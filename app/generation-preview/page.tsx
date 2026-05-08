@@ -577,6 +577,7 @@ function GenerationPreviewContent() {
                 providerId: p.providerId,
                 voiceId: v.id,
                 voiceName: v.name,
+                voiceLanguage: v.language,
               })),
             );
           };
