@@ -127,14 +127,19 @@ function HomePage() {
   }, []);
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  // Restore requirement draft from cache (derived state pattern — no effect needed)
-  const [prevCachedRequirement, setPrevCachedRequirement] = useState(cachedRequirement);
-  if (cachedRequirement !== prevCachedRequirement) {
-    setPrevCachedRequirement(cachedRequirement);
-    if (cachedRequirement) {
-      setForm((prev) => ({ ...prev, requirement: cachedRequirement }));
-    }
-  }
+  // Restore requirement draft from localStorage on mount. The previous derived-state
+  // pattern initialised `prev` from the cached value itself, so on the first client
+  // render the comparison was always equal and the restore never fired. Use an effect
+  // so the cache is hydrated into the form once we know the live requirement is empty.
+  const draftRestoredRef = useRef(false);
+  /* eslint-disable react-hooks/set-state-in-effect -- Hydration from localStorage must happen in effect */
+  useEffect(() => {
+    if (draftRestoredRef.current) return;
+    if (!cachedRequirement) return;
+    draftRestoredRef.current = true;
+    setForm((prev) => (prev.requirement ? prev : { ...prev, requirement: cachedRequirement }));
+  }, [cachedRequirement]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const [themeOpen, setThemeOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
