@@ -500,7 +500,9 @@
       "lemonade": "Lemonade (Локальный)",
       "ollama": "Ollama (Локальный)",
       "tavily": "Tavily",
-      "bocha": "Bocha"
+      "bocha": "Bocha",
+      "brave": "Brave Search",
+      "baidu": "Baidu"
     },
     "providerTypes": {
       "openai": "Протокол OpenAI",
@@ -1008,6 +1010,16 @@
     "webSearchApiKeyPlaceholder": "Введите API-ключ поиска",
     "webSearchApiKeyPlaceholderServer": "Серверный ключ настроен, можно ввести свой",
     "webSearchApiKeyHint": "Получите API-ключ у выбранного поискового провайдера",
+    "webSearchApiKeyOptional": "API-ключ необязателен. Без него будет использоваться парсинг публичной страницы.",
+    "baiduSubSources": "Источники поиска Baidu",
+    "baiduSubSourcesDescription": "Выберите хотя бы один источник Baidu.",
+    "baiduSubSourceWeb": "Веб-поиск",
+    "baiduSubSourceWebDescription": "Обычные веб-результаты из Baidu AI Search.",
+    "baiduSubSourceBaike": "Baidu Baike",
+    "baiduSubSourceBaikeDescription": "Энциклопедические статьи из Baidu Baike.",
+    "baiduSubSourceScholar": "Baidu Scholar",
+    "baiduSubSourceScholarDescription": "Научные публикации из Baidu Scholar.",
+    "viewDocs": "API документация",
     "webSearchBaseUrl": "Base URL",
     "webSearchServerConfigured": "Серверный API-ключ поиска настроен",
     "optional": "Необязательно"
