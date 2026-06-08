@@ -123,8 +123,9 @@ export function HeaderControls({
             and never gets clipped by an ancestor's overflow-hidden. */}
         <LanguageSwitcher />
 
-        {/* Theme — same Portal-backed DropdownMenu pattern. */}
-        <DropdownMenu>
+        {/* Theme — same Portal-backed DropdownMenu pattern. Non-modal keeps
+            Radix from body scroll-locking a fixed-height classroom layout. */}
+        <DropdownMenu modal={false}>
           <DropdownMenuTrigger asChild>
             <button
               className="p-2 rounded-full text-gray-400 dark:text-gray-500 hover:bg-white dark:hover:bg-gray-700 hover:text-gray-800 dark:hover:text-gray-200 hover:shadow-sm transition-all group"
