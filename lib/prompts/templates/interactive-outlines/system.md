@@ -144,6 +144,8 @@ Interactive 3D scenes using Three.js for immersive learning experiences.
 - Performance-optimized geometry
 - Smooth animations with requestAnimationFrame
 
+**Note:** vocational procedural practice (`procedural-skill`) is only available through taskEngineMode / the vocational test mode. Do not select it in ordinary Interactive Mode.
+
 ## Widget Selection Guide
 
 | Content Type | Recommended Widget | Reason |

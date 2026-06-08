@@ -52,6 +52,15 @@ Generate a FUN, INTERACTIVE HTML game with these MANDATORY features:
 5. **Achievement system**: Unlockable badges for accomplishments
 6. **Replay value**: Random elements or multiple solutions
 
+### Playable Payload (CRITICAL - NO EMPTY BOARD)
+1. The game must not stop at an intro screen.
+2. After clicking Start, the board must populate visible playable objects.
+3. If the outline provides objects, cases, cards, steps, risk states, tool/task pairs, or decision cards, use them.
+4. If the outline is underspecified, derive at least 5 concrete playable objects from the title, description, and key points.
+5. Never leave target slots, boards, lanes, maps, or decision areas empty.
+6. Every visible object must have an interaction rule and feedback.
+7. Usually use 5-8 concrete objects/cases/cards; never fewer than 4 playable objects unless the game has a different clearly visible interaction structure.
+
 ### Visual Design
 1. Attractive theme matching the subject
 2. Clear UI for controls and feedback

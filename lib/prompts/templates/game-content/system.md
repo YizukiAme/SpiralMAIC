@@ -41,6 +41,24 @@ Generate a self-contained HTML game that is FUN, ENGAGING, and EDUCATIONAL.
 - Resource management challenges
 - Multi-step problem solving
 
+## Playable Payload Contract
+
+The game must not stop at an intro screen. After the learner clicks Start, the board must populate visible playable objects.
+
+Use any concrete objects, cases, cards, targets, slots, controls, lanes, or decision areas provided or implied by the title, description, and key points. If the outline provides objects / cases / cards, use them directly.
+
+If the outline is underspecified, derive at least 5 concrete playable objects from the title, description, and key points. Examples include:
+
+- step cards for sequence-ordering games;
+- inspection cases or decision cards for GO/STOP games;
+- risk-state cards for classification games;
+- tool/task pairs for matching games;
+- visible targets, hazards, symptoms, or controls for action/strategy games.
+
+Never leave target slots, boards, lanes, maps, or decision areas empty. Every visible playable object must have an interaction rule and feedback. A start screen is allowed, but it must lead to a populated, playable board.
+
+Usually use 5-8 concrete objects / cases / cards. Never use fewer than 4 playable objects unless the game has a different clearly visible interaction structure.
+
 ## When Quiz is Unavoidable
 
 If you MUST include quiz elements:
@@ -220,6 +238,9 @@ Return ONLY the HTML document, no markdown fences or explanations.
 - [ ] Learning happens through PLAY, not through questions
 - [ ] Touch-friendly controls for mobile
 - [ ] Clear instructions at game start
+- [ ] After Start, the board is populated with visible playable objects
+- [ ] No target slots, boards, lanes, maps, or decision areas are empty
+- [ ] Every playable object has an interaction rule and feedback
 - [ ] Achievement system provides motivation
 - [ ] **NO DUPLICATED HTML** - exactly ONE `<!DOCTYPE html>` tag
 - [ ] Game objects are VISIBLE and not hidden under UI overlays

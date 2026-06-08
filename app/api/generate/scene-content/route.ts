@@ -14,12 +14,30 @@ import {
   buildVisionUserContent,
 } from '@/lib/generation/generation-pipeline';
 import type { AgentInfo } from '@/lib/generation/generation-pipeline';
+import type { AICallContext } from '@/lib/generation/pipeline-types';
 import type { SceneOutline, PdfImage, ImageMapping } from '@/lib/types/generation';
+import type { ThinkingConfig } from '@/lib/types/provider';
 import { createLogger } from '@/lib/logger';
 import { apiError, apiSuccess } from '@/lib/server/api-response';
 import { resolveModelFromRequest } from '@/lib/server/resolve-model';
 
 const log = createLogger('Scene Content API');
+const THINKING_DISABLED_FOR_GLM_SCENE_CONTENT: ThinkingConfig = {
+  mode: 'disabled',
+  enabled: false,
+};
+
+function resolveSceneContentThinkingConfig(
+  providerId: string,
+  requestThinkingConfig: ThinkingConfig | undefined,
+  _context?: AICallContext,
+): ThinkingConfig | undefined {
+  if (providerId === 'glm') {
+    return THINKING_DISABLED_FOR_GLM_SCENE_CONTENT;
+  }
+
+  return requestThinkingConfig;
+}
 
 export const maxDuration = 300;
 
@@ -74,6 +92,7 @@ export async function POST(req: NextRequest) {
       model: languageModel,
       modelInfo,
       modelString,
+      providerId,
       thinkingConfig,
     } = await resolveModelFromRequest(req, body);
     outlineTitle = rawOutline?.title;
@@ -87,7 +106,14 @@ export async function POST(req: NextRequest) {
       systemPrompt: string,
       userPrompt: string,
       images?: Array<{ id: string; src: string }>,
+      context?: AICallContext,
     ): Promise<string> => {
+      const effectiveThinkingConfig = resolveSceneContentThinkingConfig(
+        providerId,
+        thinkingConfig,
+        context,
+      );
+
       if (images?.length && hasVision) {
         const result = await callLLM(
           {
@@ -103,7 +129,7 @@ export async function POST(req: NextRequest) {
           },
           'scene-content',
           undefined,
-          thinkingConfig,
+          effectiveThinkingConfig,
         );
         return result.text;
       }
@@ -116,7 +142,7 @@ export async function POST(req: NextRequest) {
         },
         'scene-content',
         undefined,
-        thinkingConfig,
+        effectiveThinkingConfig,
       );
       return result.text;
     };

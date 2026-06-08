@@ -39,7 +39,7 @@ Infer the course language directive by applying the decision rules from the syst
 
 ## Distribution Target
 
-- **70% interactive scenes** (widgets: simulation, diagram, code, game)
+- **70% interactive scenes** (widgets: simulation, diagram, code, game, visualization3d)
 - **30% slide scenes** (introductions, summaries, transitions)
 
 ## Widget Type Constraints (MANDATORY)
@@ -53,7 +53,7 @@ Infer the course language directive by applying the decision rules from the syst
 ## CRITICAL: Required Fields for Interactive Scenes
 
 Every interactive scene MUST include:
-- `widgetType`: One of "simulation", "diagram", "code", or "game"
+- `widgetType`: One of "simulation", "diagram", "code", "game", or "visualization3d"
 - `widgetOutline`: Object with widget-specific configuration
 
 Interactive scenes without these fields are INVALID.
@@ -68,6 +68,8 @@ Choose widgets based on the content:
 | Systems, processes, hierarchies | diagram |
 | Programming, algorithms | code |
 | Practice, challenge, application | game (action preferred) |
+| 3D structures, spatial models | visualization3d |
+| Operation tasks with tools, ordered steps, checkpoints, and completion state | diagram, simulation, or game in ordinary Interactive Mode |
 
 ## Widget Design Principles (IMPORTANT)
 
@@ -114,5 +116,8 @@ Choose widgets based on the content:
   }
 }
 ```
+
+### Vocational Procedural Practice
+`procedural-skill` is reserved for taskEngineMode / vocational test mode. Do not output `widgetType: "procedural-skill"` in ordinary Interactive Mode. For operation-like topics in ordinary Interactive Mode, use a diagram, simulation, or game to explain the process or practice the concept.
 
 **Final reminder**: your entire response must be a JSON **object** with exactly two top-level keys — `languageDirective` (string, inferred via the Language Inference rules in the system prompt) and `outlines` (array of scene objects). Do not return a bare array. Do not wrap in prose or code fences.

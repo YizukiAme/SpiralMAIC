@@ -126,6 +126,234 @@ function extractNewOutlines(buffer: string, alreadyParsed: number): SceneOutline
   return results;
 }
 
+function normalizeTaskEngineProceduralOutline(
+  outline: SceneOutline,
+  requirement: string,
+): SceneOutline {
+  const widgetOutline = outline.widgetOutline ?? {};
+
+  return {
+    ...outline,
+    type: 'interactive',
+    widgetType: 'procedural-skill',
+    widgetOutline: {
+      ...widgetOutline,
+      procedureType: widgetOutline.procedureType ?? 'inspection',
+      task: widgetOutline.task || requirement,
+      tools:
+        widgetOutline.tools && widgetOutline.tools.length > 0
+          ? widgetOutline.tools
+          : ['required PPE', 'task checklist'],
+      steps:
+        widgetOutline.steps && widgetOutline.steps.length > 0
+          ? widgetOutline.steps
+          : ['Confirm task conditions', 'Select required tools', 'Complete safety check'],
+      successCriteria:
+        widgetOutline.successCriteria && widgetOutline.successCriteria.length > 0
+          ? widgetOutline.successCriteria
+          : ['Required checks completed', 'Unsafe conditions are not ignored'],
+      errorConsequences:
+        widgetOutline.errorConsequences && widgetOutline.errorConsequences.length > 0
+          ? widgetOutline.errorConsequences
+          : ['Unsafe or incorrect actions require stopping and rechecking'],
+    },
+  };
+}
+
+function normalizeTaskEngineGameOutline(outline: SceneOutline, requirement: string): SceneOutline {
+  const widgetOutline = outline.widgetOutline ?? {};
+
+  return {
+    ...outline,
+    type: 'interactive',
+    widgetType: 'game',
+    widgetOutline: {
+      ...widgetOutline,
+      gameType: widgetOutline.gameType ?? 'strategy',
+      challenge: widgetOutline.challenge || outline.description || requirement,
+      playerControls:
+        widgetOutline.playerControls && widgetOutline.playerControls.length > 0
+          ? widgetOutline.playerControls
+          : ['choose_action', 'submit_decision'],
+    },
+  };
+}
+
+function normalizeTaskEngineDiagramOutline(outline: SceneOutline): SceneOutline {
+  const widgetOutline = outline.widgetOutline ?? {};
+
+  return {
+    ...outline,
+    type: 'interactive',
+    widgetType: 'diagram',
+    widgetOutline: {
+      ...widgetOutline,
+      diagramType: widgetOutline.diagramType ?? 'flowchart',
+      nodeCount: widgetOutline.nodeCount ?? 5,
+    },
+  };
+}
+
+function normalizeTaskEngineSimulationOutline(outline: SceneOutline): SceneOutline {
+  const widgetOutline = outline.widgetOutline ?? {};
+
+  return {
+    ...outline,
+    type: 'interactive',
+    widgetType: 'simulation',
+    widgetOutline: {
+      ...widgetOutline,
+      concept: widgetOutline.concept || outline.title,
+      keyVariables:
+        widgetOutline.keyVariables && widgetOutline.keyVariables.length > 0
+          ? widgetOutline.keyVariables
+          : ['input', 'output'],
+    },
+  };
+}
+
+function normalizeTaskEngineCodeOutline(outline: SceneOutline): SceneOutline {
+  const widgetOutline = outline.widgetOutline ?? {};
+
+  return {
+    ...outline,
+    type: 'interactive',
+    widgetType: 'code',
+    widgetOutline: {
+      ...widgetOutline,
+      language: widgetOutline.language ?? 'javascript',
+      challengeType: widgetOutline.challengeType ?? 'practice',
+    },
+  };
+}
+
+function normalizeTaskEngineVisualization3dOutline(outline: SceneOutline): SceneOutline {
+  const widgetOutline = outline.widgetOutline ?? {};
+
+  return {
+    ...outline,
+    type: 'interactive',
+    widgetType: 'visualization3d',
+    widgetOutline: {
+      ...widgetOutline,
+      visualizationType: widgetOutline.visualizationType ?? 'custom',
+      objects:
+        widgetOutline.objects && widgetOutline.objects.length > 0
+          ? widgetOutline.objects
+          : [outline.title],
+      interactions:
+        widgetOutline.interactions && widgetOutline.interactions.length > 0
+          ? widgetOutline.interactions
+          : ['inspect', 'rotate'],
+    },
+  };
+}
+
+function normalizeTaskEngineSlideOutline(outline: SceneOutline): SceneOutline {
+  const normalized: SceneOutline = {
+    ...outline,
+    type: 'slide',
+  };
+  delete normalized.widgetType;
+  delete normalized.widgetOutline;
+  delete normalized.interactiveConfig;
+  return normalized;
+}
+
+function outlineTextForHeuristic(outline: SceneOutline, requirement: string): string {
+  const widgetOutline = outline.widgetOutline ?? {};
+  return [
+    requirement,
+    outline.title,
+    outline.description,
+    ...(outline.keyPoints ?? []),
+    widgetOutline.task,
+    ...(widgetOutline.tools ?? []),
+    ...(widgetOutline.steps ?? []),
+    ...(widgetOutline.successCriteria ?? []),
+    ...(widgetOutline.errorConsequences ?? []),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+}
+
+function looksLikeVocationalTask(outline: SceneOutline, requirement: string): boolean {
+  const text = outlineTextForHeuristic(outline, requirement);
+  return (
+    /操作|实操|点检|检查|检修|维修|设备|工具|安全|风险|测量|工单|隔离|挂牌|下电|高压|低压|电池|护理|焊接|校准|装配|检测|作业/.test(
+      text,
+    ) ||
+    /\b(ppe|go|stop|procedure|operation|inspection|tool|safety|risk|measure|equipment|workflow)\b/.test(
+      text,
+    )
+  );
+}
+
+function normalizeTaskEngineOutline(outline: SceneOutline, requirement: string): SceneOutline {
+  if (outline.type === 'slide') {
+    return normalizeTaskEngineSlideOutline(outline);
+  }
+
+  if (outline.type === 'interactive' && outline.widgetType === 'procedural-skill') {
+    return normalizeTaskEngineProceduralOutline(outline, requirement);
+  }
+
+  if (outline.type === 'interactive' && outline.widgetType === 'game') {
+    return normalizeTaskEngineGameOutline(outline, requirement);
+  }
+
+  if (outline.type === 'interactive' && outline.widgetType === 'diagram') {
+    return normalizeTaskEngineDiagramOutline(outline);
+  }
+
+  if (outline.type === 'interactive' && outline.widgetType === 'simulation') {
+    return normalizeTaskEngineSimulationOutline(outline);
+  }
+
+  if (outline.type === 'interactive' && outline.widgetType === 'code') {
+    return normalizeTaskEngineCodeOutline(outline);
+  }
+
+  if (outline.type === 'interactive' && outline.widgetType === 'visualization3d') {
+    return normalizeTaskEngineVisualization3dOutline(outline);
+  }
+
+  return looksLikeVocationalTask(outline, requirement)
+    ? normalizeTaskEngineProceduralOutline(outline, requirement)
+    : normalizeTaskEngineSlideOutline(outline);
+}
+
+function sanitizeNonTaskEngineOutline(outline: SceneOutline): SceneOutline {
+  if (outline.widgetType !== 'procedural-skill') {
+    return outline;
+  }
+
+  const widgetOutline = { ...(outline.widgetOutline ?? {}) };
+  delete widgetOutline.procedureType;
+  delete widgetOutline.task;
+  delete widgetOutline.tools;
+  delete widgetOutline.steps;
+  delete widgetOutline.successCriteria;
+  delete widgetOutline.errorConsequences;
+
+  // procedural-skill is gated behind taskEngineMode to protect ordinary MAIC generation.
+  return {
+    ...outline,
+    type: 'interactive',
+    widgetType: 'diagram',
+    description: outline.description
+      ? `${outline.description} Present this as a process or structure diagram.`
+      : 'Present this topic as a process or structure diagram.',
+    widgetOutline: {
+      ...widgetOutline,
+      diagramType: widgetOutline.diagramType ?? 'flowchart',
+      nodeCount:
+        widgetOutline.nodeCount ?? Math.max(4, Math.min(8, outline.keyPoints?.length || 5)),
+    },
+  };
+}
+
 export async function POST(req: NextRequest) {
   let requirementSnippet: string | undefined;
   let resolvedModelString: string | undefined;
@@ -203,11 +431,14 @@ export async function POST(req: NextRequest) {
     // Build teacher context from agents (if available)
     const teacherContext = formatTeacherPersonaForPrompt(agents);
 
-    // Check if Interactive Mode is enabled
+    // Check if Interactive Mode or Task Engine mode is enabled
     const interactiveMode = requirements.interactiveMode ?? false;
-    const promptId = interactiveMode
-      ? PROMPT_IDS.INTERACTIVE_OUTLINES
-      : PROMPT_IDS.REQUIREMENTS_TO_OUTLINES;
+    const taskEngineMode = requirements.taskEngineMode ?? false;
+    const promptId = taskEngineMode
+      ? PROMPT_IDS.TASK_ENGINE_OUTLINES
+      : interactiveMode
+        ? PROMPT_IDS.INTERACTIVE_OUTLINES
+        : PROMPT_IDS.REQUIREMENTS_TO_OUTLINES;
 
     const prompts = buildPrompt(promptId, {
       requirement: requirements.requirement,
@@ -312,11 +543,14 @@ export async function POST(req: NextRequest) {
                 const newOutlines = extractNewOutlines(fullText, parsedOutlines.length);
                 for (const outline of newOutlines) {
                   // Ensure ID and order
-                  const enriched = {
+                  const enrichedBase = {
                     ...outline,
                     id: outline.id || nanoid(),
                     order: parsedOutlines.length + 1,
                   };
+                  const enriched = taskEngineMode
+                    ? normalizeTaskEngineOutline(enrichedBase, requirements.requirement)
+                    : sanitizeNonTaskEngineOutline(enrichedBase);
                   parsedOutlines.push(enriched);
 
                   const event = JSON.stringify({

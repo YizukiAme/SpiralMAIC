@@ -68,6 +68,7 @@ interface FormState {
   requirement: string;
   webSearch: boolean;
   interactiveMode: boolean;
+  vocationalTestMode: boolean;
 }
 
 const initialFormState: FormState = {
@@ -75,6 +76,7 @@ const initialFormState: FormState = {
   requirement: '',
   webSearch: false,
   interactiveMode: false,
+  vocationalTestMode: false,
 };
 
 function HomePage() {
@@ -282,7 +284,8 @@ function HomePage() {
         userNickname: userProfile.nickname || undefined,
         userBio: userProfile.bio || undefined,
         webSearch: form.webSearch || undefined,
-        interactiveMode: form.interactiveMode,
+        interactiveMode: form.vocationalTestMode ? true : form.interactiveMode,
+        ...(form.vocationalTestMode ? { taskEngineMode: true } : {}),
       };
 
       let pdfStorageKey: string | undefined;
@@ -597,6 +600,52 @@ function HomePage() {
               </button>
             </div>
           </div>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4 }}
+          className="mt-2 flex w-full justify-start px-1"
+        >
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={form.vocationalTestMode}
+                onClick={() => updateForm('vocationalTestMode', !form.vocationalTestMode)}
+                className={cn(
+                  'inline-flex h-7 items-center gap-2 rounded-full border px-2.5 text-[11px] font-medium transition-colors',
+                  form.vocationalTestMode
+                    ? 'border-cyan-400/70 bg-cyan-50 text-cyan-700 shadow-[0_0_10px_rgba(6,182,212,0.16)] dark:bg-cyan-950/40 dark:text-cyan-300'
+                    : 'border-border/70 bg-background/70 text-muted-foreground hover:border-cyan-300/60 hover:text-cyan-700 dark:hover:text-cyan-300',
+                )}
+              >
+                <span className="rounded-full bg-cyan-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-normal text-cyan-700 dark:bg-cyan-900/45 dark:text-cyan-300">
+                  测试功能
+                </span>
+                <Sparkles className="size-3.5" />
+                <span>职教任务</span>
+                <span
+                  className={cn(
+                    'relative h-3.5 w-6 rounded-full transition-colors',
+                    form.vocationalTestMode ? 'bg-cyan-500' : 'bg-muted-foreground/25',
+                  )}
+                >
+                  <span
+                    className={cn(
+                      'absolute top-0.5 size-2.5 rounded-full bg-white transition-transform',
+                      form.vocationalTestMode ? 'translate-x-3' : 'translate-x-0.5',
+                    )}
+                  />
+                </span>
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-xs">
+              从当前输入框提交职教实操训练测试
+            </TooltipContent>
+          </Tooltip>
         </motion.div>
 
         {/* ── Error ── */}

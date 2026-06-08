@@ -3,6 +3,8 @@
  */
 
 import type { GenerationProgress } from '@/lib/types/generation';
+import type { PromptId } from '@/lib/prompts/types';
+import type { WidgetType } from '@/lib/types/widgets';
 
 // ==================== Agent Info ====================
 
@@ -65,8 +67,23 @@ export interface GenerationCallbacks {
   onError?: (error: string) => void;
 }
 
+export type AICallTaskType =
+  | 'widget-content'
+  | 'widget-teacher-actions'
+  | 'scene-content'
+  | 'scene-actions'
+  | 'outline-generation'
+  | (string & {});
+
+export interface AICallContext {
+  taskType?: AICallTaskType;
+  promptId?: PromptId;
+  widgetType?: WidgetType;
+}
+
 export type AICallFn = (
   systemPrompt: string,
   userPrompt: string,
   images?: Array<{ id: string; src: string }>,
+  context?: AICallContext,
 ) => Promise<string>;
