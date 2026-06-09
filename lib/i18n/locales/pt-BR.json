@@ -50,13 +50,18 @@
   },
   "import": {
     "classroom": "Importar Sala de Aula",
+    "pptx": "Importar PPTX",
     "parsing": "Lendo ZIP...",
+    "parsingPptx": "Lendo PPTX...",
     "validating": "Validando dados...",
     "writingMedia": "Gravando arquivos de mídia...",
     "writingCourse": "Gravando dados do curso...",
     "success": "Sala de aula importada com sucesso",
+    "pptxSuccess": "PPTX processado com sucesso ({{count}} slides, saída registrada no console)",
     "error": {
       "invalidZip": "Arquivo inválido. Selecione um arquivo .maic.zip válido.",
+      "invalidPptx": "Falha ao processar o PPTX. Verifique se o arquivo é válido.",
+      "parserUnavailable": "A importação de PPTX está indisponível: o pacote do analisador não foi implantado. Execute install/sync novamente.",
       "invalidManifest": "Arquivo inválido: manifest.json ausente ou corrompido.",
       "missingData": "Arquivo inválido: dados obrigatórios do curso ausentes.",
       "storageFull": "Falha na importação: armazenamento do navegador cheio. Tente apagar salas antigas."

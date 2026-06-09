@@ -2,6 +2,12 @@
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
 
+@source "../node_modules/@maic/renderer/dist/**/*.{js,cjs}";
+/* slide-renderer-demo is gitignored (local sandbox), which makes Tailwind v4's
+   auto source detection skip it. Re-include it explicitly so the demo's
+   Tailwind classes (e.g. bg-violet-600) still get generated. */
+@source "./slide-renderer-demo/**/*.{tsx,ts,jsx,js}";
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -132,15 +138,16 @@
   body {
     @apply bg-background text-foreground;
   }
-  /* Radix Select / Popover wrap with `react-remove-scroll`, which adds a
-     compensation `padding-right` to <body> when they open. Our <html>
-     already reserves the scrollbar gutter (above), so that compensation
-     creates a visible layout shift on every dropdown open. Scope the
-     override to editor mode — the SlideCanvas sets `data-maic-editor` on
-     the body while mounted — so Radix's compensation still works on the
-     rest of the app (modals, sheets, etc. on non-editor pages). */
-  body[data-maic-editor='true'] {
+  /* Radix modal overlays wrap with `react-remove-scroll`, which compensates
+     for the removed page scrollbar by adding right-side body spacing. This
+     app already reserves the scrollbar gutter on <html> (above), so that
+     extra compensation creates a visible horizontal layout shift when opening
+     Settings on the homepage/classroom shells. Keep Radix's modal focus and
+     interaction locking, but neutralize only the redundant gap compensation. */
+  body[data-maic-editor='true'],
+  body[data-scroll-locked] {
     padding-right: 0 !important;
+    margin-right: 0 !important;
   }
 }
 /* ProseMirror Editor Styles */

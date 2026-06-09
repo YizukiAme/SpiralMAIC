@@ -50,13 +50,18 @@
   },
   "import": {
     "classroom": "导入课堂",
+    "pptx": "导入 PPTX",
     "parsing": "正在解析 ZIP...",
+    "parsingPptx": "正在解析 PPTX...",
     "validating": "正在验证数据...",
     "writingMedia": "正在写入媒体文件...",
     "writingCourse": "正在写入课程数据...",
     "success": "课堂导入成功",
+    "pptxSuccess": "PPTX 解析成功（共 {{count}} 页，输出已打印到控制台）",
     "error": {
       "invalidZip": "无效文件，请选择有效的 .maic.zip 文件。",
+      "invalidPptx": "PPTX 解析失败，请检查文件是否有效。",
+      "parserUnavailable": "PPTX 导入不可用：解析器未部署。请重新执行安装/同步步骤。",
       "invalidManifest": "无效课堂文件：manifest.json 缺失或已损坏。",
       "missingData": "无效课堂文件：缺少必需的课程数据。",
       "storageFull": "导入失败：浏览器存储空间已满，请清理旧课堂后重试。"

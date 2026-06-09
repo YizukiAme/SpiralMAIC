@@ -10,7 +10,8 @@ import { useSettingsStore } from '@/lib/store/settings';
 import { useAgentRegistry } from '@/lib/orchestration/registry/store';
 import { resolveAgentVoice, getSelectableProvidersWithVoices } from '@/lib/audio/voice-resolver';
 import { playBrowserTTSPreview } from '@/lib/audio/browser-tts-preview';
-import { getVoxCPMProviderOptions, useVoxCPMVoiceProfiles } from '@/lib/audio/voxcpm-voices';
+import { useVoxCPMVoiceProfiles } from '@/lib/audio/voxcpm-voices';
+import { resolveAgentVoiceOptions } from '@/lib/audio/agent-voice';
 import { VOXCPM_AUTO_VOICE_ID, VOXCPM_TTS_PROVIDER_ID } from '@/lib/audio/voxcpm';
 import {
   Sparkles,
@@ -31,7 +32,11 @@ function matchesVoiceQuery(value: string | undefined, query: string): boolean {
   return !!value?.toLowerCase().includes(query);
 }
 
-function getFilteredModelGroups(provider: ProviderWithVoices, query: string) {
+function getFilteredModelGroups(
+  provider: ProviderWithVoices,
+  query: string,
+  autoVoiceLabel?: string,
+) {
   const normalizedQuery = query.trim().toLowerCase();
   if (!normalizedQuery) return provider.modelGroups;
 
@@ -47,7 +52,9 @@ function getFilteredModelGroups(provider: ProviderWithVoices, query: string) {
           groupMatches ||
           matchesVoiceQuery(voice.name, normalizedQuery) ||
           matchesVoiceQuery(voice.id, normalizedQuery) ||
-          matchesVoiceQuery(voice.language, normalizedQuery),
+          matchesVoiceQuery(voice.language, normalizedQuery) ||
+          // Auto Voice is shown by its localized label, not voice.name — match it too.
+          (voice.id === VOXCPM_AUTO_VOICE_ID && matchesVoiceQuery(autoVoiceLabel, normalizedQuery)),
       );
       return { ...group, voices };
     })
@@ -82,7 +89,7 @@ function AgentVoicePill({
   const visibleProviderGroups = availableProviders
     .map((provider) => ({
       provider,
-      groups: getFilteredModelGroups(provider, voiceQuery),
+      groups: getFilteredModelGroups(provider, voiceQuery, t('settings.voxcpmAutoVoice')),
     }))
     .filter(({ groups }) => groups.length > 0);
 
@@ -139,18 +146,12 @@ function AgentVoicePill({
         const controller = new AbortController();
         previewAbortRef.current = controller;
         const providerConfig = ttsProvidersConfig[providerId];
-        const providerOptions =
-          providerId === 'voxcpm-tts'
-            ? {
-                ...(providerConfig?.providerOptions || {}),
-                ...(await getVoxCPMProviderOptions(voiceId, {
-                  agentName: agent.name,
-                  role: agent.role,
-                  persona: agent.persona,
-                  locale,
-                })),
-              }
-            : undefined;
+        const providerOptions = await resolveAgentVoiceOptions(agent, {
+          providerId,
+          providerConfig: { ...providerConfig, modelId: modelId || providerConfig?.modelId },
+          voiceId,
+          language: locale,
+        });
         const res = await fetch('/api/generate/tts', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -367,7 +368,7 @@ function TeacherVoicePill({
   const visibleProviderGroups = availableProviders
     .map((provider) => ({
       provider,
-      groups: getFilteredModelGroups(provider, voiceQuery),
+      groups: getFilteredModelGroups(provider, voiceQuery, t('settings.voxcpmAutoVoice')),
     }))
     .filter(({ groups }) => groups.length > 0);
 
@@ -425,17 +426,12 @@ function TeacherVoicePill({
         const controller = new AbortController();
         previewAbortRef.current = controller;
         const providerConfig = ttsProvidersConfig[providerId];
-        const providerOptions =
-          providerId === 'voxcpm-tts'
-            ? {
-                ...(providerConfig?.providerOptions || {}),
-                ...(await getVoxCPMProviderOptions(voiceId, {
-                  agentName: 'Teacher',
-                  role: 'teacher',
-                  locale,
-                })),
-              }
-            : undefined;
+        const providerOptions = await resolveAgentVoiceOptions(undefined, {
+          providerId,
+          providerConfig: { ...providerConfig, modelId: modelId || providerConfig?.modelId },
+          voiceId,
+          language: locale,
+        });
         const res = await fetch('/api/generate/tts', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

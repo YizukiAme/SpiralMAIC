@@ -7,9 +7,10 @@
     "node": ">=20.9.0"
   },
   "scripts": {
-    "postinstall": "cd packages/mathml2omml && npm run build && cd ../pptxgenjs && npm run build",
+    "postinstall": "cd packages/mathml2omml && npm run build && cd ../pptxgenjs && npm run build && cd ../@maic/dsl && pnpm run build && cd ../importer && pnpm run build && cd ../renderer && pnpm run build && cd ../../.. && node scripts/sync-maic-importer.mjs",
+    "sync:maic-importer": "node scripts/sync-maic-importer.mjs",
     "dev": "next dev",
-    "build": "next build",
+    "build": "node scripts/assert-vendor-maic-importer.mjs && next build",
     "start": "next start",
     "lint": "eslint",
     "check:i18n-keys": "node scripts/check-i18n-keys.mjs",
@@ -85,6 +86,8 @@
     "partial-json": "^0.1.7",
     "pptxgenjs": "workspace:*",
     "pptxtojson": "^1.11.0",
+    "@maic/importer": "workspace:*",
+    "@maic/renderer": "workspace:*",
     "prosemirror-commands": "^1.7.1",
     "prosemirror-dropcursor": "^1.8.2",
     "prosemirror-gapcursor": "^1.4.0",
