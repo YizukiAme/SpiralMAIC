@@ -451,6 +451,7 @@ function GenerationPreviewContent() {
         createdAt: Date.now(),
         updatedAt: Date.now(),
         interactiveMode: !!currentSession.requirements.interactiveMode,
+        taskEngineMode: !!currentSession.requirements.taskEngineMode,
       };
 
       // ── Generate outlines first (infers languageDirective) ──

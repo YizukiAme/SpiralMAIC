@@ -1118,6 +1118,7 @@ async function generateWidgetContent(
         tools: widgetOutline.tools || [],
         steps: widgetOutline.steps || [],
         successCriteria: widgetOutline.successCriteria || [],
+        errorConsequences: widgetOutline.errorConsequences || [],
         languageDirective: languageDirective || '',
       };
       break;
@@ -1134,11 +1135,7 @@ async function generateWidgetContent(
   }
 
   log.info(`Generating ${widgetType} widget for: ${outline.title}`);
-  const response = await aiCall(prompts.system, prompts.user, undefined, {
-    taskType: 'widget-content',
-    promptId,
-    widgetType,
-  });
+  const response = await aiCall(prompts.system, prompts.user);
   const html = extractHtml(response);
 
   if (!html) {
@@ -1211,11 +1208,7 @@ async function generateWidgetTeacherActions(
   if (!prompts) return undefined;
 
   try {
-    const response = await aiCall(prompts.system, prompts.user, undefined, {
-      taskType: 'widget-teacher-actions',
-      promptId: PROMPT_IDS.WIDGET_TEACHER_ACTIONS,
-      widgetType,
-    });
+    const response = await aiCall(prompts.system, prompts.user);
     const parsed = parseJsonResponse<{ actions: TeacherAction[] }>(response);
     return parsed?.actions;
   } catch {

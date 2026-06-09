@@ -305,23 +305,6 @@ Each scene should correspond to one specific trainable operation segment:
 - GO / STOP safety decision
 - completion check or handoff confirmation
 
-For the default NEV-A12 battery-pack safety task, a good 10-12 scene structure could include:
-
-1. Work-order confirmation and pre-job risk identification
-2. PPE selection and insulated tool inspection
-3. High-voltage power-down confirmation
-4. Service disconnect / MSD removal operation
-5. Discharge wait and residual-voltage pre-check
-6. High-voltage loop residual-voltage measurement
-7. Insulation resistance check
-8. LOTO isolation and tagging
-9. Test result recording and abnormality judgment
-10. GO / STOP safety decision
-11. Error handling and rework flow
-12. Completion check and handoff confirmation
-
-This is only an example for NEV-A12. For other vocational tasks, create 10-14 equivalent hands-on operation segments suited to that task.
-
 For a mixed NEV-A12 task-engine outline, a good 12-scene structure is:
 
 1. Briefing slide: task goal, high-voltage risk boundary, training steps, completion criteria, and GO/STOP standard
@@ -336,6 +319,8 @@ For a mixed NEV-A12 task-engine outline, a good 12-scene structure is:
 10. Procedural skill: LOTO isolation and tagging
 11. Game: GO / STOP safety decision
 12. Procedural skill or slide: abnormal handling, completion check, and handoff
+
+This is only an example for NEV-A12. For other vocational tasks, create 10-14 equivalent hands-on operation segments suited to that task.
 
 ## Selection Rules
 

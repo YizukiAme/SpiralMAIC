@@ -79,7 +79,8 @@ The embedded widget config must be valid JSON and must use this minimum shape:
       "successCriteria": ["..."]
     }
   ],
-  "successCriteria": ["..."]
+  "successCriteria": ["..."],
+  "errorConsequences": ["..."]
 }
 ```
 
@@ -88,6 +89,7 @@ Requirements:
 - `type` must be exactly `"procedural-skill"`.
 - Step IDs must be stable DOM-friendly IDs such as `step-1`, `step-2`, `step-3`.
 - If the input provides only plain step strings, convert them into the minimum step objects.
+- Preserve input error consequences when provided and use them for unsafe or incorrect feedback paths.
 - Keep the config generic. Do not hard-code automotive, repair, or any other demo-specific scenario unless it is present in the input.
 
 ## Interaction Requirements
@@ -217,14 +219,14 @@ Your HTML may include a small `postMessage` listener, but it must only support t
 - `ANNOTATE_ELEMENT`
 - `REVEAL_ELEMENT`
 
-MAIC's renderer sends iframe messages using `event.data.type` as the canonical message field. Generated HTML must read `event.data.type` first. It may support `event.data.action` only as a legacy compatibility fallback, but `type` is the real platform protocol.
+MAIC's renderer sends iframe messages using `event.data.type` as the platform message field. Generated HTML must read `event.data.type`; do not invent alternate message fields.
 
 Use a listener pattern equivalent to:
 
 ```js
 window.addEventListener("message", (event) => {
   const data = event.data || {};
-  const messageType = data.type || data.action;
+  const messageType = data.type;
 
   if (messageType === "SET_WIDGET_STATE") {
     // Read data.state.

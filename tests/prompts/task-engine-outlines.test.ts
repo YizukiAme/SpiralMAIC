@@ -130,7 +130,7 @@ describe('task-engine outlines prompt', () => {
     expect(text).toMatch(/risk-classification/i);
     expect(text).toMatch(/tool-matching/i);
     expect(text).toMatch(/5-8 concrete objects|5-8 concrete objects\/cases\/cards/i);
-    expect(text).toMatch(/Never fewer than 4 playable objects/i);
+    expect(text).toMatch(/Never provide fewer than 4 playable objects/i);
     expect(text).toMatch(/not the only allowed patterns/i);
     expect(text).not.toMatch(/only these four patterns are allowed/i);
     expect(text).not.toContain('{{');

@@ -23,6 +23,7 @@ function buildProceduralSkillPrompt() {
       tools: ['inspection checklist', 'multimeter', 'protective gloves'],
       steps: ['Select the tool', 'Measure voltage', 'Judge safe or unsafe'],
       successCriteria: ['All checks completed', 'Unsafe conditions identified'],
+      errorConsequences: ['Unsafe readings require stopping and rechecking'],
       languageDirective: 'Teach in English.',
     }),
   );
@@ -48,6 +49,7 @@ describe('procedural-skill content quality contract', () => {
     expect(text).toMatch(/threshold/i);
     expect(text).toMatch(/operation proxy/i);
     expect(text).toMatch(/consequence feedback/i);
+    expect(text).toContain('Unsafe readings require stopping and rechecking');
     expect(text).toMatch(/risk detected|unsafe state|requires recheck|inspection blocked/i);
   });
 
@@ -141,10 +143,10 @@ describe('procedural-skill content quality contract', () => {
     expect(text).toContain('ANNOTATE_ELEMENT');
     expect(text).toContain('REVEAL_ELEMENT');
     expect(text).toContain('event.data.type');
-    expect(text).toContain('event.data.type || event.data.action');
+    expect(text).not.toContain('event.data.type || event.data.action');
     expect(text).toContain('data.state');
     expect(text).toContain('data.target');
-    expect(text).toMatch(/canonical message field|renderer sends/i);
+    expect(text).toMatch(/platform message field|renderer sends/i);
     expect(text).not.toMatch(UNRESOLVED_PLACEHOLDER);
   });
 });

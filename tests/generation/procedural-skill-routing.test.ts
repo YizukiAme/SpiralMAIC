@@ -53,6 +53,7 @@ describe('procedural-skill widget content routing', () => {
         tools: ['multimeter', 'checklist'],
         steps: ['Inspect the device', 'Connect the tool', 'Confirm the reading'],
         successCriteria: ['No visible damage', 'Reading is within range'],
+        errorConsequences: ['Unsafe readings require stopping and rechecking'],
       },
     };
 
@@ -76,6 +77,7 @@ describe('procedural-skill widget content routing', () => {
     expect(widgetPrompt.user).toContain('multimeter');
     expect(widgetPrompt.user).toContain('Inspect the device');
     expect(widgetPrompt.user).toContain('No visible damage');
+    expect(widgetPrompt.user).toContain('Unsafe readings require stopping and rechecking');
     expect(widgetPrompt.user).toContain(DIRECTIVE);
     expect(widgetPrompt.user).not.toContain('{{languageDirective}}');
     expect(widgetPrompt.user).not.toContain('{{');

@@ -50,6 +50,7 @@ describe('procedural-skill teacher action selector contract', () => {
         tools: ['checklist'],
         steps: ['Inspect visible condition'],
         successCriteria: ['Device is ready for use'],
+        errorConsequences: ['Unsafe state requires recheck'],
         languageDirective: 'Teach in English.',
       }),
     );

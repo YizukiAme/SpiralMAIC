@@ -1,7 +1,9 @@
-import { describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 const streamLLMMock = vi.hoisted(() => vi.fn());
 const resolveModelFromRequestMock = vi.hoisted(() => vi.fn());
+const VOCATIONAL_FLAG = 'OPENMAIC_ENABLE_VOCATIONAL';
+let originalVocationalFlag: string | undefined;
 
 vi.mock('@/lib/ai/llm', () => ({
   streamLLM: streamLLMMock,
@@ -49,10 +51,24 @@ function mockRequest(requirements: Record<string, unknown>) {
 }
 
 describe('task-engine outline route', () => {
+  beforeEach(() => {
+    originalVocationalFlag = process.env[VOCATIONAL_FLAG];
+    delete process.env[VOCATIONAL_FLAG];
+  });
+
+  afterEach(() => {
+    if (originalVocationalFlag === undefined) {
+      delete process.env[VOCATIONAL_FLAG];
+    } else {
+      process.env[VOCATIONAL_FLAG] = originalVocationalFlag;
+    }
+  });
+
   test('uses the task-engine prompt and preserves allowed mixed task-engine scene types', async () => {
     vi.resetModules();
     streamLLMMock.mockReset();
     resolveModelFromRequestMock.mockReset();
+    process.env[VOCATIONAL_FLAG] = 'true';
 
     resolveModelFromRequestMock.mockResolvedValue({
       model: { provider: 'glm.chat', modelId: 'glm-5.1' },
@@ -205,53 +221,49 @@ describe('task-engine outline route', () => {
       widgetType: 'game',
     });
     expect(done.outlines[2].widgetOutline).toMatchObject({
-      gameType: 'strategy',
       challenge: '判断是否可以继续作业',
     });
-    expect(done.outlines[2].widgetOutline.playerControls.length).toBeGreaterThan(0);
+    expect(done.outlines[2].widgetOutline.gameType).toBeUndefined();
+    expect(done.outlines[2].widgetOutline.playerControls).toBeUndefined();
     expect(done.outlines[3]).toMatchObject({
       type: 'interactive',
       widgetType: 'diagram',
     });
     expect(done.outlines[3].widgetOutline).toMatchObject({
-      diagramType: 'flowchart',
-      nodeCount: 5,
+      concept: '风险路径',
     });
+    expect(done.outlines[3].widgetOutline.diagramType).toBeUndefined();
+    expect(done.outlines[3].widgetOutline.nodeCount).toBeUndefined();
     expect(done.outlines[4]).toMatchObject({
       type: 'interactive',
       widgetType: 'simulation',
     });
     expect(done.outlines[4].widgetOutline).toMatchObject({
       concept: 'motion',
-      keyVariables: ['input', 'output'],
     });
+    expect(done.outlines[4].widgetOutline.keyVariables).toBeUndefined();
     expect(done.outlines[5]).toMatchObject({
       type: 'interactive',
       widgetType: 'code',
     });
-    expect(done.outlines[5].widgetOutline).toMatchObject({
-      language: 'javascript',
-      challengeType: 'practice',
-    });
+    expect(done.outlines[5].widgetOutline.language).toBeUndefined();
+    expect(done.outlines[5].widgetOutline.challengeType).toBeUndefined();
     expect(done.outlines[6]).toMatchObject({
       type: 'interactive',
       widgetType: 'visualization3d',
     });
-    expect(done.outlines[6].widgetOutline).toMatchObject({
-      visualizationType: 'custom',
-      objects: ['三维观察'],
-      interactions: ['inspect', 'rotate'],
-    });
+    expect(done.outlines[6].widgetOutline.visualizationType).toBeUndefined();
+    expect(done.outlines[6].widgetOutline.objects).toBeUndefined();
+    expect(done.outlines[6].widgetOutline.interactions).toBeUndefined();
     expect(done.outlines[7]).toMatchObject({
-      type: 'interactive',
-      widgetType: 'procedural-skill',
+      type: 'slide',
+      title: '非法场景',
     });
-    expect(done.outlines[7].widgetOutline).toMatchObject({
-      task: '非法类型兜底任务',
-    });
+    expect(done.outlines[7].widgetType).toBeUndefined();
+    expect(done.outlines[7].widgetOutline).toBeUndefined();
   });
 
-  test('keeps non-task-engine interactive mode on the existing interactive prompt', async () => {
+  test('silently falls back to the existing interactive prompt when the server flag is off', async () => {
     vi.resetModules();
     streamLLMMock.mockReset();
     resolveModelFromRequestMock.mockReset();
@@ -290,6 +302,7 @@ describe('task-engine outline route', () => {
       mockRequest({
         requirement: 'Teach motion with interaction',
         interactiveMode: true,
+        taskEngineMode: true,
       }) as unknown as Parameters<typeof POST>[0],
     );
 
@@ -354,10 +367,8 @@ describe('task-engine outline route', () => {
       widgetType: 'diagram',
     });
     expect(done.outlines[0].description).toContain('process or structure diagram');
-    expect(done.outlines[0].widgetOutline).toMatchObject({
-      diagramType: 'flowchart',
-      nodeCount: 4,
-    });
+    expect(done.outlines[0].widgetOutline.diagramType).toBeUndefined();
+    expect(done.outlines[0].widgetOutline.nodeCount).toBeUndefined();
     expect(done.outlines[0].widgetOutline.procedureType).toBeUndefined();
     expect(done.outlines[0].widgetOutline.task).toBeUndefined();
     expect(done.outlines[0].widgetOutline.tools).toBeUndefined();
@@ -365,10 +376,67 @@ describe('task-engine outline route', () => {
     expect(done.outlines[0].widgetOutline.successCriteria).toBeUndefined();
   });
 
-  test('falls back to a slide for non-vocational invalid task-engine outlines', async () => {
+  test('ensures streamed outline ids are unique', async () => {
     vi.resetModules();
     streamLLMMock.mockReset();
     resolveModelFromRequestMock.mockReset();
+
+    resolveModelFromRequestMock.mockResolvedValue({
+      model: { provider: 'glm.chat', modelId: 'glm-5.1' },
+      modelInfo: { outputWindow: 4096, capabilities: {} },
+      modelString: 'glm:glm-5.1',
+      providerId: 'glm',
+      modelId: 'glm-5.1',
+      thinkingConfig: undefined,
+    });
+
+    streamLLMMock.mockReturnValue({
+      textStream: (async function* () {
+        yield JSON.stringify({
+          languageDirective: 'Teach in English.',
+          outlines: [
+            {
+              id: 'scene_4',
+              type: 'slide',
+              title: 'First Scene',
+              description: 'First scene.',
+              keyPoints: ['A'],
+              order: 1,
+            },
+            {
+              id: 'scene_4',
+              type: 'slide',
+              title: 'Second Scene',
+              description: 'Second scene.',
+              keyPoints: ['B'],
+              order: 2,
+            },
+          ],
+        });
+      })(),
+    });
+
+    const { POST } = await import('@/app/api/generate/scene-outlines-stream/route');
+    const response = await POST(
+      mockRequest({
+        requirement: 'Teach a topic',
+      }) as unknown as Parameters<typeof POST>[0],
+    );
+
+    const events = parseSseEvents(await readStreamBody(response));
+    const done = events.find((event) => event.type === 'done');
+    expect(done).toBeDefined();
+    const ids = done.outlines.map((outline: { id: string }) => outline.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids[0]).toBe('scene_4');
+    expect(ids[1]).not.toBe('scene_4');
+  });
+
+  test('falls back to a slide for invalid task-engine outlines without regex promotion', async () => {
+    vi.resetModules();
+    streamLLMMock.mockReset();
+    resolveModelFromRequestMock.mockReset();
+    process.env[VOCATIONAL_FLAG] = 'true';
 
     resolveModelFromRequestMock.mockResolvedValue({
       model: { provider: 'glm.chat', modelId: 'glm-5.1' },

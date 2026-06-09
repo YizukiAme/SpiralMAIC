@@ -28,6 +28,10 @@ Create a procedural skill widget for: {{title}}
 
 {{successCriteria}}
 
+## Error Consequences
+
+{{errorConsequences}}
+
 ## Language
 
 {{languageDirective}}
@@ -49,7 +53,7 @@ Generate a complete, self-contained HTML procedural skill widget with these mand
 11. A visible, enabled, clickable reset button that restores all learner state: progress, feedback, state/status, step classes, success criteria, proxy values, and initial enabled/disabled controls.
 12. Reset must use a central `resetState()` or equivalent full reset path, not a visual-only text change.
 13. A platform-to-iframe listener using only existing message types: `SET_WIDGET_STATE`, `HIGHLIGHT_ELEMENT`, `ANNOTATE_ELEMENT`, and `REVEAL_ELEMENT`.
-14. The listener must use `event.data.type` because MAIC's renderer sends the real platform message type in that field. You may use `event.data.type || event.data.action` only as a legacy fallback.
+14. The listener must use `event.data.type` because MAIC's renderer sends the platform message type in that field.
 15. `SET_WIDGET_STATE` must read `data.state`; `HIGHLIGHT_ELEMENT`, `REVEAL_ELEMENT`, and `ANNOTATE_ELEMENT` must read `data.target`.
 16. `SET_WIDGET_STATE` with `data.state.completedSteps` must update visible progress, step completion, feedback/status, and success criteria.
 17. Learner click actions and teacher action `SET_WIDGET_STATE` must use the same shared state update/render path.
