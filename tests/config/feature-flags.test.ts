@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   isMaicEditorEnabled,
   isVocationalTaskEngineEnabled,
+  resolveVocationalActive,
   shouldShowVocationalTestUi,
 } from '@/lib/config/feature-flags';
 
@@ -69,12 +70,27 @@ describe('isVocationalTaskEngineEnabled', () => {
     expect(isVocationalTaskEngineEnabled()).toBe(false);
   });
 
-  it("returns true only for 'true'", () => {
+  it("returns true for 'true' and '1'", () => {
     process.env[flag] = 'true';
     expect(isVocationalTaskEngineEnabled()).toBe(true);
 
     process.env[flag] = '1';
+    expect(isVocationalTaskEngineEnabled()).toBe(true);
+  });
+
+  it("returns false for 'false'", () => {
+    process.env[flag] = 'false';
     expect(isVocationalTaskEngineEnabled()).toBe(false);
+  });
+
+  it('resolves active mode from both request intent and server flag', () => {
+    process.env[flag] = 'true';
+    expect(resolveVocationalActive({ taskEngineMode: true })).toBe(true);
+    expect(resolveVocationalActive({ taskEngineMode: false })).toBe(false);
+    expect(resolveVocationalActive(undefined)).toBe(false);
+
+    process.env[flag] = 'false';
+    expect(resolveVocationalActive({ taskEngineMode: true })).toBe(false);
   });
 });
 

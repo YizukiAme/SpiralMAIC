@@ -27,7 +27,13 @@ export function isMaicEditorEnabled(): boolean {
  * silently fall back to the ordinary standard / interactive generation paths.
  */
 export function isVocationalTaskEngineEnabled(): boolean {
-  return process.env.OPENMAIC_ENABLE_VOCATIONAL === 'true';
+  return readBoolean(process.env.OPENMAIC_ENABLE_VOCATIONAL);
+}
+
+export function resolveVocationalActive(
+  requirements?: { taskEngineMode?: boolean } | null,
+): boolean {
+  return Boolean(requirements?.taskEngineMode) && isVocationalTaskEngineEnabled();
 }
 
 /**

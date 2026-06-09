@@ -35,7 +35,7 @@ import type {
 import { apiError } from '@/lib/server/api-response';
 import { createLogger } from '@/lib/logger';
 import { resolveModelFromRequest } from '@/lib/server/resolve-model';
-import { isVocationalTaskEngineEnabled } from '@/lib/config/feature-flags';
+import { resolveVocationalActive } from '@/lib/config/feature-flags';
 const log = createLogger('Outlines Stream');
 
 export const maxDuration = 300;
@@ -313,8 +313,7 @@ export async function POST(req: NextRequest) {
 
     // Check if Interactive Mode or server-enabled Task Engine mode is enabled.
     const interactiveMode = requirements.interactiveMode ?? false;
-    const taskEngineMode =
-      (requirements.taskEngineMode ?? false) && isVocationalTaskEngineEnabled();
+    const taskEngineMode = resolveVocationalActive(requirements);
     const promptId = taskEngineMode
       ? PROMPT_IDS.TASK_ENGINE_OUTLINES
       : interactiveMode
@@ -497,6 +496,7 @@ export async function POST(req: NextRequest) {
               type: 'done',
               outlines: uniquifiedOutlines,
               languageDirective: languageDirective || DEFAULT_LANGUAGE_DIRECTIVE,
+              taskEngineMode,
             });
             controller.enqueue(encoder.encode(`data: ${doneEvent}\n\n`));
           } else {

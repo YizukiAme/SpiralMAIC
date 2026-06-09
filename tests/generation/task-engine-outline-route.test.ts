@@ -198,6 +198,7 @@ describe('task-engine outline route', () => {
     const events = parseSseEvents(await readStreamBody(response));
     const done = events.find((event) => event.type === 'done');
     expect(done).toBeDefined();
+    expect(done.taskEngineMode).toBe(true);
     expect(done.outlines).toHaveLength(8);
     expect(done.outlines[0]).toMatchObject({
       type: 'slide',
@@ -298,7 +299,7 @@ describe('task-engine outline route', () => {
     });
 
     const { POST } = await import('@/app/api/generate/scene-outlines-stream/route');
-    await POST(
+    const response = await POST(
       mockRequest({
         requirement: 'Teach motion with interaction',
         interactiveMode: true,
@@ -309,6 +310,11 @@ describe('task-engine outline route', () => {
     const promptParams = streamLLMMock.mock.calls[0][0] as { system: string; prompt: string };
     expect(promptParams.system).toContain('Interactive Mode Outline Generator');
     expect(promptParams.system).not.toContain('Task Engine Outline Generator');
+
+    const events = parseSseEvents(await readStreamBody(response));
+    const done = events.find((event) => event.type === 'done');
+    expect(done).toBeDefined();
+    expect(done.taskEngineMode).toBe(false);
   });
 
   test('sanitizes procedural-skill outlines when taskEngineMode is disabled', async () => {
