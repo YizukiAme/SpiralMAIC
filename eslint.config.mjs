@@ -12,8 +12,17 @@ const eslintConfig = defineConfig([
     'out/**',
     'build/**',
     'next-env.d.ts',
-    // Vendored/generated code:
-    'packages/**',
+    // Third-party / vendored packages (not our code):
+    'packages/docs/**',
+    'packages/mathml2omml/**',
+    'packages/pptxgenjs/**',
+    // Our own @maic/* packages: lint the source, but skip build output,
+    // installed deps, and the vendored JS sources under importer/src1.
+    'packages/@maic/*/dist/**',
+    'packages/@maic/*/node_modules/**',
+    'packages/@maic/importer/src1/**',
+    // Generated importer bundle copied into public/ by the sync script (postinstall):
+    'public/vendor/**',
     // Claude Code local files:
     '.claude/**',
     '.superpowers/**',

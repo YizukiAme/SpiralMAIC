@@ -2,6 +2,12 @@
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
 
+@source "../node_modules/@maic/renderer/dist/**/*.{js,cjs}";
+/* slide-renderer-demo is gitignored (local sandbox), which makes Tailwind v4's
+   auto source detection skip it. Re-include it explicitly so the demo's
+   Tailwind classes (e.g. bg-violet-600) still get generated. */
+@source "./slide-renderer-demo/**/*.{tsx,ts,jsx,js}";
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {

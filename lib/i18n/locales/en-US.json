@@ -50,13 +50,18 @@
   },
   "import": {
     "classroom": "Import Classroom",
+    "pptx": "Import PPTX",
     "parsing": "Parsing ZIP...",
+    "parsingPptx": "Parsing PPTX...",
     "validating": "Validating data...",
     "writingMedia": "Writing media files...",
     "writingCourse": "Writing course data...",
     "success": "Classroom imported successfully",
+    "pptxSuccess": "PPTX parsed successfully ({{count}} slides, output logged to console)",
     "error": {
       "invalidZip": "Invalid file. Please select a valid .maic.zip file.",
+      "invalidPptx": "Failed to parse PPTX. Please check the file is valid.",
+      "parserUnavailable": "PPTX import is unavailable: the parser bundle is not deployed. Re-run install/sync.",
       "invalidManifest": "Invalid classroom file: manifest.json is missing or corrupted.",
       "missingData": "Invalid classroom file: missing required course data.",
       "storageFull": "Import failed: browser storage is full. Try clearing old classrooms."

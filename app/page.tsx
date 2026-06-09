@@ -22,6 +22,7 @@ import {
   Sparkles,
   Atom,
   X,
+  Presentation,
 } from 'lucide-react';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { LanguageSwitcher } from '@/components/language-switcher';
@@ -56,12 +57,19 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useDraftCache } from '@/lib/hooks/use-draft-cache';
 import { SpeechButton } from '@/components/audio/speech-button';
 import { useImportClassroom } from '@/lib/import/use-import-classroom';
+import { useImportPptx } from '@/lib/import/use-import-pptx';
 
 const log = createLogger('Home');
 
 const WEB_SEARCH_STORAGE_KEY = 'webSearchEnabled';
 const RECENT_OPEN_STORAGE_KEY = 'recentClassroomsOpen';
 const INTERACTIVE_MODE_STORAGE_KEY = 'interactiveModeEnabled';
+
+// PPTX import is still scaffolding: `useImportPptx` has no `onImported` consumer
+// yet, so the flow only logs the parsed slides. Hide the entry point behind a
+// flag until it's wired end-to-end, so the UI doesn't expose a no-op button.
+// Enable with NEXT_PUBLIC_ENABLE_PPTX_IMPORT=true.
+const PPTX_IMPORT_ENABLED = process.env.NEXT_PUBLIC_ENABLE_PPTX_IMPORT === 'true';
 
 interface FormState {
   pdfFile: File | null;
@@ -197,6 +205,13 @@ function HomePage() {
       loadClassrooms();
     },
   );
+
+  const {
+    importing: pptxImporting,
+    fileInputRef: pptxFileInputRef,
+    triggerFileSelect: triggerPptxFileSelect,
+    handleFileChange: handlePptxFileChange,
+  } = useImportPptx();
 
   useEffect(() => {
     // Clear stale media store to prevent cross-course thumbnail contamination.
@@ -357,6 +372,15 @@ function HomePage() {
         onChange={handleFileChange}
         className="hidden"
       />
+      {PPTX_IMPORT_ENABLED && (
+        <input
+          ref={pptxFileInputRef}
+          type="file"
+          accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+          onChange={handlePptxFileChange}
+          className="hidden"
+        />
+      )}
       {/* ═══ Top-right pill (unchanged) ═══ */}
       <div
         ref={toolbarRef}
@@ -613,16 +637,28 @@ function HomePage() {
           )}
         </AnimatePresence>
 
-        {/* ── Import button (empty state) ── */}
+        {/* ── Import buttons (empty state) ── */}
         {classrooms.length === 0 && (
-          <button
-            onClick={triggerFileSelect}
-            disabled={importing}
-            className="relative z-10 mt-4 flex items-center gap-1.5 text-[12px] text-muted-foreground/40 hover:text-foreground/60 transition-colors"
-          >
-            <Upload className="size-3.5" />
-            <span>{t('import.classroom')}</span>
-          </button>
+          <div className="relative z-10 mt-4 flex items-center gap-4">
+            <button
+              onClick={triggerFileSelect}
+              disabled={importing}
+              className="flex items-center gap-1.5 text-[12px] text-muted-foreground/40 hover:text-foreground/60 transition-colors"
+            >
+              <Upload className="size-3.5" />
+              <span>{t('import.classroom')}</span>
+            </button>
+            {PPTX_IMPORT_ENABLED && (
+              <button
+                onClick={triggerPptxFileSelect}
+                disabled={pptxImporting}
+                className="flex items-center gap-1.5 text-[12px] text-muted-foreground/40 hover:text-foreground/60 transition-colors"
+              >
+                <Presentation className="size-3.5" />
+                <span>{t('import.pptx')}</span>
+              </button>
+            )}
+          </div>
         )}
       </motion.div>
 
@@ -745,6 +781,18 @@ function HomePage() {
                   {t('import.classroom')}
                 </span>
               </button>
+              {PPTX_IMPORT_ENABLED && (
+                <button
+                  onClick={triggerPptxFileSelect}
+                  disabled={pptxImporting}
+                  className="group/import-pptx grid grid-cols-[auto_0fr] hover:grid-cols-[auto_1fr] items-center gap-1 rounded-full px-1.5 py-0.5 text-[12px] text-muted-foreground/35 hover:text-muted-foreground/70 hover:bg-muted/50 transition-all duration-200 cursor-pointer"
+                >
+                  <Presentation className="size-3" />
+                  <span className="overflow-hidden opacity-0 group-hover/import-pptx:opacity-100 transition-opacity duration-200 whitespace-nowrap">
+                    {t('import.pptx')}
+                  </span>
+                </button>
+              )}
             </div>
             <div className="flex-1 h-px bg-border/40 group-hover:bg-border/70 transition-colors" />
           </div>

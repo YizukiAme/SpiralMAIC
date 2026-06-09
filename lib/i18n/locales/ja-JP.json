@@ -50,13 +50,18 @@
   },
   "import": {
     "classroom": "教室をインポート",
+    "pptx": "PPTX をインポート",
     "parsing": "ZIP を解析中...",
+    "parsingPptx": "PPTX を解析中...",
     "validating": "データを検証中...",
     "writingMedia": "メディアファイルを書き込み中...",
     "writingCourse": "コースデータを書き込み中...",
     "success": "教室のインポートが完了しました",
+    "pptxSuccess": "PPTX を解析しました（{{count}} ページ、出力をコンソールに表示しました）",
     "error": {
       "invalidZip": "無効なファイルです。有効な .maic.zip ファイルを選択してください。",
+      "invalidPptx": "PPTX の解析に失敗しました。ファイルが有効か確認してください。",
+      "parserUnavailable": "PPTX インポートは利用できません：パーサーがデプロイされていません。インストール／同期を再実行してください。",
       "invalidManifest": "無効な教室ファイル：manifest.json が見つからないか破損しています。",
       "missingData": "無効な教室ファイル：必要なコースデータが不足しています。",
       "storageFull": "インポート失敗：ブラウザのストレージが一杯です。古い教室を削除してください。"
