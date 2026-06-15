@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react';
 import { Play } from 'lucide-react';
-import type { Slide, PPTElement, PPTVideoElement } from '@/lib/types/slides';
+import type { Slide, PPTElement, PPTVideoElement } from '@maic/dsl';
 import { isMediaPlaceholder, useMediaGenerationStore } from '@/lib/store/media-generation';
 import { useMediaStageId } from '@/lib/contexts/media-stage-context';
 import { getVideoMediaRefForElement } from '@/lib/media/video-manifest';
