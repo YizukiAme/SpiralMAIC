@@ -86,6 +86,7 @@
     "partial-json": "^0.1.7",
     "pptxgenjs": "workspace:*",
     "pptxtojson": "^1.11.0",
+    "@maic/dsl": "workspace:*",
     "@maic/importer": "workspace:*",
     "@maic/renderer": "workspace:*",
     "prosemirror-commands": "^1.7.1",
