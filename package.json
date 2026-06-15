@@ -22,7 +22,8 @@
     "eval:whiteboard": "tsx eval/whiteboard-layout/runner.ts",
     "eval:outline-language": "tsx eval/outline-language/runner.ts",
     "eval:orchestration": "tsx eval/orchestration/runner.ts",
-    "eval:orchestration:answering": "tsx eval/orchestration/answering-runner.ts"
+    "eval:orchestration:answering": "tsx eval/orchestration/answering-runner.ts",
+    "eval:orchestration:answer-content": "tsx eval/orchestration/answer-content-runner.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.71",
