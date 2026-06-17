@@ -52,7 +52,7 @@
     "canvas",
     "react"
   ],
-  "license": "AGPL-3.0",
+  "license": "MIT",
   "peerDependencies": {
     "echarts": ">=5",
     "motion": ">=11",

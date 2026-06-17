@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="https://jcst.ict.ac.cn/en/article/doi/10.1007/s11390-025-6000-0"><img src="https://img.shields.io/badge/Paper-JCST'26-blue?style=flat-square" alt="Paper"/></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg?style=flat-square" alt="License: AGPL-3.0"/></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green.svg?style=flat-square" alt="License: MIT"/></a>
   <a href="https://open.maic.chat/"><img src="https://img.shields.io/badge/Demo-Live-brightgreen?style=flat-square" alt="Live Demo"/></a>
   <a href="https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FTHU-MAIC%2FOpenMAIC&envDescription=Configure%20at%20least%20one%20LLM%20provider%20API%20key%20(e.g.%20OPENAI_API_KEY%2C%20ANTHROPIC_API_KEY).%20All%20providers%20are%20optional.&envLink=https%3A%2F%2Fgithub.com%2FTHU-MAIC%2FOpenMAIC%2Fblob%2Fmain%2F.env.example&project-name=openmaic&framework=nextjs"><img src="https://vercel.com/button" alt="Deploy with Vercel" height="20"/></a>
   <a href="#-openclaw-集成"><img src="https://img.shields.io/badge/OpenClaw-集成-F4511E?style=flat-square" alt="OpenClaw 集成"/></a>
@@ -678,7 +678,7 @@ OpenMAIC/
 
 ## 💼 商业合作
 
-本项目基于 AGPL-3.0 协议开源。商业授权合作请联系：**thu_maic@mail.tsinghua.edu.cn**
+本项目基于 MIT 协议开源，可免费商用。商业合作或共建请联系：**thu_maic@mail.tsinghua.edu.cn**
 
 ---
 
@@ -711,4 +711,13 @@ OpenMAIC/
 
 ## 📄 许可证
 
-本项目基于 [GNU Affero General Public License v3.0](LICENSE) 开源。
+本项目基于 [MIT License](LICENSE) 开源。
+
+### 第三方组件
+
+仓库内置的以下工作区子包**不**受根目录 MIT 许可证覆盖，各自保留原有协议：
+
+- `packages/mathml2omml` —— [LGPL-3.0-or-later](packages/mathml2omml/LICENSE)
+- `packages/pptxgenjs` —— [MIT](packages/pptxgenjs/package.json)（第三方）
+
+整体再分发本仓库时，上述子包内文件适用其各自的协议。

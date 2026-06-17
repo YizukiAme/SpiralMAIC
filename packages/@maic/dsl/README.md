@@ -115,6 +115,6 @@ pnpm --filter @maic/dsl typecheck
 
 ## License
 
-AGPL-3.0, matching the rest of the family (`@maic/dsl`, `@maic/importer`,
+MIT, matching the rest of the family (`@maic/dsl`, `@maic/importer`,
 `@maic/renderer`) and the OpenMAIC root, so the license policy is uniform
 across the SDK.

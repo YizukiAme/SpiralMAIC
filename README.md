@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="https://jcst.ict.ac.cn/en/article/doi/10.1007/s11390-025-6000-0"><img src="https://img.shields.io/badge/Paper-JCST'26-blue?style=flat-square" alt="Paper"/></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg?style=flat-square" alt="License: AGPL-3.0"/></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green.svg?style=flat-square" alt="License: MIT"/></a>
   <a href="https://open.maic.chat/"><img src="https://img.shields.io/badge/Demo-Live-brightgreen?style=flat-square" alt="Live Demo"/></a>
   <a href="https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FTHU-MAIC%2FOpenMAIC&envDescription=Configure%20at%20least%20one%20LLM%20provider%20API%20key%20(e.g.%20OPENAI_API_KEY%2C%20ANTHROPIC_API_KEY).%20All%20providers%20are%20optional.&envLink=https%3A%2F%2Fgithub.com%2FTHU-MAIC%2FOpenMAIC%2Fblob%2Fmain%2F.env.example&project-name=openmaic&framework=nextjs"><img src="https://vercel.com/button" alt="Deploy with Vercel" height="20"/></a>
   <a href="#-openclaw-integration"><img src="https://img.shields.io/badge/OpenClaw-Integration-F4511E?style=flat-square" alt="OpenClaw Integration"/></a>
@@ -678,9 +678,9 @@ OpenMAIC/
 
 ---
 
-## 💼 Commercial Licensing
+## 💼 Partnerships
 
-This project is licensed under AGPL-3.0. For commercial licensing inquiries, please contact: **thu_maic@mail.tsinghua.edu.cn**
+This project is licensed under the MIT License, so commercial use is permitted free of charge. For partnership or collaboration inquiries, please contact: **thu_maic@mail.tsinghua.edu.cn**
 
 ---
 
@@ -713,4 +713,13 @@ If you find OpenMAIC useful in your research, please consider citing:
 
 ## 📄 License
 
-This project is licensed under the [GNU Affero General Public License v3.0](LICENSE).
+This project is licensed under the [MIT License](LICENSE).
+
+### Third-Party Components
+
+The repository bundles workspace packages that are **not** covered by the root MIT license and keep their own terms:
+
+- `packages/mathml2omml` — [LGPL-3.0-or-later](packages/mathml2omml/LICENSE)
+- `packages/pptxgenjs` — [MIT](packages/pptxgenjs/package.json) (third-party)
+
+When redistributing the repository as a whole, the terms of each bundled package above apply to that package's files.

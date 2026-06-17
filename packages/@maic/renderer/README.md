@@ -214,4 +214,4 @@ import '@maic/renderer/fonts.css';
 
 ## License
 
-AGPL-3.0
+MIT
