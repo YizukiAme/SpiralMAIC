@@ -460,6 +460,7 @@ function GenerationPreviewContent() {
       // ── Generate outlines first (infers languageDirective) ──
       let outlines = currentSession.sceneOutlines;
       let languageDirective = currentSession.languageDirective;
+      let courseTitle = currentSession.courseTitle;
 
       const outlineStepIdx = activeSteps.findIndex((s) => s.id === 'outline');
       setCurrentStepIndex(outlineStepIdx >= 0 ? outlineStepIdx : 0);
@@ -471,10 +472,12 @@ function GenerationPreviewContent() {
         const outlineResult = await new Promise<{
           outlines: SceneOutline[];
           languageDirective: string;
+          courseTitle?: string;
           taskEngineMode: boolean;
         }>((resolve, reject) => {
           const collected: SceneOutline[] = [];
           let directive: string | undefined;
+          let title: string | undefined;
 
           fetch('/api/generate/scene-outlines-stream', {
             method: 'POST',
@@ -519,11 +522,19 @@ function GenerationPreviewContent() {
                         const evt = JSON.parse(line.slice(6));
                         if (evt.type === 'languageDirective') {
                           directive = evt.data;
+                        } else if (evt.type === 'courseTitle') {
+                          title = evt.data;
                         } else if (evt.type === 'outline') {
                           collected.push(evt.data);
                           setStreamingOutlines([...collected]);
                         } else if (evt.type === 'retry') {
                           collected.length = 0;
+                          // Drop any directive/title latched from the failed
+                          // attempt — the server resets these per attempt, so a
+                          // succeeding attempt that omits them must fall back, not
+                          // inherit the previous attempt's stale values.
+                          directive = undefined;
+                          title = undefined;
                           setStreamingOutlines([]);
                           setStatusMessage(t('generation.outlineRetrying'));
                         } else if (evt.type === 'done') {
@@ -533,6 +544,7 @@ function GenerationPreviewContent() {
                             languageDirective:
                               directive ||
                               'Teach in the language that matches the user requirement.',
+                            courseTitle: evt.courseTitle || title,
                             taskEngineMode: resolveTaskEngineModeFromOutlineDoneEvent(evt),
                           });
                           return;
@@ -551,6 +563,11 @@ function GenerationPreviewContent() {
                         outlines: collected,
                         languageDirective:
                           directive || 'Teach in the language that matches the user requirement.',
+                        // Carry any title latched from a streaming `courseTitle`
+                        // event here too — symmetric with languageDirective — so
+                        // a stream that ends without an explicit `done` event
+                        // does not silently drop a valid inferred title.
+                        courseTitle: title,
                         taskEngineMode: false,
                       });
                     } else {
@@ -568,6 +585,7 @@ function GenerationPreviewContent() {
 
         outlines = outlineResult.outlines;
         languageDirective = outlineResult.languageDirective;
+        courseTitle = outlineResult.courseTitle;
         const effectiveTaskEngineMode = outlineResult.taskEngineMode;
         setIsOutlineStreaming(false);
 
@@ -579,6 +597,7 @@ function GenerationPreviewContent() {
           ...currentSession,
           sceneOutlines: outlines,
           languageDirective,
+          courseTitle,
           taskEngineMode: effectiveTaskEngineMode,
           previewPhase: shouldReviewOutlines ? 'review' : 'outline-ready',
         };
@@ -619,6 +638,12 @@ function GenerationPreviewContent() {
       // Store languageDirective on the stage
       if (languageDirective) {
         stage.languageDirective = languageDirective;
+      }
+
+      // Adopt the LLM-inferred course title as the stage name when available,
+      // replacing the raw-requirement placeholder set at stage creation time.
+      if (courseTitle) {
+        stage.name = courseTitle;
       }
 
       // ── Agent generation (after outlines — uses languageDirective + outlines) ──
