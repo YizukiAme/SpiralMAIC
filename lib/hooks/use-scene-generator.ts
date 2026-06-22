@@ -316,6 +316,7 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
       if (pending.length === 0) {
         store.getState().setGenerationStatus('completed');
         store.getState().setGeneratingOutlines([]);
+        store.getState().setGenerationComplete(true);
         options.onComplete?.();
         generatingRef.current = false;
         return;
@@ -533,6 +534,7 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
           } else {
             store.getState().setGenerationStatus('completed');
             store.getState().setGeneratingOutlines([]);
+            store.getState().setGenerationComplete(true);
             options.onComplete?.();
           }
         }
@@ -681,6 +683,12 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
         // Resume remaining generation if there are pending outlines
         if (store.getState().generatingOutlines.length > 0 && lastParamsRef.current) {
           generateRemainingRef.current?.(lastParamsRef.current);
+        } else {
+          // This retry may have materialized the final outstanding slide. The
+          // generateRemaining completion path is not reached on the retry flow,
+          // so mark completion here too — otherwise a later delete would treat
+          // the orphaned outline as pending and regenerate it.
+          store.getState().markGenerationCompleteIfDone();
         }
       } catch (err) {
         if (!(err instanceof DOMException && err.name === 'AbortError')) {

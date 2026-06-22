@@ -132,6 +132,10 @@ export interface PlaybackStateRecord {
 export interface StageOutlinesRecord {
   stageId: string; // Primary key (FK -> stages.id)
   outlines: SceneOutline[];
+  // True once generation finished for this stage. Gates resume-on-mount so an
+  // edited (e.g. slide-deleted) finished deck is not treated as "interrupted"
+  // and regenerated. Optional for backward compat with pre-existing records.
+  generationComplete?: boolean;
   createdAt: number;
   updatedAt: number;
 }
