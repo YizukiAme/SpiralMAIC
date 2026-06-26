@@ -191,6 +191,11 @@ function renderProject(p){
     for (const t of (m.microtasks||[])){
       h += '<div class="mt"><div class="t">'+esc(t.title)+'</div>';
       if (t.description) h += '<div class="d">'+esc(t.description)+'</div>';
+      if (t.learnerBrief) h += '<div class="script"><b>learnerBrief</b> '+esc(t.learnerBrief)+'</div>';
+      if (t.successWhen) h += '<div class="script"><b>successWhen</b> '+esc(t.successWhen)+'</div>';
+      if (t.characterObjective) h += '<div class="script"><b>characterObjective</b> '+esc(t.characterObjective)+'</div>';
+      if (t.skillFocus) h += '<div class="script"><b>skillFocus</b> '+esc(t.skillFocus)+'</div>';
+      if (t.narration) h += '<div class="script"><b>narration</b> '+esc(t.narration)+'</div>';
       if (t.hints && t.hints.length){ h += '<ul>'+t.hints.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>'; }
       h += '</div>';
     }

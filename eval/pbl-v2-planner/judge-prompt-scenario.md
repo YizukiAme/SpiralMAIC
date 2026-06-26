@@ -19,13 +19,13 @@ A beat's "deliverable" is almost never a file. Judge it on two axes:
 
 ## Generated scenario (JSON)
 
-The project carries a top-level `scenario` block (setting / rules / learnerRole / characters) and milestones tagged `scenarioStage` (`prep` → `roleplay`×1..N → `wrapup`). Roleplay microtasks are beats carrying `successWhen` / `characterObjective` / `skillFocus` / `narration`.
+The project carries a top-level `scenario` block (setting / rules / learnerRole / characters) and milestones tagged `scenarioStage` (`prep` → `roleplay`×1..N → `wrapup`). Roleplay microtasks are beats carrying `successWhen` / `characterObjective` / `skillFocus` / `learnerBrief` / `narration`.
 
 {{project}}
 
 ## What is learner-visible vs private (read before judging spoilers / channels)
 
-- **Learner-visible** (the learner reads these — spoilers here are S4): `setting`, `rules`, `learnerRole`, each character's `name` / `persona` / `situation` / `openingLine`, the prep `briefing`, and each roleplay beat's `description` / `narration`.
+- **Learner-visible** (the learner reads these — spoilers here are S4): `setting`, `rules`, `learnerRole`, each character's `name` / `persona` / `situation` / `openingLine`, the prep `briefing`, and each roleplay beat's `description` / `learnerBrief` / `narration`.
 - **Private by design** (NEVER shown to the learner, never narrated, never spoken): a beat's `characterObjective`. This is the **intended hiding place** for a fact the learner must uncover. A hidden cause / secret / opponent's cards living in `characterObjective` is CORRECT design, NOT a spoiler — do not flag S4 for it.
 - `successWhen` is the **advance gate** — the observable in-scene action that lets the beat progress. It is NOT required to embed the full grading rubric; HOW WELL the action was done is judged separately at runtime against the scenario's criteria. Do not flag S3 merely because `successWhen` names the action without spelling out a quality bar.
 - The authored `briefing` / `debrief` are design-time scripts; at runtime the debrief is grounded in the learner's actual performance. A pre-written debrief that reads as if the learner did well is a normal placeholder, not a defect — judge closure on whether the wrapup is SHAPED to deliver specific performance-based feedback, not on the placeholder wording.
@@ -63,7 +63,7 @@ Scenario-specific red lines (the ones that matter most here):
 - **S1** wrong skeleton: not exactly prep → roleplay(s) → wrapup, or `coreConcept` set on any scenario stage.
 - **S2** prep gates or guesses: prep has a do-before-advance task, has more than one microtask, or asks the learner to guess/invent the premise instead of being told it. (A prep `completionCriteria` that just says "you've read the background" is NOT a gate — prep is allowed its briefing/completionCriteria text.)
 - **S3** missing/empty beat success — **ROLEPLAY beats only**: a roleplay beat lacks a `successWhen`, or its `successWhen` names no observable in-scene action (it is literally "they chatted / discussed"). A `successWhen` that names a concrete action without spelling out the quality bar is FINE (quality is judged separately). Prep and wrapup correctly have NO `successWhen` — never flag S3 for them.
-- **S4** spoiler — **learner-visible fields only** (`setting` / `rules` / `learnerRole` / a character's `persona` / `situation` / `openingLine` / prep `briefing` / a beat's `description` / `narration`): one of these reveals a fact meant to be uncovered later, or pre-states a later beat's situation. A hidden fact placed in the private `characterObjective` is CORRECT and is NOT S4.
+- **S4** spoiler — **learner-visible fields only** (`setting` / `rules` / `learnerRole` / a character's `persona` / `situation` / `openingLine` / prep `briefing` / a beat's `description` / `learnerBrief` / `narration`): one of these reveals a fact meant to be uncovered later, or pre-states a later beat's situation. A hidden fact placed in the private `characterObjective` is CORRECT and is NOT S4.
 - **S5** character-as-coach / channel bleed: a character is written to coach the LEARNER — grade them, ask them to justify their reasoning, give strategy/meta hints, narrate the scene, or say "your turn". An in-world evaluative motive (an interviewer privately assessing the candidate, an opponent reading the table) is the character's legitimate drive and is NOT S5; the violation is meta-talk aimed at the learner. A character implying it can see hidden info it shouldn't (e.g. the learner's hole cards) is S5.
 - **S6** missing rules: a rule-based scenario (game / interview / debate / structured negotiation) omits the concrete `rules` the Instructor needs to teach the premise in prep.
 - **S7** flattened performance: a beat that should be a live spoken exchange is forced into a written artifact or a quiz with no in-scene reason (delivery-form mismatch).
@@ -94,4 +94,3 @@ Output **exactly one JSON object** and nothing else (no prose, no code fences):
 }
 
 `redLines` may contain B-codes and S-codes; set it to [] when none are violated. "overall" is your holistic ship/no-ship judgement; any red line should pull it down hard.
-</content>

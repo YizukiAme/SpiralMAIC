@@ -104,5 +104,3 @@ Output **exactly one JSON object** and nothing else (no prose, no code fences):
 }
 
 `redLines` lists the violated B-codes; set it to [] when none are violated. "overall" is your holistic ship/no-ship judgement; any red line should pull it down hard.
-</content>
-</invoke>

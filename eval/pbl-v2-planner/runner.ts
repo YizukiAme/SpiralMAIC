@@ -261,10 +261,7 @@ function loadTestCases(): TestCase[] {
 // Outline builder
 // ---------------------------------------------------------------------------
 
-let outlineCounter = 0;
-
-function buildOutline(tc: TestCase): SceneOutline {
-  outlineCounter += 1;
+function buildOutline(tc: TestCase, order: number): SceneOutline {
   return {
     id: `eval-pbl-${tc.id}`,
     type: 'pbl',
@@ -272,7 +269,7 @@ function buildOutline(tc: TestCase): SceneOutline {
     description: tc.pblConfig.projectDescription,
     keyPoints: tc.pblConfig.targetSkills.map((s) => `Learn ${s}`),
     teachingObjective: `完成 ${tc.pblConfig.projectTopic} 项目`,
-    order: outlineCounter,
+    order,
     pblConfig: tc.pblConfig,
     languageNote: tc.languageDirective,
   };
@@ -349,6 +346,7 @@ function projectForJudge(project: PBLProjectV2): unknown {
         ...(t.successWhen ? { successWhen: t.successWhen } : {}),
         ...(t.characterObjective ? { characterObjective: t.characterObjective } : {}),
         ...(t.skillFocus ? { skillFocus: t.skillFocus } : {}),
+        ...(t.learnerBrief ? { learnerBrief: t.learnerBrief } : {}),
         ...(t.narration ? { narration: t.narration } : {}),
       })),
       documents: (m.documents ?? []).map((d) => ({ title: d.title })),
@@ -464,11 +462,12 @@ function runVariant(
 async function runOne(
   tc: TestCase,
   variant: Variant,
+  outlineOrder: number,
   model: LanguageModel,
   judgeModel: LanguageModel,
   thinkingConfig?: ThinkingConfig,
 ): Promise<RunResult> {
-  const outline = buildOutline(tc);
+  const outline = buildOutline(tc, outlineOrder);
   const input = buildInput(tc, outline);
   const isScenario = tc.pblConfig.scenarioRoleplay === true;
   const startedAt = performance.now();
@@ -842,10 +841,10 @@ async function main(): Promise<void> {
   const executing = new Set<Promise<void>>();
   let done = 0;
   for (let j = 0; j < jobs.length; j++) {
-    const { tc, variant } = jobs[j];
+    const { tc, variant, n } = jobs[j];
     if (j > 0) await sleep(staggerMs);
     const p = (async () => {
-      const result = await runOne(tc, variant, model, judgeModel, thinkingConfig);
+      const result = await runOne(tc, variant, n, model, judgeModel, thinkingConfig);
       results[j] = result;
 
       if (result.project) {
