@@ -35,6 +35,11 @@
     "contract"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/THU-MAIC/OpenMAIC",
+    "directory": "packages/@openmaic/dsl"
+  },
   "publishConfig": {
     "registry": "https://registry.npmjs.org",
     "access": "public"

@@ -36,6 +36,11 @@
     "json"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/THU-MAIC/OpenMAIC",
+    "directory": "packages/@openmaic/importer"
+  },
   "publishConfig": {
     "registry": "https://registry.npmjs.org",
     "access": "public"
