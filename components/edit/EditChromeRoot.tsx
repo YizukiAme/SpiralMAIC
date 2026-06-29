@@ -100,6 +100,11 @@ export function EditChromeRoot({ scene, isEditable, onToggleEditMode }: EditChro
             clearThread={agentRuntime.clearThread}
             hasMessages={agentRuntime.hasMessages}
             canSend={agentEnabled}
+            sessions={agentRuntime.sessions}
+            activeSessionId={agentRuntime.activeSessionId}
+            switchSession={agentRuntime.switchSession}
+            deleteSessionAndRefresh={agentRuntime.deleteSessionAndRefresh}
+            refreshSessions={agentRuntime.refreshSessions}
           />
         ) : undefined
       }
