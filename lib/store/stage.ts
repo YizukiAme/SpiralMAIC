@@ -7,6 +7,7 @@ import {
   type SceneContent,
   type ScenePatch,
   type StageMode,
+  type GeneratedAgentConfig,
 } from '@/lib/types/stage';
 import { createSelectors } from '@/lib/utils/create-selectors';
 import type { ChatSession } from '@/lib/types/chat';
@@ -105,6 +106,7 @@ interface StageState {
   setChats: (chats: ChatSession[]) => void;
   setMode: (mode: StageMode) => void;
   setToolbarState: (state: ToolbarState) => void;
+  setStageAgents: (configs: GeneratedAgentConfig[]) => void;
   setGeneratingOutlines: (outlines: SceneOutline[]) => void;
   setOutlines: (outlines: SceneOutline[]) => void;
   setGenerationComplete: (complete: boolean) => void;
@@ -281,6 +283,14 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
 
   setToolbarState: (toolbarState) => set({ toolbarState }),
 
+  setStageAgents: (configs) => {
+    const stage = get().stage;
+    if (!stage) return;
+    set({ stage: { ...stage, generatedAgentConfigs: configs } });
+    debouncedSave();
+    debouncedSaveAgents();
+  },
+
   setGeneratingOutlines: (generatingOutlines) => set({ generatingOutlines }),
 
   setOutlines: (outlines) => {
@@ -394,6 +404,7 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
         currentSceneId,
         chats,
       });
+
       return true;
     } catch (error) {
       log.error('Failed to save to storage:', error);
@@ -510,4 +521,18 @@ export const useStageStore = createSelectors(useStageStoreBase);
  */
 const debouncedSave = debounce(() => {
   useStageStore.getState().saveToStorage();
+}, 500);
+
+/**
+ * Debounced registry sync — fires ONLY when the agent roster is edited.
+ * Keeps db.generatedAgents writes off the broad saveToStorage path so scene
+ * advances (setCurrentSceneId etc.) never churn the registry mid-playback.
+ */
+const debouncedSaveAgents = debounce(async () => {
+  const { stage } = useStageStore.getState();
+  if (!stage?.id || !stage.generatedAgentConfigs) return;
+  const { saveGeneratedAgents } = await import('@/lib/orchestration/registry/store');
+  await saveGeneratedAgents(stage.id, stage.generatedAgentConfigs);
+  const { useSettingsStore } = await import('@/lib/store/settings');
+  useSettingsStore.getState().setSelectedAgentIds(stage.generatedAgentConfigs.map((a) => a.id));
 }, 500);
