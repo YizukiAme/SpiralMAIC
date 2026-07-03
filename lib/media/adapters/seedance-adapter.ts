@@ -36,6 +36,16 @@ import type {
 const DEFAULT_MODEL = 'doubao-seedance-2-0-260128';
 const DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com';
 const POLL_INTERVAL_MS = 5000;
+
+/**
+ * Resolves the Ark API root. A bare host gets the standard `/api/v3` appended; a
+ * baseUrl that already carries an `/api/...` path (e.g. a token plan's
+ * `https://ark.cn-beijing.volces.com/api/plan/v3`) is used verbatim.
+ */
+function resolveArkRoot(baseUrl: string): string {
+  const trimmed = baseUrl.replace(/\/+$/, '');
+  return /\/api\//.test(trimmed) ? trimmed : `${trimmed}/api/v3`;
+}
 const MAX_POLL_ATTEMPTS = 60; // 5 minutes max
 
 /** Response shape for task creation (only returns id) */
@@ -114,7 +124,7 @@ export async function testSeedanceConnectivity(
   const baseUrl = config.baseUrl || DEFAULT_BASE_URL;
   try {
     const response = await fetch(
-      `${baseUrl}/api/v3/contents/generations/tasks/connectivity-test-nonexistent`,
+      `${resolveArkRoot(baseUrl)}/contents/generations/tasks/connectivity-test-nonexistent`,
       {
         method: 'GET',
         headers: { Authorization: `Bearer ${config.apiKey}` },
@@ -159,7 +169,7 @@ export async function submitSeedanceTask(
   const resolution = toSeedanceResolution(options.resolution);
   if (resolution) body.resolution = resolution;
 
-  const response = await fetch(`${baseUrl}/api/v3/contents/generations/tasks`, {
+  const response = await fetch(`${resolveArkRoot(baseUrl)}/contents/generations/tasks`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -192,7 +202,7 @@ export async function pollSeedanceTask(
 ): Promise<VideoGenerationResult | null> {
   const baseUrl = config.baseUrl || DEFAULT_BASE_URL;
 
-  const response = await fetch(`${baseUrl}/api/v3/contents/generations/tasks/${taskId}`, {
+  const response = await fetch(`${resolveArkRoot(baseUrl)}/contents/generations/tasks/${taskId}`, {
     method: 'GET',
     headers: {
       Authorization: `Bearer ${config.apiKey}`,
