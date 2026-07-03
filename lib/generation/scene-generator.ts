@@ -1334,6 +1334,288 @@ function extractWidgetConfig(html: string): WidgetConfig | undefined {
 }
 
 /**
+ * Extract an inventory of interactable elements from the generated widget HTML,
+ * so the interactive-actions prompt can pick real selectors instead of guessing
+ * by convention. Returns an empty string when no elements are found.
+ */
+export function extractInteractiveElements(html: string): string {
+  if (!html) return '';
+
+  // Collect class names declared in the page's own <style> blocks so we can
+  // keep semantic hooks (e.g. `.grid-cell`, `.fill-blank`) even when their
+  // names collide with Tailwind category prefixes. Do this BEFORE stripping.
+  const styledClasses = collectStyledClassNames(html);
+
+  // Strip <script> / <style> / HTML comments so we don't inventory JS
+  // variables, CSS rules, or commented-out markup. Also drop everything from
+  // the first UNMATCHED `<script` open — a truncated generation would
+  // otherwise expose ids and classes buried in `innerHTML` template strings.
+  let dom = html
+    .replace(/<script\b[\s\S]*?<\/script>/gi, '')
+    .replace(/<style\b[\s\S]*?<\/style>/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '');
+  const unterminatedScript = dom.search(/<script\b/i);
+  if (unterminatedScript !== -1) {
+    dom = dom.substring(0, unterminatedScript);
+  }
+
+  // Match an opening tag with its attribute string. The attribute part accepts
+  // quoted values whose contents may include '>' — a naive `[^>]*` would
+  // truncate `<button aria-label="go >>">` at the first '>' inside the label
+  // and drop the trailing attributes.
+  const tagRegex =
+    /<([a-zA-Z][a-zA-Z0-9-]*)((?:\s+[a-zA-Z_:][\w:-]*(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'<>`=]+))?)*)\s*\/?>/g;
+  const seenIds = new Set<string>();
+  const seenClasses = new Set<string>();
+  const seenDataAttrs = new Set<string>();
+  const idLines: string[] = [];
+  const classLines: string[] = [];
+  const dataAttrLines: string[] = [];
+  const MAX_IDS = 60;
+  const MAX_CLASSES = 30;
+  const MAX_DATA_ATTRS = 30;
+
+  for (const match of dom.matchAll(tagRegex)) {
+    const tag = match[1].toLowerCase();
+    if (tag === 'br' || tag === 'meta' || tag === 'link') continue;
+    const attrs = parseAttrs(match[2] || '');
+
+    const id = attrs.id;
+    const classAttr = attrs.class;
+    const ariaLabel = attrs['aria-label'];
+    const role = attrs.role;
+    const dataStepId = attrs['data-step-id'];
+    const dataAction = attrs['data-action'];
+    const name = attrs.name;
+    const typeAttr = attrs.type;
+
+    if (id && !seenIds.has(id) && idLines.length < MAX_IDS) {
+      seenIds.add(id);
+      const parts: string[] = [
+        `#${id}`,
+        `<${tag}${typeAttr ? ` type=${cleanAttrValue(typeAttr)}` : ''}>`,
+      ];
+      if (classAttr) parts.push(`class="${cleanAttrValue(classAttr)}"`);
+      if (role) parts.push(`role=${cleanAttrValue(role)}`);
+      if (ariaLabel) parts.push(`aria-label="${cleanAttrValue(ariaLabel)}"`);
+      if (dataStepId) parts.push(`data-step-id="${cleanAttrValue(dataStepId)}"`);
+      if (dataAction) parts.push(`data-action="${cleanAttrValue(dataAction)}"`);
+      if (name) parts.push(`name=${cleanAttrValue(name)}`);
+      idLines.push(parts.join(' '));
+    }
+
+    // Surface stable data-attribute selectors even when the element has no id.
+    // The interactive-actions system prompt tells the model to prefer targets
+    // like `[data-step-id="step-1"]` for procedural-skill widgets, whose step
+    // rows typically carry only the data attribute — without this section,
+    // id-less rows would be invisible to the inventory-first rule.
+    if (!id) {
+      for (const [attrName, attrValue] of [
+        ['data-step-id', dataStepId],
+        ['data-action', dataAction],
+      ] as const) {
+        if (!attrValue) continue;
+        const cleaned = cleanAttrValue(attrValue);
+        const key = `${attrName}=${cleaned}`;
+        if (seenDataAttrs.has(key)) continue;
+        if (dataAttrLines.length >= MAX_DATA_ATTRS) break;
+        seenDataAttrs.add(key);
+        dataAttrLines.push(`[${attrName}="${cleaned}"] <${tag}>`);
+      }
+    }
+
+    if (classAttr) {
+      for (const cls of classAttr.split(/\s+/).filter(Boolean)) {
+        if (!styledClasses.has(cls) && isUtilityClass(cls)) continue;
+        if (!seenClasses.has(cls) && classLines.length < MAX_CLASSES) {
+          seenClasses.add(cls);
+          classLines.push(`.${cls} <${tag}>`);
+        }
+      }
+    }
+  }
+
+  const sections: string[] = [];
+  if (idLines.length) sections.push(`Elements with id:\n${idLines.join('\n')}`);
+  if (dataAttrLines.length) sections.push(`Stable data attributes:\n${dataAttrLines.join('\n')}`);
+  if (classLines.length) sections.push(`Notable classes:\n${classLines.join('\n')}`);
+  return sections.join('\n\n');
+}
+
+/**
+ * Whitespace-collapse an attribute value and cap its length. Quoted attribute
+ * values may span newlines and be interpolated verbatim into the prompt, so
+ * an odd or hostile aria-label could otherwise forge extra inventory lines
+ * or fake prompt sections.
+ */
+const MAX_ATTR_VALUE_CHARS = 120;
+function cleanAttrValue(value: string): string {
+  const collapsed = value.replace(/\s+/g, ' ').trim();
+  return collapsed.length > MAX_ATTR_VALUE_CHARS
+    ? collapsed.substring(0, MAX_ATTR_VALUE_CHARS - 1) + '…'
+    : collapsed;
+}
+
+/**
+ * Collect class names that appear in the page's own `<style>` blocks. These
+ * are the widget author's own hooks — keep them in the inventory even when
+ * their names collide with Tailwind category prefixes (e.g. `.grid-cell` vs
+ * `grid-cols-2`, `.text-input` vs `text-lg`).
+ */
+function collectStyledClassNames(html: string): Set<string> {
+  const styled = new Set<string>();
+  const styleBlockRegex = /<style\b[^>]*>([\s\S]*?)<\/style>/gi;
+  const classNameRegex = /\.([a-zA-Z_][\w-]*)/g;
+  for (const block of html.matchAll(styleBlockRegex)) {
+    for (const m of block[1].matchAll(classNameRegex)) {
+      styled.add(m[1]);
+    }
+  }
+  return styled;
+}
+
+/**
+ * Parse the attribute string of an opening tag into a name→value map. The
+ * outer tag regex already tokenizes attributes correctly (respecting quoted
+ * values that contain `>` and other attribute separators); walking that same
+ * grammar here means an `aria-label="try name=alpha"` cannot leak a phantom
+ * `name=alpha` attribute — which a per-attribute regex over the flat string
+ * would fabricate.
+ */
+const ATTR_TOKEN_REGEX = /([a-zA-Z_:][\w:-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'<>`=]+)))?/g;
+function parseAttrs(attrs: string): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const m of attrs.matchAll(ATTR_TOKEN_REGEX)) {
+    const name = m[1].toLowerCase();
+    if (map[name] !== undefined) continue;
+    map[name] = m[2] ?? m[3] ?? m[4] ?? '';
+  }
+  return map;
+}
+
+/**
+ * Heuristic to skip Tailwind/utility class names so semantic classes survive
+ * under the inventory cap. Errs on the side of dropping — if a class name
+ * looks like a utility (color/spacing/typography/layout token), don't include
+ * it. Semantic hooks whose names collide with utility prefixes (e.g.
+ * `.grid-cell`, `.fill-blank`, `.text-input`, `.select-btn`, `.ring-carbon`)
+ * are preserved by the caller when the same class is declared in the page's
+ * own `<style>` block.
+ */
+// Common Tailwind category prefixes. Anchored with `-` so we don't match
+// e.g. `.flex-container` (semantic) — Tailwind's `flex` is bare, and its
+// modifiers are `flex-col`, `flex-1`, `flex-wrap` etc.
+const UTILITY_PREFIXES = [
+  'p-',
+  'px-',
+  'py-',
+  'pt-',
+  'pr-',
+  'pb-',
+  'pl-',
+  'm-',
+  'mx-',
+  'my-',
+  'mt-',
+  'mr-',
+  'mb-',
+  'ml-',
+  'w-',
+  'h-',
+  'min-w-',
+  'min-h-',
+  'max-w-',
+  'max-h-',
+  'text-',
+  'font-',
+  'leading-',
+  'tracking-',
+  'bg-',
+  'border-',
+  'ring-',
+  'shadow-',
+  'opacity-',
+  'rounded-',
+  'divide-',
+  'space-',
+  'gap-',
+  'grid-',
+  'col-',
+  'row-',
+  'top-',
+  'right-',
+  'bottom-',
+  'left-',
+  'inset-',
+  'z-',
+  'order-',
+  'flex-',
+  'items-',
+  'justify-',
+  'content-',
+  'self-',
+  'place-',
+  'overflow-',
+  'whitespace-',
+  'break-',
+  'transition-',
+  'duration-',
+  'ease-',
+  'delay-',
+  'animate-',
+  'translate-',
+  'rotate-',
+  'scale-',
+  'skew-',
+  'origin-',
+  'cursor-',
+  'select-',
+  'pointer-events-',
+  'accent-',
+  'caret-',
+  'fill-',
+  'stroke-',
+  'aspect-',
+];
+// Exact single-token Tailwind utilities (no dash).
+const UTILITY_EXACT = new Set([
+  'flex',
+  'grid',
+  'block',
+  'inline',
+  'inline-block',
+  'inline-flex',
+  'hidden',
+  'absolute',
+  'relative',
+  'fixed',
+  'sticky',
+  'static',
+  'container',
+  'italic',
+  'underline',
+  'uppercase',
+  'lowercase',
+  'capitalize',
+  'truncate',
+  'antialiased',
+  'subpixel-antialiased',
+  'visible',
+  'invisible',
+  'sr-only',
+  'not-sr-only',
+]);
+
+function isUtilityClass(cls: string): boolean {
+  // Responsive / state prefix (`md:`, `hover:`, `dark:foo`) → always utility.
+  if (cls.includes(':')) return true;
+  // Arbitrary-value utilities: `w-[240px]`, `text-[10px]`.
+  if (cls.includes('[')) return true;
+  if (UTILITY_PREFIXES.some((p) => cls.startsWith(p))) return true;
+  return UTILITY_EXACT.has(cls);
+}
+
+/**
  * Step 3.2: Generate Actions based on content and script
  */
 export async function generateSceneActions(
@@ -1418,6 +1700,12 @@ export async function generateSceneActions(
   if (outline.type === 'interactive' && 'html' in content) {
     const config = outline.interactiveConfig;
     const agentsText = formatAgentsForPrompt(agents);
+    // Always recompute the inventory from the current html so it matches what
+    // the tool actually reads — persisting the field would go stale relative
+    // to `postProcessInteractiveHtml` output and to any in-turn html edits.
+    const inventory =
+      (content.html ? extractInteractiveElements(content.html) : '') ||
+      '(no interactive elements detected)';
     const prompts = buildPrompt(PROMPT_IDS.INTERACTIVE_ACTIONS, {
       title: outline.title,
       keyPoints: (outline.keyPoints || []).map((p, i) => `${i + 1}. ${p}`).join('\n'),
@@ -1426,6 +1714,7 @@ export async function generateSceneActions(
       designIdea: config?.designIdea || '',
       widgetType: content.widgetType || outline.widgetType || '',
       widgetConfig: JSON.stringify(content.widgetConfig || {}),
+      elementInventory: inventory,
       courseContext: buildCourseContext(ctx),
       agents: agentsText,
       languageDirective: languageDirective || '',
