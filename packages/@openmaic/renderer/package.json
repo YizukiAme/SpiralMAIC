@@ -23,6 +23,10 @@
       "types": "./dist/snapshot/index.d.ts",
       "import": "./dist/snapshot/index.js"
     },
+    "./editing": {
+      "types": "./dist/editing/index.d.ts",
+      "import": "./dist/editing/index.js"
+    },
     "./fonts.css": "./fonts.css"
   },
   "files": [
@@ -94,6 +98,7 @@
     "@types/react-dom": "^19",
     "@types/tinycolor2": "^1.4.6",
     "rollup": "^4.35.0",
+    "rollup-plugin-preserve-directives": "^0.4.0",
     "tslib": "^2.8.0",
     "typescript": "^5"
   },
