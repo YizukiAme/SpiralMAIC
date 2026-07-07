@@ -42,6 +42,12 @@ import type { Scene, Stage } from '@/lib/types/stage';
 import { loadStageData } from '@/lib/utils/stage-storage';
 import { getCurrentModelConfig } from '@/lib/utils/model-config';
 import { useSettingsStore } from '@/lib/store/settings';
+import { useAgentRegistry } from '@/lib/orchestration/registry/store';
+import { resolveAgentVoiceOptions } from '@/lib/audio/agent-voice';
+import {
+  BROWSER_NATIVE_TTS_PROVIDER_ID,
+  isTTSProviderEnabled,
+} from '@/lib/audio/provider-enablement';
 
 interface LoadedClassroom {
   stage: Stage;
@@ -76,10 +82,19 @@ export default function RevisitChallengePage() {
   const [startedAt] = useState(() => Date.now());
   const [lastGate, setLastGate] = useState<RevisitGateDecision | null>(null);
   const transcriptRef = useRef<RevisitMessage[]>([]);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
     transcriptRef.current = messages;
   }, [messages]);
+
+  useEffect(() => {
+    return () => {
+      audioRef.current?.pause();
+      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -259,6 +274,8 @@ export default function RevisitChallengePage() {
     const decoder = new TextDecoder();
     let buffer = '';
     let gate: RevisitGateDecision | null = null;
+    const agentTextByMessageId: Record<string, string> = {};
+    const agentIdByMessageId: Record<string, string> = {};
 
     const processEvent = (event: StatelessEvent) => {
       if (event.type === 'agent_start') {
@@ -270,8 +287,12 @@ export default function RevisitChallengePage() {
           text: '',
           createdAt: Date.now(),
         };
+        agentTextByMessageId[event.data.messageId] = '';
+        agentIdByMessageId[event.data.messageId] = event.data.agentId;
         setMessages((prev) => [...prev, nextMessage]);
       } else if (event.type === 'text_delta' && event.data.messageId) {
+        agentTextByMessageId[event.data.messageId] =
+          (agentTextByMessageId[event.data.messageId] || '') + event.data.content;
         setMessages((prev) =>
           prev.map((message) =>
             message.id === event.data.messageId
@@ -279,6 +300,12 @@ export default function RevisitChallengePage() {
               : message,
           ),
         );
+      } else if (event.type === 'agent_end') {
+        const text = agentTextByMessageId[event.data.messageId]?.trim();
+        const agentId = agentIdByMessageId[event.data.messageId];
+        if (text && agentId) {
+          void playAgentSpeech(text, agentId);
+        }
       } else if (event.type === 'revisit_gate') {
         gate = event.data;
       } else if (event.type === 'done') {
@@ -305,6 +332,76 @@ export default function RevisitChallengePage() {
       }
     }
     applyGate(gate);
+  }
+
+  async function playAgentSpeech(text: string, agentId: string) {
+    const settings = useSettingsStore.getState();
+    if (!settings.ttsEnabled || settings.ttsMuted || !text.trim()) return;
+
+    if (settings.ttsProviderId === BROWSER_NATIVE_TTS_PROVIDER_ID) {
+      if (!('speechSynthesis' in window)) return;
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      if (classroom?.stage.languageDirective) {
+        utterance.lang = classroom.stage.languageDirective;
+      }
+      utterance.rate = settings.ttsSpeed;
+      utterance.volume = settings.ttsVolume;
+      window.speechSynthesis.speak(utterance);
+      return;
+    }
+
+    const providerConfig = settings.ttsProvidersConfig?.[settings.ttsProviderId];
+    if (!isTTSProviderEnabled(settings.ttsProviderId, providerConfig)) return;
+
+    try {
+      const agent = useAgentRegistry.getState().getAgent(agentId);
+      const providerOptions = await resolveAgentVoiceOptions(agent, {
+        providerId: settings.ttsProviderId,
+        providerConfig,
+        voiceId: settings.ttsVoice,
+        language: classroom?.stage.languageDirective,
+      });
+      const response = await fetch('/api/generate/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text,
+          audioId: `revisit-${Date.now()}`,
+          ttsProviderId: settings.ttsProviderId,
+          ttsModelId: providerConfig?.modelId,
+          ttsVoice: settings.ttsVoice,
+          ttsSpeed: settings.ttsSpeed,
+          ttsApiKey: providerConfig?.apiKey || undefined,
+          ttsBaseUrl: providerConfig?.baseUrl || providerConfig?.customDefaultBaseUrl || undefined,
+          ttsProviderOptions: providerOptions,
+        }),
+      });
+      if (!response.ok) return;
+      const data = (await response.json()) as {
+        success?: boolean;
+        base64?: string;
+        format?: string;
+      };
+      if (!data.success || !data.base64 || !data.format) return;
+
+      const binary = atob(data.base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      const blobUrl = URL.createObjectURL(new Blob([bytes], { type: `audio/${data.format}` }));
+      audioRef.current?.pause();
+      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = blobUrl;
+      const audio = new Audio(blobUrl);
+      audio.volume = settings.ttsVolume;
+      audio.playbackRate = settings.ttsSpeed;
+      audioRef.current = audio;
+      await audio.play();
+    } catch {
+      // Voice is helpful, not session-critical.
+    }
   }
 
   async function finishChallenge() {

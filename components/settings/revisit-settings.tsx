@@ -1,7 +1,9 @@
 'use client';
 
-import { BrainCircuit } from 'lucide-react';
+import Link from 'next/link';
+import { BrainCircuit, Map } from 'lucide-react';
 
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
@@ -82,7 +84,15 @@ export function RevisitSettings() {
       </div>
 
       <div className="space-y-3 rounded-lg border p-4">
-        <h3 className="text-sm font-semibold">{t('settings.revisit.demoArea')}</h3>
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-sm font-semibold">{t('settings.revisit.demoArea')}</h3>
+          <Button asChild variant="outline" size="sm">
+            <Link href="/revisit-goals">
+              <Map className="size-4" />
+              {t('settings.revisit.goalMap')}
+            </Link>
+          </Button>
+        </div>
         <div className="flex items-center justify-between gap-4">
           <Label htmlFor="demo-accelerated-clock">{t('settings.revisit.acceleratedClock')}</Label>
           <Switch
