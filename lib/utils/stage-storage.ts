@@ -138,6 +138,8 @@ export async function deleteStageData(stageId: string): Promise<void> {
     // Delete chat sessions and playback state
     await deleteChatSessions(stageId);
     await clearPlaybackState(stageId);
+    const { deleteRevisitStageData } = await import('@/lib/revisit/db');
+    await deleteRevisitStageData(stageId);
 
     // Sweep quiz persistence keys for each deleted scene.
     for (const sceneId of sceneIds) {

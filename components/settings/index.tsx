@@ -28,6 +28,7 @@ import {
   Mic,
   Plus,
   CreditCard,
+  BrainCircuit,
 } from 'lucide-react';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { useSettingsStore } from '@/lib/store/settings';
@@ -58,6 +59,7 @@ import { WEB_SEARCH_PROVIDERS, getWebSearchProviderDisplayName } from '@/lib/web
 import type { WebSearchProviderId } from '@/lib/web-search/types';
 import { GeneralSettings } from './general-settings';
 import { TokenPlanSettings } from './token-plan-settings';
+import { RevisitSettings } from './revisit-settings';
 import { ModelEditDialog } from './model-edit-dialog';
 import { AddProviderDialog, type NewProviderData } from './add-provider-dialog';
 import { AddAudioProviderDialog, type NewAudioProviderData } from './add-audio-provider-dialog';
@@ -567,6 +569,8 @@ export function SettingsDialog({ open, onOpenChange, initialSection }: SettingsD
         return <h2 className="text-lg font-semibold">{t('settings.systemSettings')}</h2>;
       case 'token-plan':
         return <h2 className="text-lg font-semibold">{t('settings.tokenPlan.nav')}</h2>;
+      case 'revisit':
+        return <h2 className="text-lg font-semibold">{t('settings.revisit.title')}</h2>;
       case 'providers':
         if (selectedProvider) {
           return (
@@ -768,6 +772,18 @@ export function SettingsDialog({ open, onOpenChange, initialSection }: SettingsD
             >
               <Box className="h-4 w-4 shrink-0" />
               <span className="truncate">{t('settings.providers')}</span>
+            </button>
+            <button
+              onClick={() => setActiveSection('revisit')}
+              className={cn(
+                'w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg transition-all border text-left',
+                activeSection === 'revisit'
+                  ? 'bg-primary/5 border-primary/50 shadow-sm'
+                  : 'border-transparent hover:bg-muted/50',
+              )}
+            >
+              <BrainCircuit className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="truncate">{t('settings.revisit.nav')}</span>
             </button>
 
             <button
@@ -1070,6 +1086,8 @@ export function SettingsDialog({ open, onOpenChange, initialSection }: SettingsD
               {activeSection === 'general' && <GeneralSettings />}
 
               {activeSection === 'token-plan' && <TokenPlanSettings />}
+
+              {activeSection === 'revisit' && <RevisitSettings />}
 
               {activeSection === 'providers' && selectedProvider && (
                 <ProviderConfigPanel

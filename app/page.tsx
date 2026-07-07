@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useRef, useDeferredValue } from 'react';
+import { useState, useEffect, useMemo, useRef, useDeferredValue, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -60,6 +60,11 @@ import { SpeechButton } from '@/components/audio/speech-button';
 import { useImportClassroom } from '@/lib/import/use-import-classroom';
 import { shouldShowVocationalTestUi } from '@/lib/config/feature-flags';
 import { useImportPptx } from '@/lib/import/use-import-pptx';
+import {
+  getEffectiveForgettingSpeedMultiplier,
+  loadLessonMemorySummaries,
+} from '@/lib/revisit/client';
+import type { LessonMemorySummary } from '@/lib/revisit/types';
 
 const log = createLogger('Home');
 
@@ -108,6 +113,9 @@ function HomePage() {
   // invariant). Gate generation on this single condition (state A vs B)
   // instead of inspecting modelId directly.
   const providersConfig = useSettingsStore((s) => s.providersConfig);
+  const stableSuccessesRequired = useSettingsStore((s) => s.stableSuccessesRequired);
+  const forgettingSpeedMultiplier = useSettingsStore((s) => s.forgettingSpeedMultiplier);
+  const demoAcceleratedClockEnabled = useSettingsStore((s) => s.demoAcceleratedClockEnabled);
   const hasUsableProvider = hasUsableLLMProvider(providersConfig);
   const [recentOpen, setRecentOpen] = useState(true);
   const persistRecentOpen = (next: boolean) => {
@@ -160,6 +168,7 @@ function HomePage() {
   const [themeOpen, setThemeOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [classrooms, setClassrooms] = useState<StageListItem[]>([]);
+  const [memorySummaries, setMemorySummaries] = useState<Record<string, LessonMemorySummary>>({});
   const [thumbnails, setThumbnails] = useState<Record<string, Slide>>({});
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -189,10 +198,21 @@ function HomePage() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [themeOpen]);
 
-  const loadClassrooms = async () => {
+  const loadClassrooms = useCallback(async () => {
     try {
       const list = await listStages();
       setClassrooms(list);
+      const memory = await loadLessonMemorySummaries(
+        list.map((c) => c.id),
+        {
+          forgettingSpeedMultiplier: getEffectiveForgettingSpeedMultiplier({
+            forgettingSpeedMultiplier,
+            demoAcceleratedClockEnabled,
+          }),
+          stableSuccessesRequired,
+        },
+      );
+      setMemorySummaries(memory);
       // Load first slide thumbnails
       if (list.length > 0) {
         const slides = await getFirstSlideByStages(list.map((c) => c.id));
@@ -203,7 +223,27 @@ function HomePage() {
     } catch (err) {
       log.error('Failed to load classrooms:', err);
     }
-  };
+  }, [demoAcceleratedClockEnabled, forgettingSpeedMultiplier, stableSuccessesRequired]);
+
+  useEffect(() => {
+    if (classrooms.length === 0) return;
+    let cancelled = false;
+    loadLessonMemorySummaries(
+      classrooms.map((c) => c.id),
+      {
+        forgettingSpeedMultiplier: getEffectiveForgettingSpeedMultiplier({
+          forgettingSpeedMultiplier,
+          demoAcceleratedClockEnabled,
+        }),
+        stableSuccessesRequired,
+      },
+    ).then((memory) => {
+      if (!cancelled) setMemorySummaries(memory);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [classrooms, demoAcceleratedClockEnabled, forgettingSpeedMultiplier, stableSuccessesRequired]);
 
   const { importing, fileInputRef, triggerFileSelect, handleFileChange } = useImportClassroom(
     () => {
@@ -232,7 +272,7 @@ function HomePage() {
       revokeThumbnailSlideMediaUrls(thumbnailsRef.current);
       thumbnailsRef.current = {};
     };
-  }, []);
+  }, [loadClassrooms]);
 
   const handleDelete = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -887,6 +927,7 @@ function HomePage() {
                         <ClassroomCard
                           classroom={classroom}
                           slide={thumbnails[classroom.id]}
+                          memorySummary={memorySummaries[classroom.id]}
                           formatDate={formatDate}
                           onDelete={handleDelete}
                           onRename={handleRename}
@@ -1202,6 +1243,7 @@ function GreetingBar() {
 function ClassroomCard({
   classroom,
   slide,
+  memorySummary,
   formatDate,
   onDelete,
   onRename,
@@ -1212,6 +1254,7 @@ function ClassroomCard({
 }: {
   classroom: StageListItem;
   slide?: Slide;
+  memorySummary?: LessonMemorySummary;
   formatDate: (ts: number) => string;
   onDelete: (id: string, e: React.MouseEvent) => void;
   onRename: (id: string, newName: string) => void;
@@ -1245,6 +1288,10 @@ function ClassroomCard({
   const showModeBadge = classroom.interactiveMode || isTaskEngineMode;
   const ModeBadgeIcon = isTaskEngineMode ? Sparkles : Atom;
   const modeBadgeLabel = isTaskEngineMode ? 'Vocational Mode' : t('toolbar.interactiveModeLabel');
+  const memoryLabel = memorySummary ? t(`revisit.memory.${memorySummary.status}`) : null;
+  const memoryTooltip = memorySummary?.recall
+    ? t('revisit.memory.recallPercent', { percent: Math.round(memorySummary.recall * 100) })
+    : memoryLabel;
 
   const startRename = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -1309,6 +1356,28 @@ function ClassroomCard({
               className="text-xs"
             >
               {modeBadgeLabel}
+            </TooltipContent>
+          </Tooltip>
+        )}
+
+        {memorySummary && memoryLabel && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                aria-label={memoryTooltip || memoryLabel}
+                onClick={(e) => e.stopPropagation()}
+                className="absolute bottom-2 right-2 z-10 inline-flex h-5 max-w-[70%] items-center rounded-full border px-2 text-[10px] font-semibold shadow-sm backdrop-blur-sm"
+                style={{
+                  borderColor: memorySummary.color,
+                  color: memorySummary.color,
+                  background: `color-mix(in srgb, ${memorySummary.color} 18%, transparent)`,
+                }}
+              >
+                <span className="truncate">{memoryLabel}</span>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" align="end" sideOffset={-4} className="text-xs">
+              {memoryTooltip || memoryLabel}
             </TooltipContent>
           </Tooltip>
         )}

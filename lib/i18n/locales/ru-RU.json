@@ -1628,7 +1628,20 @@
       "capabilities": "Capabilities offered",
       "offeredNote": "Models offered by this plan. Pick the ones you want on the generation bar — availability depends on your plan tier, and unsupported models will error at generation time."
     },
-    "ttsBrowserNativeTimelineNotice": "Встроенный в браузер TTS не поддерживает функции аудио на таймлайне редактора (прослушивание, повторная генерация и массовая озвучка). Переключитесь на управляемый TTS-провайдер, чтобы генерировать и управлять аудио для каждой строки."
+    "ttsBrowserNativeTimelineNotice": "Встроенный в браузер TTS не поддерживает функции аудио на таймлайне редактора (прослушивание, повторная генерация и массовая озвучка). Переключитесь на управляемый TTS-провайдер, чтобы генерировать и управлять аудио для каждой строки.",
+    "revisit": {
+      "nav": "Спиральное повторение",
+      "title": "Спиральное повторение",
+      "reverseChallenge": "Reverse Challenge",
+      "reverseChallengeDetail": "После урока можно объяснить материал AI-ученику в режиме повторения.",
+      "stableSuccesses": "Устойчиво после успехов",
+      "timesUnit": "раз",
+      "forgettingSpeed": "Скорость забывания",
+      "multiplierValue": "{{value}}x",
+      "demoArea": "Демо",
+      "acceleratedClock": "Ускоренные часы",
+      "gateSkip": "Пропуск проверок страниц"
+    }
   },
   "profile": {
     "title": "Профиль",
@@ -1660,5 +1673,14 @@
     "title": "Введите код доступа",
     "placeholder": "Код доступа",
     "error": "Неверный код доступа. Попробуйте ещё раз."
+  },
+  "revisit": {
+    "memory": {
+      "unlearned": "Не изучено",
+      "fresh": "Свежее",
+      "review": "Пора повторить",
+      "stable": "Устойчиво",
+      "recallPercent": "Память {{percent}}%"
+    }
   }
 }

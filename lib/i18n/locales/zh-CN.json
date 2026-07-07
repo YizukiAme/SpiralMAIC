@@ -1628,7 +1628,20 @@
       "capabilities": "套餐提供的能力",
       "offeredNote": "套餐提供的模型清单。请在生成界面选择需要使用的模型——是否可用取决于你的套餐档位，不支持的模型会在生成时报错。"
     },
-    "ttsBrowserNativeTimelineNotice": "浏览器内置 TTS 不支持编辑器时间轴的音频功能（试听、重新生成、全部配音）。切换到托管 TTS 提供方即可逐句生成和管理音频。"
+    "ttsBrowserNativeTimelineNotice": "浏览器内置 TTS 不支持编辑器时间轴的音频功能（试听、重新生成、全部配音）。切换到托管 TTS 提供方即可逐句生成和管理音频。",
+    "revisit": {
+      "nav": "螺旋复习",
+      "title": "螺旋复习",
+      "reverseChallenge": "Reverse Challenge",
+      "reverseChallengeDetail": "课件学完后，可进入给 AI 学生讲回去的复习挑战。",
+      "stableSuccesses": "稳定所需成功次数",
+      "timesUnit": "次",
+      "forgettingSpeed": "遗忘速度",
+      "multiplierValue": "{{value}} 倍",
+      "demoArea": "演示区",
+      "acceleratedClock": "加速时钟",
+      "gateSkip": "跳过页门控"
+    }
   },
   "profile": {
     "title": "个人资料",
@@ -1660,5 +1673,14 @@
     "title": "请输入访问码",
     "placeholder": "访问码",
     "error": "访问码错误，请重试。"
+  },
+  "revisit": {
+    "memory": {
+      "unlearned": "未学习",
+      "fresh": "记忆新鲜",
+      "review": "可以复习",
+      "stable": "已稳定",
+      "recallPercent": "记忆 {{percent}}%"
+    }
   }
 }
