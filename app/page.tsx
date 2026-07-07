@@ -23,6 +23,7 @@ import {
   Atom,
   X,
   Presentation,
+  BrainCircuit,
 } from 'lucide-react';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { LanguageSwitcher } from '@/components/language-switcher';
@@ -113,6 +114,7 @@ function HomePage() {
   // invariant). Gate generation on this single condition (state A vs B)
   // instead of inspecting modelId directly.
   const providersConfig = useSettingsStore((s) => s.providersConfig);
+  const reverseChallengeEnabled = useSettingsStore((s) => s.reverseChallengeEnabled);
   const stableSuccessesRequired = useSettingsStore((s) => s.stableSuccessesRequired);
   const forgettingSpeedMultiplier = useSettingsStore((s) => s.forgettingSpeedMultiplier);
   const demoAcceleratedClockEnabled = useSettingsStore((s) => s.demoAcceleratedClockEnabled);
@@ -935,6 +937,8 @@ function HomePage() {
                           onConfirmDelete={() => confirmDelete(classroom.id)}
                           onCancelDelete={() => setPendingDeleteId(null)}
                           onClick={() => router.push(`/classroom/${classroom.id}`)}
+                          onRevisit={() => router.push(`/classroom/${classroom.id}/revisit`)}
+                          showRevisitAction={reverseChallengeEnabled}
                         />
                       </motion.div>
                     ))}
@@ -1251,6 +1255,8 @@ function ClassroomCard({
   onConfirmDelete,
   onCancelDelete,
   onClick,
+  onRevisit,
+  showRevisitAction,
 }: {
   classroom: StageListItem;
   slide?: Slide;
@@ -1262,6 +1268,8 @@ function ClassroomCard({
   onConfirmDelete: () => void;
   onCancelDelete: () => void;
   onClick: () => void;
+  onRevisit: () => void;
+  showRevisitAction: boolean;
 }) {
   const { t } = useI18n();
   const thumbRef = useRef<HTMLDivElement>(null);
@@ -1356,6 +1364,28 @@ function ClassroomCard({
               className="text-xs"
             >
               {modeBadgeLabel}
+            </TooltipContent>
+          </Tooltip>
+        )}
+
+        {showRevisitAction && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="absolute top-2 left-2 z-10 size-7 bg-black/30 text-white opacity-0 backdrop-blur-sm transition-opacity hover:bg-black/50 hover:text-white group-hover:opacity-100"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRevisit();
+                }}
+                aria-label={t('revisit.challenge.open')}
+              >
+                <BrainCircuit className="size-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="top" align="start" sideOffset={-4} className="text-xs">
+              {t('revisit.challenge.open')}
             </TooltipContent>
           </Tooltip>
         )}

@@ -3,7 +3,8 @@
     "you": "你",
     "confirm": "确定",
     "cancel": "取消",
-    "loading": "加载中..."
+    "loading": "加载中...",
+    "back": "返回"
   },
   "revisitSpike": {
     "title": "Reverse 席位接线 Spike",
@@ -458,7 +459,8 @@
       "high": "太棒了，完美发挥！",
       "mid": "表现不错，继续加油！",
       "low": "万事开头难，回去再练练吧。"
-    }
+    },
+    "revisitInviteCta": "开始复习挑战"
   },
   "whiteboard": {
     "title": "互动白板",
@@ -1681,6 +1683,44 @@
       "review": "可以复习",
       "stable": "已稳定",
       "recallPercent": "记忆 {{percent}}%"
+    },
+    "challenge": {
+      "disabled": "反向挑战已关闭",
+      "loading": "正在加载反向挑战...",
+      "loadFailed": "无法加载本次挑战",
+      "progress": "第 {{current}} / {{total}} 页",
+      "passed": "已通过 {{count}} / {{total}} 页",
+      "previousPage": "上一页",
+      "nextPage": "下一页",
+      "skeleton": "复习骨架",
+      "teacher": "你",
+      "student": "AI 学生",
+      "assistant": "AI 助教",
+      "emptyTranscript": "准备好后，就开始讲这一页。",
+      "thinking": "学生正在思考...",
+      "teacherPlaceholder": "用自己的话把这一页讲给学生听...",
+      "send": "发送",
+      "finish": "下课",
+      "chatFailed": "学生回应失败。",
+      "judgeFailed": "报告生成失败。",
+      "report": "挑战报告",
+      "reportStrong": "记得很稳",
+      "reportNeedsWork": "需要复习",
+      "errors": "错误清单",
+      "noErrors": "没有记录到事实性错误。",
+      "dimensions": {
+        "clarity": "讲解清晰度",
+        "doubtResolution": "解疑能力",
+        "transfer": "迁移应用",
+        "errorCorrection": "纠错能力"
+      },
+      "gate": {
+        "pass": "通过",
+        "probe": "追问",
+        "rescue": "助教",
+        "fail": "重试"
+      },
+      "open": "复习挑战"
     }
   }
 }
