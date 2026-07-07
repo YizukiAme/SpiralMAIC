@@ -119,6 +119,8 @@ export const LLM_STAGES = [
   'scene-actions',
   'agent-profiles',
   'quiz-grade',
+  'revisit-blueprint',
+  'revisit-judge',
   'pbl-chat',
   'pbl-v2-runtime',
   'pbl-v2-runtime:instructor',
