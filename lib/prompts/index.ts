@@ -45,5 +45,7 @@ export const PROMPT_IDS = {
   AGENT_SYSTEM_WB_ASSISTANT: 'agent-system-wb-assistant',
   AGENT_SYSTEM_WB_STUDENT: 'agent-system-wb-student',
   DIRECTOR: 'director',
+  REVISIT_EXAM_BLUEPRINT: 'revisit-exam-blueprint',
+  REVISIT_JUDGE: 'revisit-judge',
   PBL_DESIGN: 'pbl-design',
 } as const satisfies Record<string, PromptId>;

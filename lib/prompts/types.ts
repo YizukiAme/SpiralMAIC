@@ -27,6 +27,8 @@ export type PromptId =
   | 'agent-system-wb-assistant'
   | 'agent-system-wb-student'
   | 'director'
+  | 'revisit-exam-blueprint'
+  | 'revisit-judge'
   | 'pbl-design';
 
 /**
