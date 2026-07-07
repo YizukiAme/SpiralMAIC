@@ -1642,7 +1642,8 @@
       "multiplierValue": "{{value}}x",
       "demoArea": "데모",
       "acceleratedClock": "가속 시계",
-      "gateSkip": "페이지 게이트 건너뛰기"
+      "gateSkip": "페이지 게이트 건너뛰기",
+      "goalMap": "Goal map"
     }
   },
   "profile": {
@@ -1721,6 +1722,20 @@
         "fail": "Retry"
       },
       "open": "Review challenge"
+    },
+    "goalMap": {
+      "demoBadge": "Demo",
+      "kicker": "Goal mode",
+      "title": "Fallacy Review Map",
+      "subtitle": "A static goal-mode preview using the same memory colors as real classrooms.",
+      "openDemoCourse": "Open classrooms",
+      "locked": "Locked",
+      "nodes": {
+        "basics": "Recognize common fallacies",
+        "causal": "Causal traps",
+        "choiceTraps": "False choices and slippery slopes",
+        "mastery": "Teach a live debate"
+      }
     }
   }
 }

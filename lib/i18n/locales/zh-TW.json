@@ -1626,7 +1626,8 @@
       "multiplierValue": "{{value}} 倍",
       "demoArea": "展示區",
       "acceleratedClock": "加速時鐘",
-      "gateSkip": "跳過頁面門控"
+      "gateSkip": "跳過頁面門控",
+      "goalMap": "目标地图"
     }
   },
   "profile": {
@@ -1721,6 +1722,20 @@
         "fail": "重试"
       },
       "open": "复习挑战"
+    },
+    "goalMap": {
+      "demoBadge": "演示",
+      "kicker": "目标模式",
+      "title": "谬误复习地图",
+      "subtitle": "静态目标模式预览，节点颜色使用和真实课件相同的记忆公式。",
+      "openDemoCourse": "打开课件列表",
+      "locked": "未解锁",
+      "nodes": {
+        "basics": "识别常见谬误",
+        "causal": "因果陷阱",
+        "choiceTraps": "虚假选择与滑坡",
+        "mastery": "讲解一场真实辩论"
+      }
     }
   }
 }

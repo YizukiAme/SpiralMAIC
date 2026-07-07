@@ -1,0 +1,81 @@
+[
+  {
+    "case_id": "fallacy-teachback-stability",
+    "description": "The same non-formal-fallacy teach-back should receive stable q and dimension scores across repeated judging runs.",
+    "repetitions": 2,
+    "maxQDelta": 0.08,
+    "maxDimensionDelta": 0.12,
+    "languageDirective": "zh-CN",
+    "blueprint": {
+      "id": "demo-fallacy:stable",
+      "stageId": "demo-fallacy",
+      "generatedAt": 1793808000000,
+      "language": "zh-CN",
+      "sourceHash": "stable",
+      "concepts": [
+        {
+          "id": "straw-man",
+          "label": "稻草人谬误",
+          "summary": "把对方观点替换成更弱版本后再攻击。",
+          "anchors": {
+            "clarity": ["区分真实主张与被弱化后的主张"],
+            "doubtResolution": ["能回答为什么这不是直接反驳"],
+            "transfer": ["能识别新的稻草人例子"],
+            "errorCorrection": ["能修正把类比误判成稻草人的说法"]
+          },
+          "probes": [
+            {
+              "id": "p-straw-transfer",
+              "conceptId": "straw-man",
+              "pageIndex": 0,
+              "kind": "transfer",
+              "prompt": "如果有人说“你支持减少作业就是不想学习”，这是不是稻草人？为什么？"
+            }
+          ]
+        }
+      ],
+      "skeleton": {
+        "pages": [
+          {
+            "id": "page-01",
+            "title": "识别稻草人",
+            "summary": "讲清真实主张、弱化主张、攻击对象三者的差别。",
+            "conceptIds": ["straw-man"],
+            "cues": ["真实主张", "弱化版本", "攻击对象"]
+          }
+        ]
+      }
+    },
+    "transcript": [
+      {
+        "id": "m1",
+        "role": "teacher",
+        "text": "稻草人谬误不是回答原来的观点，而是先把对方观点改成一个更夸张、更容易攻击的版本。比如对方只是说减少一点作业，你却说他完全不想学习，这就是换了靶子。",
+        "createdAt": 1793808001000
+      },
+      {
+        "id": "m2",
+        "role": "student",
+        "agentId": "default-4",
+        "agentName": "好奇宝宝",
+        "text": "那它和普通反驳最大的区别是什么？",
+        "createdAt": 1793808002000
+      },
+      {
+        "id": "m3",
+        "role": "teacher",
+        "text": "普通反驳会抓住原话来回应；稻草人是先歪曲原话，再攻击歪曲后的版本。所以判断时要问：他打的是原观点，还是被改弱的观点？",
+        "createdAt": 1793808003000
+      }
+    ],
+    "pageReports": [
+      {
+        "pageId": "page-01",
+        "pageIndex": 0,
+        "passed": true,
+        "probeCount": 1,
+        "conceptIds": ["straw-man"]
+      }
+    ]
+  }
+]
