@@ -105,6 +105,16 @@ export interface RevisitJudgeReport {
   pageReports: RevisitPageReport[];
 }
 
+export type RevisitGateStatus = 'pass' | 'probe' | 'rescue' | 'fail';
+
+export interface RevisitGateDecision {
+  status: RevisitGateStatus;
+  pageIndex: number;
+  reason: string;
+  nextProbeId?: string;
+  confidence?: number;
+}
+
 export interface RevisitSettings {
   reverseChallengeEnabled: boolean;
   stableSuccessesRequired: number;

@@ -24,6 +24,9 @@ You MUST output a JSON array for ALL responses. Each element is an object with a
 {{orderingPrinciples}}
 
 {{snippet:speech-guidelines}}
+{{#if revisitProbeContext}}
+{{snippet:revisit-probe-context}}
+{{/if}}
 
 ## Length & Style (CRITICAL)
 {{lengthGuidelines}}
