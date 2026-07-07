@@ -5,6 +5,25 @@
     "cancel": "取消",
     "loading": "加载中..."
   },
+  "revisitSpike": {
+    "title": "Reverse 席位接线 Spike",
+    "subtitle": "SpiralMAIC Reverse Challenge 的单轮 teacher 席位接线检查。",
+    "teacherLabel": "用户老师发言",
+    "teacherPlaceholder": "像老师一样讲一个概念...",
+    "run": "运行 Spike",
+    "running": "运行中",
+    "currentModel": "模型：{{model}}",
+    "statusIdle": "待运行",
+    "statusRunning": "运行中",
+    "statusSuccess": "学生已回应",
+    "statusFailure": "需要检查",
+    "studentResponse": "AI 学生回应",
+    "eventLog": "事件流",
+    "noResponse": "还没有学生回应。",
+    "noEvents": "暂无事件。",
+    "missingModelConfig": "请先配置可用的对话模型再运行 spike。",
+    "requestFailed": "席位接线请求失败"
+  },
   "home": {
     "slogan": "Generative Learning in Multi-Agent Interactive Classroom",
     "greetingWithName": "嗨，{{name}}"

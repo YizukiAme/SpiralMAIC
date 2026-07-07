@@ -5,6 +5,25 @@
     "cancel": "Отмена",
     "loading": "Загрузка..."
   },
+  "revisitSpike": {
+    "title": "Revisit Seat Spike",
+    "subtitle": "One-turn teacher seat wiring check for SpiralMAIC reverse challenge.",
+    "teacherLabel": "Teacher utterance",
+    "teacherPlaceholder": "Explain one concept as the human teacher...",
+    "run": "Run spike",
+    "running": "Running",
+    "currentModel": "Model: {{model}}",
+    "statusIdle": "Idle",
+    "statusRunning": "Running",
+    "statusSuccess": "Student responded",
+    "statusFailure": "Needs attention",
+    "studentResponse": "AI student response",
+    "eventLog": "Event log",
+    "noResponse": "No student response yet.",
+    "noEvents": "No events yet.",
+    "missingModelConfig": "Configure a usable chat model before running the spike.",
+    "requestFailed": "Seat spike request failed"
+  },
   "home": {
     "slogan": "Generative Learning in Multi-Agent Interactive Classroom",
     "greetingWithName": "Привет, {{name}}"
