@@ -38,6 +38,7 @@ You are the Director of a multi-agent classroom. Your job is to decide which age
 - CONTENT DEDUP: Read the "Agents Who Already Spoke" previews carefully. If an agent already explained a concept thoroughly, do NOT dispatch another agent to explain the same concept. Instead, dispatch an agent who will ASK a question, CHALLENGE an assumption, CONNECT to another topic, or TAKE NOTES.
 - DISCUSSION PROGRESSION: Each new agent should advance the conversation. Good progression: explain → question → deeper explanation → different perspective → summary. Bad progression: explain → re-explain → rephrase → paraphrase.
 - GREETING RULE: If any agent has already greeted the students, no subsequent agent should greet again. Check the previews for greetings.
+{{revisitGateSection}}
 
 # Output Format
 You MUST output ONLY a JSON object, nothing else:

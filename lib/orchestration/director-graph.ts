@@ -56,6 +56,8 @@ const OrchestratorState = Annotation.Root({
   languageModel: Annotation<LanguageModel>,
   thinkingConfig: Annotation<ThinkingConfig | null>,
   discussionContext: Annotation<{ topic: string; prompt?: string } | null>,
+  revisitProbeContext: Annotation<string | null>,
+  revisitGateContext: Annotation<string | null>,
   triggerAgentId: Annotation<string | null>,
   userProfile: Annotation<{ nickname?: string; bio?: string } | null>,
   /** Request-scoped agent configs for generated agents (not in the default registry) */
@@ -171,6 +173,7 @@ async function directorNode(
     state.whiteboardLedger,
     state.userProfile || undefined,
     state.storeState.whiteboardOpen,
+    state.revisitGateContext,
   );
 
   const adapter = new AISdkLangGraphAdapter(state.languageModel, state.thinkingConfig ?? undefined);
@@ -185,6 +188,9 @@ async function directorNode(
     log.info(`[Director] Raw decision: ${content}`);
 
     const decision = parseDirectorDecision(content);
+    if (decision.revisitGate) {
+      write({ type: 'revisit_gate', data: decision.revisitGate });
+    }
 
     if (decision.shouldEnd || !decision.nextAgentId) {
       log.info('[Director] Decision: END');
@@ -283,6 +289,7 @@ async function runAgentGeneration(
     state.whiteboardLedger,
     state.userProfile || undefined,
     state.agentResponses,
+    state.revisitProbeContext || undefined,
   );
   const openaiMessages = convertMessagesToOpenAI(state.messages, agentId);
   const adapter = new AISdkLangGraphAdapter(state.languageModel, state.thinkingConfig ?? undefined);
@@ -535,6 +542,8 @@ export function buildInitialState(
     languageModel,
     thinkingConfig: thinkingConfig ?? null,
     discussionContext,
+    revisitProbeContext: request.config.revisitProbeContext || null,
+    revisitGateContext: request.config.revisitGateContext || null,
     triggerAgentId: request.config.triggerAgentId || null,
     userProfile: request.userProfile || null,
     agentConfigOverrides,

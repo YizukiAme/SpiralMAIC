@@ -7,6 +7,7 @@
 
 import type { UIMessage } from 'ai';
 import type { ThinkingConfig } from './provider';
+import type { RevisitGateDecision } from '@/lib/revisit/types';
 
 // Session Types
 export type SessionType = 'qa' | 'discussion' | 'lecture';
@@ -269,6 +270,10 @@ export interface StatelessChatRequest {
     discussionTopic?: string;
     /** Discussion prompt (for agent-initiated discussions) */
     discussionPrompt?: string;
+    /** Optional reverse-teaching probe context injected through prompt snippets */
+    revisitProbeContext?: string;
+    /** Optional reverse-teaching gate context for the director's existing route call */
+    revisitGateContext?: string;
     /** Which agent should speak first in a discussion */
     triggerAgentId?: string;
     /** Full agent configs for generated (non-default) agents that aren't in the server-side registry */
@@ -350,6 +355,7 @@ export type StatelessEvent =
       data: { stage: 'director' | 'agent_loading'; agentId?: string };
     }
   | { type: 'cue_user'; data: { fromAgentId?: string; prompt?: string } }
+  | { type: 'revisit_gate'; data: RevisitGateDecision }
   | {
       type: 'done';
       data: {

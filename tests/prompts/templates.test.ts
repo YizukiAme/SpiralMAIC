@@ -146,6 +146,21 @@ describe('role dispatch', () => {
     const out = buildStructuredPrompt(studentAgent, slideState);
     expect(out).toContain('Whiteboard — Student Role');
   });
+
+  test('student prompt can inject reverse-teaching probe context by snippet', () => {
+    const studentAgent: AgentConfig = { ...baseAgent, role: 'student' };
+    const out = buildStructuredPrompt(
+      studentAgent,
+      slideState,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'Candidate probes: [p1] Why does this matter?',
+    );
+    expect(out).toContain('Reverse Teaching Challenge');
+    expect(out).toContain('Candidate probes: [p1] Why does this matter?');
+  });
 });
 
 describe('scene-type action stripping', () => {
@@ -214,6 +229,24 @@ describe('director routing contract', () => {
     expect(out).toContain('# Discussion Mode');
     expect(out).toContain('Force decomposition');
     expect(out).toContain('student_1');
+  });
+
+  test('director prompt inserts reverse gate section when provided', () => {
+    const out = buildDirectorPrompt(
+      [baseAgent],
+      'No history',
+      [],
+      0,
+      null,
+      null,
+      [],
+      undefined,
+      false,
+      'page_index: 0\nlatest_teacher_turn: example',
+    );
+    expect(out).toContain('Reverse Teaching Gate');
+    expect(out).toContain('"revisit_gate"');
+    expect(out).not.toMatch(UNRESOLVED_PLACEHOLDER);
   });
 });
 

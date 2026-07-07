@@ -127,6 +127,7 @@ export function buildStructuredPrompt(
   whiteboardLedger?: WhiteboardActionRecord[],
   userProfile?: { nickname?: string; bio?: string },
   agentResponses?: AgentTurnSummary[],
+  revisitProbeContext?: string,
 ): string {
   // Determine current scene type for action filtering
   const currentScene = storeState.currentSceneId
@@ -155,6 +156,7 @@ export function buildStructuredPrompt(
     lengthGuidelines: buildLengthGuidelines(agentConfig.role),
     whiteboardGuidelines: buildWhiteboardGuidelines(agentConfig.role),
     discussionContextSection: buildDiscussionContextSection(discussionContext, agentResponses),
+    revisitProbeContext,
   };
 
   const prompt = buildPrompt(PROMPT_IDS.AGENT_SYSTEM, vars);

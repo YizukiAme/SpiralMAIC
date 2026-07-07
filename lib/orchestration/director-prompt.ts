@@ -9,6 +9,7 @@ import type { AgentConfig } from '@/lib/orchestration/registry/types';
 import { createLogger } from '@/lib/logger';
 import { buildPrompt, PROMPT_IDS } from '@/lib/prompts';
 import type { WhiteboardActionRecord, AgentTurnSummary } from './types';
+import type { RevisitGateDecision, RevisitGateStatus } from '@/lib/revisit/types';
 
 const log = createLogger('DirectorPrompt');
 
@@ -30,6 +31,7 @@ export function buildDirectorPrompt(
   whiteboardLedger?: WhiteboardActionRecord[],
   userProfile?: { nickname?: string; bio?: string },
   whiteboardOpen?: boolean,
+  revisitGateContext?: string | null,
 ): string {
   const agentList = agents
     .map((a) => `- id: "${a.id}", name: "${a.name}", role: ${a.role}, priority: ${a.priority}`)
@@ -74,6 +76,7 @@ ${userProfile.bio ? `Background: ${userProfile.bio}` : ''}
     discussionSection,
     whiteboardSection: buildWhiteboardStateForDirector(whiteboardLedger),
     studentProfileSection,
+    revisitGateSection: buildRevisitGateSection(revisitGateContext),
     rule1,
     turnCountPlusOne: turnCount + 1,
     whiteboardOpenText: whiteboardOpen
@@ -86,6 +89,28 @@ ${userProfile.bio ? `Background: ${userProfile.bio}` : ''}
     throw new Error('director prompt template failed to load');
   }
   return prompt.system;
+}
+
+function buildRevisitGateSection(revisitGateContext?: string | null): string {
+  if (!revisitGateContext) return '';
+  return `
+# Reverse Teaching Gate
+This reverse-teaching challenge overrides the normal human-student Q&A routing rule. The latest human turn is a teacher attempt, not a student question.
+
+Evaluate whether the human teacher has sufficiently taught the current page, then choose the next speaker from the available AI student/assistant agents.
+
+Gate status:
+- "pass": the teacher covered the page well enough; choose an AI student for a brief acknowledgment or choose END.
+- "probe": one short student probe should be asked.
+- "rescue": the teacher is stuck or has reached the page probe cap; choose the assistant.
+- "fail": the page still has material issues, but a rescue is not yet needed.
+
+Context:
+${revisitGateContext}
+
+When this section is present, output the normal next_agent field and include:
+"revisit_gate":{"status":"pass|probe|rescue|fail","page_index":0,"reason":"brief reason","next_probe_id":"optional probe id","confidence":0.0}
+`;
 }
 
 /**
@@ -216,6 +241,7 @@ Contributors: ${contributors.length > 0 ? contributors.join(', ') : 'none'}${cro
 export function parseDirectorDecision(content: string): {
   nextAgentId: string | null;
   shouldEnd: boolean;
+  revisitGate?: RevisitGateDecision;
 } {
   try {
     // Try to extract JSON from the response
@@ -225,10 +251,18 @@ export function parseDirectorDecision(content: string): {
       const nextAgent = parsed.next_agent;
 
       if (!nextAgent || nextAgent === 'END') {
-        return { nextAgentId: null, shouldEnd: true };
+        return {
+          nextAgentId: null,
+          shouldEnd: true,
+          revisitGate: normalizeRevisitGateDecision(parsed.revisit_gate),
+        };
       }
 
-      return { nextAgentId: nextAgent, shouldEnd: false };
+      return {
+        nextAgentId: nextAgent,
+        shouldEnd: false,
+        revisitGate: normalizeRevisitGateDecision(parsed.revisit_gate),
+      };
     }
   } catch (_e) {
     log.warn('[Director] Failed to parse decision:', content.slice(0, 200));
@@ -236,4 +270,30 @@ export function parseDirectorDecision(content: string): {
 
   // Default: end the round if we can't parse
   return { nextAgentId: null, shouldEnd: true };
+}
+
+function normalizeRevisitGateDecision(raw: unknown): RevisitGateDecision | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const record = raw as Record<string, unknown>;
+  const status = record.status;
+  if (!isRevisitGateStatus(status)) return undefined;
+  const pageIndex = Number(record.page_index ?? record.pageIndex ?? 0);
+  const confidence = Number(record.confidence);
+
+  return {
+    status,
+    pageIndex: Number.isFinite(pageIndex) ? Math.max(0, Math.floor(pageIndex)) : 0,
+    reason: String(record.reason || ''),
+    nextProbeId:
+      typeof record.next_probe_id === 'string'
+        ? record.next_probe_id
+        : typeof record.nextProbeId === 'string'
+          ? record.nextProbeId
+          : undefined,
+    confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : undefined,
+  };
+}
+
+function isRevisitGateStatus(value: unknown): value is RevisitGateStatus {
+  return value === 'pass' || value === 'probe' || value === 'rescue' || value === 'fail';
 }
