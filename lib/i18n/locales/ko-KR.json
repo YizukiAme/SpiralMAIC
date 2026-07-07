@@ -3,7 +3,8 @@
     "you": "나",
     "confirm": "확인",
     "cancel": "취소",
-    "loading": "로딩 중..."
+    "loading": "로딩 중...",
+    "back": "Back"
   },
   "revisitSpike": {
     "title": "Revisit Seat Spike",
@@ -458,7 +459,8 @@
       "high": "훌륭합니다 — 완벽하게 해내셨어요!",
       "mid": "잘하셨어요 — 계속 이대로 나아가세요.",
       "low": "좋은 시작입니다 — 복습하고 다시 도전해 보세요."
-    }
+    },
+    "revisitInviteCta": "Start review challenge"
   },
   "whiteboard": {
     "title": "인터랙티브 화이트보드",
@@ -1681,6 +1683,44 @@
       "review": "복습 가능",
       "stable": "안정",
       "recallPercent": "기억 {{percent}}%"
+    },
+    "challenge": {
+      "disabled": "Reverse Challenge is off",
+      "loading": "Loading reverse challenge...",
+      "loadFailed": "Could not load this challenge",
+      "progress": "Page {{current}} / {{total}}",
+      "passed": "{{count}} / {{total}} passed",
+      "previousPage": "Previous page",
+      "nextPage": "Next page",
+      "skeleton": "Review skeleton",
+      "teacher": "You",
+      "student": "AI student",
+      "assistant": "AI assistant",
+      "emptyTranscript": "Start teaching this page when you are ready.",
+      "thinking": "Student is thinking...",
+      "teacherPlaceholder": "Teach this page in your own words...",
+      "send": "Send",
+      "finish": "Dismiss class",
+      "chatFailed": "The student response failed.",
+      "judgeFailed": "The report could not be generated.",
+      "report": "Challenge report",
+      "reportStrong": "Strong recall",
+      "reportNeedsWork": "Needs review",
+      "errors": "Error list",
+      "noErrors": "No factual errors recorded.",
+      "dimensions": {
+        "clarity": "Clarity",
+        "doubtResolution": "Doubt resolution",
+        "transfer": "Transfer",
+        "errorCorrection": "Error correction"
+      },
+      "gate": {
+        "pass": "Passed",
+        "probe": "Probe",
+        "rescue": "Assistant",
+        "fail": "Retry"
+      },
+      "open": "Review challenge"
     }
   }
 }

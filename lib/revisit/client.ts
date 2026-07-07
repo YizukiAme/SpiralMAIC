@@ -1,12 +1,20 @@
 import type { Scene, Stage } from '@/lib/types/stage';
-import type { LessonMemorySummary, RevisitExamBlueprint } from '@/lib/revisit/types';
+import type {
+  LessonMemorySummary,
+  RevisitExamBlueprint,
+  RevisitJudgeReport,
+  RevisitPageReport,
+} from '@/lib/revisit/types';
 import { createFallbackBlueprint } from '@/lib/revisit/blueprint';
 import {
   getConceptStates,
   getLatestExamBlueprint,
+  saveEvidenceAndUpdateState,
   saveBlueprintAndInitializeState,
 } from '@/lib/revisit/db';
+import { normalizeJudgeReport } from '@/lib/revisit/judge';
 import { computeLessonMemory } from '@/lib/revisit/memory';
+import type { RevisitMessage } from '@/lib/revisit/session';
 import { getCurrentModelConfig } from '@/lib/utils/model-config';
 
 const DEMO_ACCELERATED_CLOCK_MULTIPLIER = 1440;
@@ -94,6 +102,50 @@ export async function markPlaybackCompleteForRevisit(args: {
   });
 }
 
+export async function submitRevisitAttempt(args: {
+  attemptId: string;
+  stage: Stage;
+  blueprint: RevisitExamBlueprint;
+  transcript: RevisitMessage[];
+  pageReports: RevisitPageReport[];
+  stableSuccessesRequired: number;
+  forgettingSpeedMultiplier: number;
+  modelConfig?: ModelConfig;
+}): Promise<RevisitJudgeReport> {
+  const modelConfig = args.modelConfig ?? getCurrentModelConfig();
+  const canCallModel =
+    !modelConfig.requiresApiKey || modelConfig.isServerConfigured || modelConfig.apiKey;
+
+  const report = canCallModel
+    ? await requestJudgeFromApi({
+        attemptId: args.attemptId,
+        stage: args.stage,
+        blueprint: args.blueprint,
+        transcript: args.transcript,
+        pageReports: args.pageReports,
+        modelConfig,
+      }).catch(() =>
+        createLocalJudgeReport({
+          attemptId: args.attemptId,
+          stageId: args.stage.id,
+          blueprint: args.blueprint,
+          pageReports: args.pageReports,
+        }),
+      )
+    : createLocalJudgeReport({
+        attemptId: args.attemptId,
+        stageId: args.stage.id,
+        blueprint: args.blueprint,
+        pageReports: args.pageReports,
+      });
+
+  await saveEvidenceAndUpdateState(report, {
+    stableSuccessesRequired: args.stableSuccessesRequired,
+    forgettingSpeedMultiplier: args.forgettingSpeedMultiplier,
+  });
+  return report;
+}
+
 async function requestBlueprintFromApi(
   stage: Stage,
   scenes: Scene[],
@@ -127,4 +179,94 @@ async function requestBlueprintFromApi(
     throw new Error('Blueprint response missing blueprint');
   }
   return data.blueprint;
+}
+
+async function requestJudgeFromApi(args: {
+  attemptId: string;
+  stage: Stage;
+  blueprint: RevisitExamBlueprint;
+  transcript: RevisitMessage[];
+  pageReports: RevisitPageReport[];
+  modelConfig: ModelConfig;
+}): Promise<RevisitJudgeReport> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'x-model': args.modelConfig.modelString,
+    'x-api-key': args.modelConfig.apiKey,
+  };
+  if (args.modelConfig.baseUrl) headers['x-base-url'] = args.modelConfig.baseUrl;
+  if (args.modelConfig.providerType) headers['x-provider-type'] = args.modelConfig.providerType;
+
+  const response = await fetch('/api/revisit/judge', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      attemptId: args.attemptId,
+      stageId: args.stage.id,
+      blueprint: args.blueprint,
+      transcript: args.transcript,
+      pageReports: args.pageReports,
+      languageDirective: args.stage.languageDirective,
+      ...(args.modelConfig.thinkingConfig
+        ? { thinkingConfig: args.modelConfig.thinkingConfig }
+        : {}),
+    }),
+  });
+
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const data = (await response.json()) as {
+    success?: boolean;
+    report?: RevisitJudgeReport;
+  };
+  if (!data.success || !data.report) {
+    throw new Error('Judge response missing report');
+  }
+  return data.report;
+}
+
+function createLocalJudgeReport(args: {
+  attemptId: string;
+  stageId: string;
+  blueprint: RevisitExamBlueprint;
+  pageReports: RevisitPageReport[];
+}): RevisitJudgeReport {
+  const completedAt = Date.now();
+  const passedPageIds = new Set(
+    args.pageReports.filter((report) => report.passed).map((report) => report.pageId),
+  );
+  const passedRatio =
+    args.pageReports.length > 0 ? passedPageIds.size / args.pageReports.length : 0.5;
+  const score = Math.max(0.35, Math.min(0.9, 0.45 + passedRatio * 0.4));
+
+  return normalizeJudgeReport({
+    attemptId: args.attemptId,
+    stageId: args.stageId,
+    completedAt,
+    summary: 'Local fallback report generated from page gate results.',
+    dimensions: {
+      clarity: score,
+      doubtResolution: score,
+      transfer: Math.max(0.35, score - 0.05),
+      errorCorrection: Math.max(0.35, score - 0.08),
+    },
+    conceptScores: args.blueprint.concepts.map((concept) => {
+      const relatedPages = args.blueprint.skeleton.pages.filter((page) =>
+        page.conceptIds.includes(concept.id),
+      );
+      const relatedPassed = relatedPages.some((page) => passedPageIds.has(page.id));
+      const conceptScore = relatedPassed ? score : Math.max(0.25, score - 0.2);
+      return {
+        conceptId: concept.id,
+        scores: {
+          clarity: conceptScore,
+          doubtResolution: conceptScore,
+          transfer: Math.max(0.25, conceptScore - 0.05),
+          errorCorrection: Math.max(0.25, conceptScore - 0.08),
+        },
+        notes: concept.summary,
+      };
+    }),
+    errors: [],
+    pageReports: args.pageReports,
+  });
 }

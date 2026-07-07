@@ -3,7 +3,8 @@
     "you": "Вы",
     "confirm": "Подтвердить",
     "cancel": "Отмена",
-    "loading": "Загрузка..."
+    "loading": "Загрузка...",
+    "back": "Back"
   },
   "revisitSpike": {
     "title": "Revisit Seat Spike",
@@ -458,7 +459,8 @@
       "high": "Отлично — вы справились!",
       "mid": "Хорошая работа — продолжайте.",
       "low": "Неплохое начало — повторите ещё раз."
-    }
+    },
+    "revisitInviteCta": "Start review challenge"
   },
   "whiteboard": {
     "title": "Интерактивная доска",
@@ -1681,6 +1683,44 @@
       "review": "Пора повторить",
       "stable": "Устойчиво",
       "recallPercent": "Память {{percent}}%"
+    },
+    "challenge": {
+      "disabled": "Reverse Challenge is off",
+      "loading": "Loading reverse challenge...",
+      "loadFailed": "Could not load this challenge",
+      "progress": "Page {{current}} / {{total}}",
+      "passed": "{{count}} / {{total}} passed",
+      "previousPage": "Previous page",
+      "nextPage": "Next page",
+      "skeleton": "Review skeleton",
+      "teacher": "You",
+      "student": "AI student",
+      "assistant": "AI assistant",
+      "emptyTranscript": "Start teaching this page when you are ready.",
+      "thinking": "Student is thinking...",
+      "teacherPlaceholder": "Teach this page in your own words...",
+      "send": "Send",
+      "finish": "Dismiss class",
+      "chatFailed": "The student response failed.",
+      "judgeFailed": "The report could not be generated.",
+      "report": "Challenge report",
+      "reportStrong": "Strong recall",
+      "reportNeedsWork": "Needs review",
+      "errors": "Error list",
+      "noErrors": "No factual errors recorded.",
+      "dimensions": {
+        "clarity": "Clarity",
+        "doubtResolution": "Doubt resolution",
+        "transfer": "Transfer",
+        "errorCorrection": "Error correction"
+      },
+      "gate": {
+        "pass": "Passed",
+        "probe": "Probe",
+        "rescue": "Assistant",
+        "fail": "Retry"
+      },
+      "open": "Review challenge"
     }
   }
 }
