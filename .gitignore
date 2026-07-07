@@ -74,6 +74,9 @@ next-env.d.ts
 
 # docs
 /docs
+
+# SpiralMAIC private planning docs
+/community/spiralmaic/
 # Eval results
 eval/whiteboard-layout/results/
 eval/outline-language/results/
