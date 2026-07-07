@@ -163,6 +163,13 @@ export interface SettingsState {
   videoGenerationEnabled: boolean;
   reviewOutlineEnabled: boolean;
 
+  // SpiralMAIC revisit settings
+  reverseChallengeEnabled: boolean;
+  stableSuccessesRequired: number;
+  forgettingSpeedMultiplier: number;
+  demoAcceleratedClockEnabled: boolean;
+  demoGateSkipEnabled: boolean;
+
   // Web Search settings
   webSearchProviderId: WebSearchProviderId;
   webSearchProvidersConfig: Record<
@@ -336,6 +343,13 @@ export interface SettingsState {
   setImageGenerationEnabled: (enabled: boolean) => void;
   setVideoGenerationEnabled: (enabled: boolean) => void;
   setReviewOutlineEnabled: (enabled: boolean) => void;
+
+  // SpiralMAIC revisit actions
+  setReverseChallengeEnabled: (enabled: boolean) => void;
+  setStableSuccessesRequired: (count: number) => void;
+  setForgettingSpeedMultiplier: (multiplier: number) => void;
+  setDemoAcceleratedClockEnabled: (enabled: boolean) => void;
+  setDemoGateSkipEnabled: (enabled: boolean) => void;
 
   // Web Search actions
   setWebSearchProvider: (providerId: WebSearchProviderId) => void;
@@ -893,6 +907,13 @@ export const useSettingsStore = create<SettingsState>()(
         videoGenerationEnabled: false,
         reviewOutlineEnabled: false,
 
+        // SpiralMAIC revisit defaults
+        reverseChallengeEnabled: true,
+        stableSuccessesRequired: 2,
+        forgettingSpeedMultiplier: 1,
+        demoAcceleratedClockEnabled: false,
+        demoGateSkipEnabled: false,
+
         // TTS is OFF by default; auto-enabled on first server-sync when a TTS
         // provider is configured (mirrors image/video). Fresh installs with no
         // provider stay off and show an "enable browser-native" CTA (#665).
@@ -1233,6 +1254,18 @@ export const useSettingsStore = create<SettingsState>()(
           set({ videoGenerationEnabled: enabled });
         },
         setReviewOutlineEnabled: (enabled) => set({ reviewOutlineEnabled: enabled }),
+        setReverseChallengeEnabled: (enabled) => set({ reverseChallengeEnabled: enabled }),
+        setStableSuccessesRequired: (count) =>
+          set({ stableSuccessesRequired: Math.max(1, Math.min(12, Math.round(count))) }),
+        setForgettingSpeedMultiplier: (multiplier) =>
+          set({
+            forgettingSpeedMultiplier: Math.max(
+              0.1,
+              Math.min(60, Number.isFinite(multiplier) ? multiplier : 1),
+            ),
+          }),
+        setDemoAcceleratedClockEnabled: (enabled) => set({ demoAcceleratedClockEnabled: enabled }),
+        setDemoGateSkipEnabled: (enabled) => set({ demoGateSkipEnabled: enabled }),
         setTTSEnabled: (enabled) => set({ ttsEnabled: enabled }),
         setASREnabled: (enabled) => set({ asrEnabled: enabled }),
 
@@ -1905,6 +1938,21 @@ export const useSettingsStore = create<SettingsState>()(
         }
         if (state.reviewOutlineEnabled === undefined) {
           state.reviewOutlineEnabled = false;
+        }
+        if ((state as Record<string, unknown>).reverseChallengeEnabled === undefined) {
+          (state as Record<string, unknown>).reverseChallengeEnabled = true;
+        }
+        if ((state as Record<string, unknown>).stableSuccessesRequired === undefined) {
+          (state as Record<string, unknown>).stableSuccessesRequired = 2;
+        }
+        if ((state as Record<string, unknown>).forgettingSpeedMultiplier === undefined) {
+          (state as Record<string, unknown>).forgettingSpeedMultiplier = 1;
+        }
+        if ((state as Record<string, unknown>).demoAcceleratedClockEnabled === undefined) {
+          (state as Record<string, unknown>).demoAcceleratedClockEnabled = false;
+        }
+        if ((state as Record<string, unknown>).demoGateSkipEnabled === undefined) {
+          (state as Record<string, unknown>).demoGateSkipEnabled = false;
         }
 
         // Add default audio toggles if missing. TTS defaults OFF (opt-in / CTA);

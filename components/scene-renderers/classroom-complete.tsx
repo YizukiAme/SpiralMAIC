@@ -9,6 +9,7 @@ import { useStageStore } from '@/lib/store';
 import type { Scene, SceneType } from '@/lib/types/stage';
 import { summarizeScenes } from '@/lib/classroom/complete-summary';
 import { readAnswersForSummary } from '@/lib/quiz/persistence';
+import { markPlaybackCompleteForRevisit } from '@/lib/revisit/client';
 
 const SCENE_TYPE_ICONS: Record<SceneType, typeof FileText> = {
   slide: FileText,
@@ -499,5 +500,11 @@ export function ClassroomCompletePage({ scenes, title }: ClassroomCompletePagePr
 export function ClassroomCompletePageConnected() {
   const stage = useStageStore((s) => s.stage);
   const scenes = useStageStore((s) => s.scenes);
+
+  useEffect(() => {
+    if (!stage) return;
+    void markPlaybackCompleteForRevisit({ stage, scenes });
+  }, [stage, scenes]);
+
   return <ClassroomCompletePage scenes={scenes} title={stage?.name ?? ''} />;
 }
