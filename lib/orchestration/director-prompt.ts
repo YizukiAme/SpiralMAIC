@@ -5,6 +5,8 @@
  * which agent should respond next in a multi-agent conversation.
  */
 
+import { jsonrepair } from 'jsonrepair';
+
 import type { AgentConfig } from '@/lib/orchestration/registry/types';
 import { createLogger } from '@/lib/logger';
 import { buildPrompt, PROMPT_IDS } from '@/lib/prompts';
@@ -249,11 +251,18 @@ export function parseDirectorDecision(content: string): {
   revisitGate?: RevisitGateDecision;
 } {
   try {
-    // Try to extract JSON from the response
-    const jsonMatch = content.match(/\{[\s\S]*?"next_agent"[\s\S]*?\}/);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      const nextAgent = parsed.next_agent;
+    // Extract JSON from the response: greedy first-{ to last-} so nested
+    // objects (revisit_gate) survive — a lazy match stops at the first `}`
+    // and truncates nested payloads. jsonrepair covers fenced/dirty output.
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    if (jsonMatch && jsonMatch[0].includes('"next_agent"')) {
+      let parsed: { next_agent?: unknown; revisit_gate?: unknown };
+      try {
+        parsed = JSON.parse(jsonMatch[0]);
+      } catch {
+        parsed = JSON.parse(jsonrepair(jsonMatch[0]));
+      }
+      const nextAgent = typeof parsed.next_agent === 'string' ? parsed.next_agent : null;
 
       if (!nextAgent || nextAgent === 'END') {
         return {
