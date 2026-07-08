@@ -211,7 +211,20 @@ export function resolveRevisitAgentIds(candidates: RevisitAgentCandidate[]): Rev
   };
 }
 
-export function parseRevisitChatSse(input: string): {
+export function roleForRevisitAgent(
+  agentId: string,
+  agentIds: RevisitAgentIds = {
+    studentAgentId: REVISIT_STUDENT_AGENT_ID,
+    assistantAgentId: REVISIT_ASSISTANT_AGENT_ID,
+  },
+): RevisitMessage['role'] {
+  return agentId === agentIds.assistantAgentId ? 'assistant' : 'student';
+}
+
+export function parseRevisitChatSse(
+  input: string,
+  agentIds?: RevisitAgentIds,
+): {
   events: RevisitParsedSse;
   remaining: string;
 } {
@@ -238,7 +251,7 @@ export function parseRevisitChatSse(input: string): {
       if (event.type === 'agent_start') {
         activeMessage = {
           id: event.data.messageId,
-          role: event.data.agentId === REVISIT_ASSISTANT_AGENT_ID ? 'assistant' : 'student',
+          role: roleForRevisitAgent(event.data.agentId, agentIds),
           agentId: event.data.agentId,
           agentName: event.data.agentName,
           text: '',

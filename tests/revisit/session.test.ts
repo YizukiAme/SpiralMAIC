@@ -10,6 +10,7 @@ import {
   REVISIT_PAGE_PROBE_CAP,
   REVISIT_STUDENT_AGENT_ID,
   resolveRevisitAgentIds,
+  roleForRevisitAgent,
   type RevisitSessionPageState,
   selectPageProbes,
 } from '@/lib/revisit/session';
@@ -170,6 +171,24 @@ describe('revisit session helpers', () => {
       studentAgentId: REVISIT_STUDENT_AGENT_ID,
       assistantAgentId: REVISIT_ASSISTANT_AGENT_ID,
     });
+  });
+
+  test('classifies assistant turns using resolved revisit seats', () => {
+    const agentIds = {
+      studentAgentId: 'custom-student',
+      assistantAgentId: 'custom-assistant',
+    };
+    const sse = [
+      'data: {"type":"agent_start","data":{"messageId":"m1","agentId":"custom-assistant","agentName":"Assistant"}}',
+      '',
+      'data: {"type":"text_delta","data":{"messageId":"m1","content":"Try a simpler example."}}',
+      '',
+      '',
+    ].join('\n');
+
+    expect(roleForRevisitAgent('custom-assistant', agentIds)).toBe('assistant');
+    expect(roleForRevisitAgent('custom-student', agentIds)).toBe('student');
+    expect(parseRevisitChatSse(sse, agentIds).events.messages[0]?.role).toBe('assistant');
   });
 
   test('parses revisit gate and streamed agent text from SSE', () => {
