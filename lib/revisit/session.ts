@@ -14,6 +14,17 @@ export const REVISIT_ASSISTANT_AGENT_ID = 'default-2';
 export const REVISIT_PAGE_PROBE_CAP = 2;
 export const REVISIT_SOFT_LIMIT_MINUTES = 15;
 
+export interface RevisitAgentCandidate {
+  id: string;
+  role: string;
+  priority?: number;
+}
+
+export interface RevisitAgentIds {
+  studentAgentId: string;
+  assistantAgentId: string;
+}
+
 export interface RevisitMessage {
   id: string;
   role: 'teacher' | 'student' | 'assistant';
@@ -148,8 +159,13 @@ export function createRevisitChatRequest(args: {
   apiKey: string;
   baseUrl?: string;
   providerType?: string;
+  agentIds?: RevisitAgentIds;
 }): StatelessChatRequest {
   const page = args.blueprint.skeleton.pages[args.pageState.pageIndex];
+  const agentIds = args.agentIds ?? {
+    studentAgentId: REVISIT_STUDENT_AGENT_ID,
+    assistantAgentId: REVISIT_ASSISTANT_AGENT_ID,
+  };
 
   return {
     messages: revisitMessagesToUiMessages(args.messages),
@@ -161,7 +177,7 @@ export function createRevisitChatRequest(args: {
       whiteboardOpen: false,
     },
     config: {
-      agentIds: [REVISIT_STUDENT_AGENT_ID, REVISIT_ASSISTANT_AGENT_ID],
+      agentIds: [agentIds.studentAgentId, agentIds.assistantAgentId],
       sessionType: 'discussion',
       discussionTopic: page?.title || args.stage.name,
       revisitProbeContext: buildRevisitProbeContext({
@@ -180,6 +196,18 @@ export function createRevisitChatRequest(args: {
     model: args.model,
     ...(args.baseUrl ? { baseUrl: args.baseUrl } : {}),
     ...(args.providerType ? { providerType: args.providerType } : {}),
+  };
+}
+
+export function resolveRevisitAgentIds(candidates: RevisitAgentCandidate[]): RevisitAgentIds {
+  const byRolePriority = (role: string, fallback: string) =>
+    candidates
+      .filter((candidate) => candidate.role === role)
+      .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))[0]?.id ?? fallback;
+
+  return {
+    studentAgentId: byRolePriority('student', REVISIT_STUDENT_AGENT_ID),
+    assistantAgentId: byRolePriority('assistant', REVISIT_ASSISTANT_AGENT_ID),
   };
 }
 

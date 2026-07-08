@@ -131,10 +131,10 @@ export function updateHalfLifeDays({
   const quality = clamp(q, 0.05, 0.98);
   const recall = clamp(retrievability, 0, 1);
 
+  const positiveEvidence = Math.max(quality - recall, 0);
+  const negativeEvidence = Math.max(recall - quality, 0);
   const deltaLog =
-    quality >= REVIEW_RECALL_THRESHOLD
-      ? etaPlus * quality * Math.pow(1 - recall, lambda)
-      : -etaMinus * ((REVIEW_RECALL_THRESHOLD - quality) / REVIEW_RECALL_THRESHOLD);
+    etaPlus * positiveEvidence * (1 + lambda * (1 - recall)) - etaMinus * negativeEvidence;
 
   return clamp(
     Number((current * Math.exp(deltaLog)).toFixed(6)),

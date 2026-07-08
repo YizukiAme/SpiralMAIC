@@ -107,14 +107,28 @@ describe('SpiralMAIC memory decay', () => {
     expect(stable.badge).toBe('stable');
   });
 
-  it('updates half-life in log domain with larger gains for effortful success and stronger penalties for poor recall', () => {
+  it('updates half-life in log domain against predicted recall with spacing gains', () => {
     const effortfulSuccess = updateHalfLifeDays({ currentHDays: 4, q: 0.9, retrievability: 0.25 });
     const easySuccess = updateHalfLifeDays({ currentHDays: 4, q: 0.9, retrievability: 0.9 });
+    const longGapPass = updateHalfLifeDays({ currentHDays: 4, q: 0.5, retrievability: 0.05 });
     const poorRefresh = updateHalfLifeDays({ currentHDays: 4, q: 0.2, retrievability: 0.5 });
 
     expect(effortfulSuccess).toBeGreaterThan(easySuccess);
-    expect(easySuccess).toBeGreaterThan(4);
+    expect(easySuccess).toBe(4);
+    expect(longGapPass).toBeGreaterThan(7.9);
     expect(poorRefresh).toBeLessThan(4);
+    expect(updateHalfLifeDays({ currentHDays: 3, q: 0.8, retrievability: 0.5 })).toBeCloseTo(
+      4.3,
+      4,
+    );
+    expect(updateHalfLifeDays({ currentHDays: 3, q: 0.4, retrievability: 0.5 })).toBeCloseTo(
+      2.6608,
+      4,
+    );
+    expect(updateHalfLifeDays({ currentHDays: 7, q: 0.85, retrievability: 0.25 })).toBeCloseTo(
+      16.2146,
+      4,
+    );
     expect(updateHalfLifeDays({ currentHDays: 500, q: 0.98, retrievability: 0.1 })).toBe(180);
     expect(updateHalfLifeDays({ currentHDays: 0.2, q: 0.05, retrievability: 0.9 })).toBe(1);
   });
@@ -131,7 +145,11 @@ describe('SpiralMAIC memory decay', () => {
     });
 
     const first = applyEvidenceToConceptState(
-      state({ hDays: 121, successChallengeDates: [] }),
+      state({
+        hDays: 130,
+        lastRetrievalAt: Date.UTC(2026, 0, 1),
+        successChallengeDates: [],
+      }),
       {
         id: 'e1',
         attemptId: 'a1',
@@ -150,19 +168,25 @@ describe('SpiralMAIC memory decay', () => {
     expect(first.successChallengeDates).toEqual(['2026-07-02']);
     expect(first.stableAt).toBeUndefined();
 
-    const second = applyEvidenceToConceptState(first, {
-      id: 'e2',
-      attemptId: 'a2',
-      stageId: 'stage-1',
-      conceptId: 'concept-1',
-      source: 'teach_back',
-      scores: { clarity: 0.9, doubtResolution: 0.9, transfer: 0.9, errorCorrection: 0.9 },
-      q: 0.9,
-      qRaw: 0.9,
-      polarity: 'positive',
-      timestamp: Date.UTC(2026, 6, 4),
-      errors: [],
-    });
+    const second = applyEvidenceToConceptState(
+      {
+        ...first,
+        lastRetrievalAt: Date.UTC(2026, 0, 1),
+      },
+      {
+        id: 'e2',
+        attemptId: 'a2',
+        stageId: 'stage-1',
+        conceptId: 'concept-1',
+        source: 'teach_back',
+        scores: { clarity: 0.9, doubtResolution: 0.9, transfer: 0.9, errorCorrection: 0.9 },
+        q: 0.9,
+        qRaw: 0.9,
+        polarity: 'positive',
+        timestamp: Date.UTC(2026, 6, 4),
+        errors: [],
+      },
+    );
     expect(second.successChallengeDates).toContain('2026-07-04');
     expect(second.stableAt).toBe(Date.UTC(2026, 6, 4));
   });

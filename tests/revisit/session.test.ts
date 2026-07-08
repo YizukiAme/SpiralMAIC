@@ -9,6 +9,7 @@ import {
   REVISIT_ASSISTANT_AGENT_ID,
   REVISIT_PAGE_PROBE_CAP,
   REVISIT_STUDENT_AGENT_ID,
+  resolveRevisitAgentIds,
   type RevisitSessionPageState,
   selectPageProbes,
 } from '@/lib/revisit/session';
@@ -151,6 +152,24 @@ describe('revisit session helpers', () => {
     expect(request.config.revisitProbeContext).toContain('Candidate probes');
     expect(request.config.revisitGateContext).toContain('latest_teacher_turn');
     expect(request.messages[0].metadata?.originalRole).toBe('teacher');
+  });
+
+  test('resolves revisit seats by role before falling back to defaults', () => {
+    expect(
+      resolveRevisitAgentIds([
+        { id: 'custom-student-low', role: 'student', priority: 1 },
+        { id: 'custom-student-high', role: 'student', priority: 9 },
+        { id: 'custom-assistant', role: 'assistant', priority: 3 },
+      ]),
+    ).toEqual({
+      studentAgentId: 'custom-student-high',
+      assistantAgentId: 'custom-assistant',
+    });
+
+    expect(resolveRevisitAgentIds([])).toEqual({
+      studentAgentId: REVISIT_STUDENT_AGENT_ID,
+      assistantAgentId: REVISIT_ASSISTANT_AGENT_ID,
+    });
   });
 
   test('parses revisit gate and streamed agent text from SSE', () => {
