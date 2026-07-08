@@ -1726,15 +1726,14 @@
     "goalMap": {
       "demoBadge": "Demo",
       "kicker": "Goal mode",
-      "title": "Fallacy Review Map",
+      "title": "Goal Preview Map",
       "subtitle": "A static goal-mode preview using the same memory colors as real classrooms.",
-      "openDemoCourse": "Open classrooms",
       "locked": "Locked",
       "nodes": {
-        "basics": "Recognize common fallacies",
-        "causal": "Causal traps",
-        "choiceTraps": "False choices and slippery slopes",
-        "mastery": "Teach a live debate"
+        "basics": "Recover the core ideas",
+        "causal": "Transfer to new examples",
+        "choiceTraps": "Correct common mistakes",
+        "mastery": "Teach the full lesson"
       }
     }
   }

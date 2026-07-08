@@ -1726,15 +1726,14 @@
     "goalMap": {
       "demoBadge": "演示",
       "kicker": "目标模式",
-      "title": "谬误复习地图",
+      "title": "目标模式预览",
       "subtitle": "静态目标模式预览，节点颜色使用和真实课件相同的记忆公式。",
-      "openDemoCourse": "打开课件列表",
       "locked": "未解锁",
       "nodes": {
-        "basics": "识别常见谬误",
-        "causal": "因果陷阱",
-        "choiceTraps": "虚假选择与滑坡",
-        "mastery": "讲解一场真实辩论"
+        "basics": "讲回核心概念",
+        "causal": "迁移到新例子",
+        "choiceTraps": "纠正常见误解",
+        "mastery": "完整讲授一节课"
       }
     }
   }
