@@ -26,9 +26,10 @@ import { ensureRevisitBlueprint, submitRevisitAttempt } from '@/lib/revisit/clie
 import {
   createRevisitChatRequest,
   createTeacherRevisitMessage,
-  REVISIT_ASSISTANT_AGENT_ID,
   REVISIT_PAGE_PROBE_CAP,
   resolveRevisitAgentIds,
+  roleForRevisitAgent,
+  type RevisitAgentIds,
   type RevisitMessage,
   type RevisitSessionPageState,
 } from '@/lib/revisit/session';
@@ -236,6 +237,7 @@ export default function RevisitChallengePage() {
     setRunning(true);
     try {
       const modelConfig = getCurrentModelConfig();
+      const revisitAgentIds = resolveRevisitAgentIds(useAgentRegistry.getState().listAgents());
       const request = createRevisitChatRequest({
         stage: classroom.stage,
         scenes: classroom.scenes,
@@ -249,7 +251,7 @@ export default function RevisitChallengePage() {
         apiKey: modelConfig.apiKey,
         baseUrl: modelConfig.baseUrl,
         providerType: modelConfig.providerType,
-        agentIds: resolveRevisitAgentIds(useAgentRegistry.getState().listAgents()),
+        agentIds: revisitAgentIds,
       });
 
       const response = await fetch('/api/chat', {
@@ -261,7 +263,7 @@ export default function RevisitChallengePage() {
         }),
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      await readChatStream(response);
+      await readChatStream(response, revisitAgentIds);
     } catch (err) {
       toast.error(t('revisit.challenge.chatFailed'));
       setError(err instanceof Error ? err.message : String(err));
@@ -270,7 +272,7 @@ export default function RevisitChallengePage() {
     }
   }
 
-  async function readChatStream(response: Response) {
+  async function readChatStream(response: Response, agentIds: RevisitAgentIds) {
     const reader = response.body?.getReader();
     if (!reader) throw new Error('missing stream');
     const decoder = new TextDecoder();
@@ -283,7 +285,7 @@ export default function RevisitChallengePage() {
       if (event.type === 'agent_start') {
         const nextMessage: RevisitMessage = {
           id: event.data.messageId,
-          role: event.data.agentId === REVISIT_ASSISTANT_AGENT_ID ? 'assistant' : 'student',
+          role: roleForRevisitAgent(event.data.agentId, agentIds),
           agentId: event.data.agentId,
           agentName: event.data.agentName,
           text: '',
