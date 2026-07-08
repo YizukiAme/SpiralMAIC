@@ -314,7 +314,9 @@ export default function RevisitChallengePage() {
       toast.error(t('revisit.challenge.chatFailed'));
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setSpeakingAgentId(null);
+      // Keep speakingAgentId paired with liveSpeech: nulling only the speaker
+      // leaves an unattributed bubble that Roundtable re-hangs on the user's
+      // seat ("你" flash). Both reset together at the next submitTurn.
       setRunning(false);
     }
   }
