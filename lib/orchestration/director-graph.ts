@@ -338,6 +338,15 @@ async function directorNode(
     };
   } catch (error) {
     log.error('[Director] Error:', error);
+    // Surface the failure to the client instead of ending in silence —
+    // a swallowed director error renders as agents ignoring the user
+    // (billing/rate-limit/timeout all looked like dead air, see #revisit).
+    if (!(error instanceof Error && error.name === 'AbortError')) {
+      write({
+        type: 'error',
+        data: { message: error instanceof Error ? error.message : String(error) },
+      });
+    }
     return { shouldEnd: true };
   }
 }
