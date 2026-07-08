@@ -1626,8 +1626,7 @@
       "multiplierValue": "{{value}} 倍",
       "demoArea": "展示區",
       "acceleratedClock": "加速時鐘",
-      "gateSkip": "跳過頁面門控",
-      "goalMap": "目标地图"
+      "gateSkip": "跳過頁面門控"
     }
   },
   "profile": {
@@ -1722,19 +1721,6 @@
         "fail": "重试"
       },
       "open": "复习挑战"
-    },
-    "goalMap": {
-      "demoBadge": "演示",
-      "kicker": "目标模式",
-      "title": "目標模式預覽",
-      "subtitle": "静态目标模式预览，节点颜色使用和真实课件相同的记忆公式。",
-      "locked": "未解锁",
-      "nodes": {
-        "basics": "講回核心概念",
-        "causal": "遷移到新例子",
-        "choiceTraps": "修正常見誤解",
-        "mastery": "完整講授一節課"
-      }
     }
   }
 }

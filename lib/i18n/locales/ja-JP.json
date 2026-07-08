@@ -1642,8 +1642,7 @@
       "multiplierValue": "{{value}}x",
       "demoArea": "デモ",
       "acceleratedClock": "加速時計",
-      "gateSkip": "ページ判定をスキップ",
-      "goalMap": "Goal map"
+      "gateSkip": "ページ判定をスキップ"
     }
   },
   "profile": {
@@ -1722,19 +1721,6 @@
         "fail": "Retry"
       },
       "open": "Review challenge"
-    },
-    "goalMap": {
-      "demoBadge": "Demo",
-      "kicker": "Goal mode",
-      "title": "Goal Preview Map",
-      "subtitle": "A static goal-mode preview using the same memory colors as real classrooms.",
-      "locked": "Locked",
-      "nodes": {
-        "basics": "Recover the core ideas",
-        "causal": "Transfer to new examples",
-        "choiceTraps": "Correct common mistakes",
-        "mastery": "Teach the full lesson"
-      }
     }
   }
 }
