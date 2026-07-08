@@ -88,6 +88,113 @@ function resolveAgent(state: OrchestratorStateType, agentId: string): AgentConfi
   return state.agentConfigOverrides[agentId] ?? useAgentRegistry.getState().getAgent(agentId);
 }
 
+type DirectorDecision = ReturnType<typeof parseDirectorDecision>;
+
+export interface ResolvedDirectorDecision {
+  nextAgentId: string | null;
+  shouldEnd: boolean;
+  cueUser: boolean;
+  fallbackUsed: boolean;
+}
+
+export function resolveDirectorDecisionForAvailableAgents({
+  decision,
+  agents,
+  revisitMode,
+  agentRespondedAfterLatestHuman = false,
+}: {
+  decision: DirectorDecision;
+  agents: Pick<AgentConfig, 'id' | 'role' | 'priority'>[];
+  revisitMode: boolean;
+  agentRespondedAfterLatestHuman?: boolean;
+}): ResolvedDirectorDecision {
+  const fallbackAgentId = revisitMode
+    ? selectRevisitFallbackAgentId(agents, decision.revisitGate?.status)
+    : null;
+
+  if (decision.nextAgentId === 'USER') {
+    return revisitMode && fallbackAgentId
+      ? {
+          nextAgentId: fallbackAgentId,
+          shouldEnd: false,
+          cueUser: false,
+          fallbackUsed: true,
+        }
+      : {
+          nextAgentId: null,
+          shouldEnd: true,
+          cueUser: true,
+          fallbackUsed: false,
+        };
+  }
+
+  if (decision.shouldEnd || !decision.nextAgentId) {
+    if (revisitMode && !agentRespondedAfterLatestHuman && fallbackAgentId) {
+      return {
+        nextAgentId: fallbackAgentId,
+        shouldEnd: false,
+        cueUser: false,
+        fallbackUsed: true,
+      };
+    }
+    return {
+      nextAgentId: null,
+      shouldEnd: true,
+      cueUser: false,
+      fallbackUsed: false,
+    };
+  }
+
+  const selectedAgent = agents.find((agent) => agent.id === decision.nextAgentId);
+  if (selectedAgent && (!revisitMode || selectedAgent.role !== 'teacher')) {
+    return {
+      nextAgentId: decision.nextAgentId,
+      shouldEnd: false,
+      cueUser: false,
+      fallbackUsed: false,
+    };
+  }
+
+  if (revisitMode && fallbackAgentId) {
+    return {
+      nextAgentId: fallbackAgentId,
+      shouldEnd: false,
+      cueUser: false,
+      fallbackUsed: true,
+    };
+  }
+
+  return {
+    nextAgentId: null,
+    shouldEnd: true,
+    cueUser: false,
+    fallbackUsed: false,
+  };
+}
+
+export function hasAgentResponseAfterLatestHumanTurn(
+  messages: StatelessChatRequest['messages'],
+): boolean {
+  const latestHumanIndex = messages.findLastIndex((message) => message.role === 'user');
+  if (latestHumanIndex < 0) return false;
+  return messages.slice(latestHumanIndex + 1).some((message) => message.role === 'assistant');
+}
+
+function selectRevisitFallbackAgentId(
+  agents: Pick<AgentConfig, 'id' | 'role' | 'priority'>[],
+  gateStatus?: string,
+): string | null {
+  const byPriority = (a: Pick<AgentConfig, 'priority'>, b: Pick<AgentConfig, 'priority'>) =>
+    (b.priority ?? 0) - (a.priority ?? 0);
+  const students = agents.filter((agent) => agent.role === 'student').sort(byPriority);
+  const assistants = agents.filter((agent) => agent.role === 'assistant').sort(byPriority);
+
+  if (gateStatus === 'rescue') {
+    return assistants[0]?.id ?? students[0]?.id ?? agents[0]?.id ?? null;
+  }
+  return students[0]?.id ?? assistants[0]?.id ?? agents[0]?.id ?? null;
+}
+
 // ==================== Director Node ====================
 
 /**
@@ -192,12 +299,14 @@ async function directorNode(
       write({ type: 'revisit_gate', data: decision.revisitGate });
     }
 
-    if (decision.shouldEnd || !decision.nextAgentId) {
-      log.info('[Director] Decision: END');
-      return { shouldEnd: true };
-    }
+    const resolvedDecision = resolveDirectorDecisionForAvailableAgents({
+      decision,
+      agents,
+      revisitMode: Boolean(state.revisitGateContext),
+      agentRespondedAfterLatestHuman: hasAgentResponseAfterLatestHumanTurn(state.messages),
+    });
 
-    if (decision.nextAgentId === 'USER') {
+    if (resolvedDecision.cueUser) {
       log.info('[Director] Decision: cue USER to speak');
       write({
         type: 'cue_user',
@@ -206,20 +315,25 @@ async function directorNode(
       return { shouldEnd: true };
     }
 
-    const agentExists = agents.some((a) => a.id === decision.nextAgentId);
-    if (!agentExists) {
-      log.warn(`[Director] Unknown agent "${decision.nextAgentId}", ending`);
+    if (resolvedDecision.shouldEnd || !resolvedDecision.nextAgentId) {
+      log.info('[Director] Decision: END');
       return { shouldEnd: true };
+    }
+
+    if (resolvedDecision.fallbackUsed) {
+      log.warn(
+        `[Director] Revisit fallback for decision "${decision.nextAgentId ?? 'END'}" -> "${resolvedDecision.nextAgentId}"`,
+      );
     }
 
     write({
       type: 'thinking',
-      data: { stage: 'agent_loading', agentId: decision.nextAgentId },
+      data: { stage: 'agent_loading', agentId: resolvedDecision.nextAgentId },
     });
 
-    log.info(`[Director] Decision: dispatch agent "${decision.nextAgentId}"`);
+    log.info(`[Director] Decision: dispatch agent "${resolvedDecision.nextAgentId}"`);
     return {
-      currentAgentId: decision.nextAgentId,
+      currentAgentId: resolvedDecision.nextAgentId,
       shouldEnd: false,
     };
   } catch (error) {

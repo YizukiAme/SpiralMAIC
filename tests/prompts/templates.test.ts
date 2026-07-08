@@ -232,9 +232,21 @@ describe('director routing contract', () => {
   });
 
   test('director prompt inserts reverse gate section when provided', () => {
+    const studentAgent: AgentConfig = {
+      ...baseAgent,
+      id: 'student-1',
+      name: 'Student',
+      role: 'student',
+    };
+    const assistantAgent: AgentConfig = {
+      ...baseAgent,
+      id: 'assistant-1',
+      name: 'Assistant',
+      role: 'assistant',
+    };
     const out = buildDirectorPrompt(
-      [baseAgent],
-      'No history',
+      [studentAgent, assistantAgent],
+      '[Student (Human)] I will explain this page.',
       [],
       0,
       null,
@@ -246,6 +258,11 @@ describe('director routing contract', () => {
     );
     expect(out).toContain('Reverse Teaching Gate');
     expect(out).toContain('"revisit_gate"');
+    expect(out).toContain('latest human turn is the human teacher');
+    expect(out).toContain('Do NOT output an agent whose role is teacher');
+    expect(out).toContain('For "pass", choose an AI student');
+    expect(out).not.toContain('role` field is LITERALLY the string `teacher`');
+    expect(out).not.toContain('or choose END');
     expect(out).not.toMatch(UNRESOLVED_PLACEHOLDER);
   });
 });

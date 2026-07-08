@@ -8,6 +8,7 @@ import {
   canNavigateRevisitPage,
   parseRevisitChatSse,
   REVISIT_ASSISTANT_AGENT_ID,
+  REVISIT_DEFAULT_STUDENT_AGENT_IDS,
   REVISIT_PAGE_PROBE_CAP,
   REVISIT_STUDENT_AGENT_ID,
   resolveRevisitAgentIds,
@@ -150,7 +151,10 @@ describe('revisit session helpers', () => {
       model: 'openai:gpt-4.1-mini',
       apiKey: 'key',
     });
-    expect(request.config.agentIds).toEqual([REVISIT_STUDENT_AGENT_ID, REVISIT_ASSISTANT_AGENT_ID]);
+    expect(request.config.agentIds).toEqual([
+      ...REVISIT_DEFAULT_STUDENT_AGENT_IDS,
+      REVISIT_ASSISTANT_AGENT_ID,
+    ]);
     expect(request.config.revisitProbeContext).toContain('Candidate probes');
     expect(request.config.revisitGateContext).toContain('latest_teacher_turn');
     expect(request.messages[0].metadata?.originalRole).toBe('teacher');
@@ -171,7 +175,7 @@ describe('revisit session helpers', () => {
 
     expect(resolveRevisitAgentIds([])).toEqual({
       studentAgentId: REVISIT_STUDENT_AGENT_ID,
-      studentAgentIds: [REVISIT_STUDENT_AGENT_ID],
+      studentAgentIds: REVISIT_DEFAULT_STUDENT_AGENT_IDS,
       assistantAgentId: REVISIT_ASSISTANT_AGENT_ID,
     });
   });

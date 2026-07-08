@@ -64,6 +64,7 @@ interface RoundtableProps {
   readonly onDiscussionStart?: (request: DiscussionAction) => void;
   readonly onDiscussionSkip?: () => void;
   readonly onStopDiscussion?: () => void;
+  readonly showStopDiscussionOverride?: boolean;
   readonly onInputActivate?: () => void;
 
   readonly onResumeTopic?: () => void;
@@ -83,6 +84,8 @@ interface RoundtableProps {
   readonly onToggleChat?: () => void;
   readonly onPrevSlide?: () => void;
   readonly onNextSlide?: () => void;
+  readonly canGoPrevOverride?: boolean;
+  readonly canGoNextOverride?: boolean;
   readonly onWhiteboardClose?: () => void;
   readonly isPresenting?: boolean;
   readonly controlsVisible?: boolean;
@@ -152,6 +155,7 @@ export function Roundtable({
   onDiscussionStart,
   onDiscussionSkip,
   onStopDiscussion,
+  showStopDiscussionOverride,
   onInputActivate,
 
   onResumeTopic,
@@ -168,6 +172,8 @@ export function Roundtable({
   onToggleChat,
   onPrevSlide,
   onNextSlide,
+  canGoPrevOverride,
+  canGoNextOverride,
   onWhiteboardClose,
   isPresenting,
   controlsVisible,
@@ -559,7 +565,8 @@ export function Roundtable({
   // sessionType is only cleared in doSessionCleanup, so this stays stable through
   // brief loading gaps (e.g. between user message and agent SSE response).
   const showStopButton =
-    engineMode === 'live' || sessionType === 'qa' || sessionType === 'discussion';
+    showStopDiscussionOverride ??
+    (engineMode === 'live' || sessionType === 'qa' || sessionType === 'discussion');
 
   const handleCycleSpeed = useCallback(() => {
     const currentIndex = PLAYBACK_SPEEDS.indexOf(playbackSpeed as (typeof PLAYBACK_SPEEDS)[number]);
@@ -633,6 +640,8 @@ export function Roundtable({
       onToggleChat={onToggleChat}
       onPrevSlide={onPrevSlide ?? (() => {})}
       onNextSlide={onNextSlide ?? (() => {})}
+      canGoPrevOverride={canGoPrevOverride}
+      canGoNextOverride={canGoNextOverride}
       onPlayPause={onPlayPause ?? (() => {})}
       onWhiteboardClose={onWhiteboardClose ?? (() => {})}
       isPresenting={isPresenting}

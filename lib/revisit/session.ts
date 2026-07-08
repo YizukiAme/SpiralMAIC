@@ -10,6 +10,11 @@ import type { Scene, Stage } from '@/lib/types/stage';
 import type { RevisitExamBlueprint, RevisitGateDecision, RevisitProbe } from '@/lib/revisit/types';
 
 export const REVISIT_STUDENT_AGENT_ID = 'default-4';
+export const REVISIT_DEFAULT_STUDENT_AGENT_IDS = [
+  REVISIT_STUDENT_AGENT_ID,
+  'default-3',
+  'default-5',
+];
 export const REVISIT_ASSISTANT_AGENT_ID = 'default-2';
 export const REVISIT_PAGE_PROBE_CAP = 2;
 export const REVISIT_SOFT_LIMIT_MINUTES = 15;
@@ -165,7 +170,7 @@ export function createRevisitChatRequest(args: {
   const page = args.blueprint.skeleton.pages[args.pageState.pageIndex];
   const agentIds = args.agentIds ?? {
     studentAgentId: REVISIT_STUDENT_AGENT_ID,
-    studentAgentIds: [REVISIT_STUDENT_AGENT_ID],
+    studentAgentIds: REVISIT_DEFAULT_STUDENT_AGENT_IDS,
     assistantAgentId: REVISIT_ASSISTANT_AGENT_ID,
   };
   const studentAgentIds = agentIds.studentAgentIds.length
@@ -209,13 +214,18 @@ export function resolveRevisitAgentIds(candidates: RevisitAgentCandidate[]): Rev
     candidates
       .filter((candidate) => candidate.role === role)
       .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+  const allowedDefaultStudents = new Set(REVISIT_DEFAULT_STUDENT_AGENT_IDS);
   const studentIds = byRolePriority('student')
+    .filter(
+      (candidate) =>
+        !candidate.id.startsWith('default-') || allowedDefaultStudents.has(candidate.id),
+    )
     .slice(0, 3)
     .map((candidate) => candidate.id);
 
   return {
     studentAgentId: studentIds[0] ?? REVISIT_STUDENT_AGENT_ID,
-    studentAgentIds: studentIds.length ? studentIds : [REVISIT_STUDENT_AGENT_ID],
+    studentAgentIds: studentIds.length ? studentIds : [...REVISIT_DEFAULT_STUDENT_AGENT_IDS],
     assistantAgentId: byRolePriority('assistant')[0]?.id ?? REVISIT_ASSISTANT_AGENT_ID,
   };
 }
@@ -224,7 +234,7 @@ export function roleForRevisitAgent(
   agentId: string,
   agentIds: RevisitAgentIds = {
     studentAgentId: REVISIT_STUDENT_AGENT_ID,
-    studentAgentIds: [REVISIT_STUDENT_AGENT_ID],
+    studentAgentIds: REVISIT_DEFAULT_STUDENT_AGENT_IDS,
     assistantAgentId: REVISIT_ASSISTANT_AGENT_ID,
   },
 ): RevisitMessage['role'] {

@@ -33,6 +33,7 @@ export function buildDirectorPrompt(
   whiteboardOpen?: boolean,
   revisitGateContext?: string | null,
 ): string {
+  const isRevisitMode = Boolean(revisitGateContext);
   const agentList = agents
     .map((a) => `- id: "${a.id}", name: "${a.name}", role: ${a.role}, priority: ${a.priority}`)
     .join('\n');
@@ -56,9 +57,11 @@ Topic: "${discussionContext!.topic}"${discussionContext!.prompt ? `\nPrompt: "${
 This is a student-initiated discussion, not a Q&A session.\n`
     : '';
 
-  const rule1 = isDiscussion
-    ? `1. The discussion initiator${triggerAgentId ? ` ("${triggerAgentId}")` : ''} should speak first to kick off the topic. Then the teacher responds to guide the discussion. After that, other students may add their perspectives.`
-    : "1. The teacher (role: teacher, highest priority) should usually speak first to address the user's question or topic.";
+  const rule1 = isRevisitMode
+    ? '1. The human is teaching this page. AI student agents should respond from the listener side, with the assistant reserved for rescue.'
+    : isDiscussion
+      ? `1. The discussion initiator${triggerAgentId ? ` ("${triggerAgentId}")` : ''} should speak first to kick off the topic. Then the teacher responds to guide the discussion. After that, other students may add their perspectives.`
+      : "1. The teacher (role: teacher, highest priority) should usually speak first to address the user's question or topic.";
 
   const studentProfileSection =
     userProfile?.nickname || userProfile?.bio
@@ -77,6 +80,8 @@ ${userProfile.bio ? `Background: ${userProfile.bio}` : ''}
     whiteboardSection: buildWhiteboardStateForDirector(whiteboardLedger),
     studentProfileSection,
     revisitGateSection: buildRevisitGateSection(revisitGateContext),
+    standardRoutingRules: !isRevisitMode,
+    revisitRoutingRules: isRevisitMode,
     rule1,
     turnCountPlusOne: turnCount + 1,
     whiteboardOpenText: whiteboardOpen
@@ -95,12 +100,12 @@ function buildRevisitGateSection(revisitGateContext?: string | null): string {
   if (!revisitGateContext) return '';
   return `
 # Reverse Teaching Gate
-This reverse-teaching challenge overrides the normal human-student Q&A routing rule. The latest human turn is a teacher attempt, not a student question.
+The latest human turn is the human teacher's lesson attempt, not a student question.
 
 Evaluate whether the human teacher has sufficiently taught the current page, then choose the next speaker from the available AI student/assistant agents.
 
 Gate status:
-- "pass": the teacher covered the page well enough; choose an AI student for a brief acknowledgment or choose END.
+- "pass": the teacher covered the page well enough; choose an AI student for a brief acknowledgment, thanks, or one-sentence summary. Do not choose END until after an agent has responded to the teacher turn.
 - "probe": one short student probe should be asked.
 - "rescue": the teacher is stuck or has reached the page probe cap; choose the assistant.
 - "fail": the page still has material issues, but a rescue is not yet needed.

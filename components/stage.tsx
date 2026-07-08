@@ -9,6 +9,7 @@ import { EditChromeRoot } from '@/components/edit/EditChromeRoot';
 import {
   PlaybackChromeRoot,
   type PlaybackChromeRootHandle,
+  type RevisitPlaybackConfig,
 } from '@/components/edit/PlaybackChromeRoot';
 import { useEditModeLock } from '@/components/edit/use-edit-mode-lock';
 import { MultiTabEditConflictPrompt } from '@/components/edit/MultiTabEditConflictPrompt';
@@ -32,8 +33,10 @@ import { preloadEditor } from '@/lib/edit/preload-editor';
  */
 export function Stage({
   onRetryOutline,
+  revisitConfig,
 }: {
   onRetryOutline?: (outlineId: string) => Promise<void>;
+  revisitConfig?: RevisitPlaybackConfig;
 }) {
   const { mode, setMode, scenes, currentSceneId, generatingOutlines, stage } = useStageStore();
   const currentScene = useStageStore((s) => s.getCurrentScene());
@@ -150,6 +153,7 @@ export function Stage({
               onRetryOutline={onRetryOutline}
               canEnterProMode={isEditable}
               onEnterProMode={toggleHandler}
+              revisitConfig={revisitConfig}
             />
           </motion.div>
         )}

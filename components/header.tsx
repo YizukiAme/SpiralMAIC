@@ -3,6 +3,7 @@
 import { ArrowLeft } from 'lucide-react';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { useRouter } from 'next/navigation';
+import type { ReactNode } from 'react';
 import type { StageMode } from '@/lib/types/stage';
 import { HeaderControls } from './stage/header-controls';
 
@@ -11,9 +12,16 @@ interface HeaderProps {
   readonly mode?: StageMode;
   readonly canEdit?: boolean;
   readonly onToggleEditMode?: () => void;
+  readonly rightSlot?: ReactNode;
 }
 
-export function Header({ currentSceneTitle, mode, canEdit, onToggleEditMode }: HeaderProps) {
+export function Header({
+  currentSceneTitle,
+  mode,
+  canEdit,
+  onToggleEditMode,
+  rightSlot,
+}: HeaderProps) {
   const { t } = useI18n();
   const router = useRouter();
 
@@ -52,7 +60,10 @@ export function Header({ currentSceneTitle, mode, canEdit, onToggleEditMode }: H
           )}
         </div>
 
-        <HeaderControls mode={mode} canEdit={canEdit} onToggleEditMode={onToggleEditMode} />
+        <div className="flex shrink-0 items-center gap-2">
+          {rightSlot}
+          <HeaderControls mode={mode} canEdit={canEdit} onToggleEditMode={onToggleEditMode} />
+        </div>
       </header>
     </>
   );
