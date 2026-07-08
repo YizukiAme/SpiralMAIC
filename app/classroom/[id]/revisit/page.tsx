@@ -1,29 +1,28 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   ArrowLeft,
-  Bot,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
   GraduationCap,
   Loader2,
-  Mic,
-  Send,
-  UserRound,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
-import { SpeechButton } from '@/components/audio/speech-button';
+import { Roundtable } from '@/components/roundtable';
+import type { AudioIndicatorState } from '@/components/roundtable/audio-indicator';
+import { ScreenCanvas } from '@/components/slide-renderer/Editor/ScreenCanvas';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
+import { SceneProvider, type SceneDataController } from '@/lib/contexts/scene-context';
 import { useI18n } from '@/lib/hooks/use-i18n';
-import { cn } from '@/lib/utils';
+import { useDiscussionTTS } from '@/lib/hooks/use-discussion-tts';
 import { ensureRevisitBlueprint, submitRevisitAttempt } from '@/lib/revisit/client';
 import {
+  canNavigateRevisitPage,
   createRevisitChatRequest,
   createTeacherRevisitMessage,
   REVISIT_PAGE_PROBE_CAP,
@@ -33,6 +32,7 @@ import {
   type RevisitMessage,
   type RevisitSessionPageState,
 } from '@/lib/revisit/session';
+import { buildRevisitSkeletonScenes } from '@/lib/revisit/slides';
 import type {
   RevisitExamBlueprint,
   RevisitGateDecision,
@@ -40,16 +40,14 @@ import type {
   RevisitPageReport,
 } from '@/lib/revisit/types';
 import type { StatelessEvent, DirectorState } from '@/lib/types/chat';
-import type { Scene, Stage } from '@/lib/types/stage';
+import type { Scene, SlideContent, Stage } from '@/lib/types/stage';
 import { loadStageData } from '@/lib/utils/stage-storage';
 import { getCurrentModelConfig } from '@/lib/utils/model-config';
 import { useSettingsStore } from '@/lib/store/settings';
 import { useAgentRegistry } from '@/lib/orchestration/registry/store';
-import { resolveAgentVoiceOptions } from '@/lib/audio/agent-voice';
-import {
-  BROWSER_NATIVE_TTS_PROVIDER_ID,
-  isTTSProviderEnabled,
-} from '@/lib/audio/provider-enablement';
+import type { AgentConfig } from '@/lib/orchestration/registry/types';
+import type { Participant } from '@/lib/types/roundtable';
+import { USER_AVATAR } from '@/lib/types/roundtable';
 
 interface LoadedClassroom {
   stage: Stage;
@@ -67,6 +65,9 @@ export default function RevisitChallengePage() {
   const stableSuccessesRequired = useSettingsStore((s) => s.stableSuccessesRequired);
   const forgettingSpeedMultiplier = useSettingsStore((s) => s.forgettingSpeedMultiplier);
   const demoGateSkipEnabled = useSettingsStore((s) => s.demoGateSkipEnabled);
+  const ttsEnabled = useSettingsStore((s) => s.ttsEnabled);
+  const ttsMuted = useSettingsStore((s) => s.ttsMuted);
+  const agentsRecord = useAgentRegistry((s) => s.agents);
 
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [classroom, setClassroom] = useState<LoadedClassroom | null>(null);
@@ -74,7 +75,6 @@ export default function RevisitChallengePage() {
   const [pageIndex, setPageIndex] = useState(0);
   const [pageStates, setPageStates] = useState<RevisitSessionPageState[]>([]);
   const [messages, setMessages] = useState<RevisitMessage[]>([]);
-  const [draft, setDraft] = useState('');
   const [running, setRunning] = useState(false);
   const [judging, setJudging] = useState(false);
   const [report, setReport] = useState<RevisitJudgeReport | null>(null);
@@ -83,20 +83,15 @@ export default function RevisitChallengePage() {
   const [attemptId] = useState(() => `revisit-${Date.now()}`);
   const [startedAt] = useState(() => Date.now());
   const [lastGate, setLastGate] = useState<RevisitGateDecision | null>(null);
+  const [liveSpeech, setLiveSpeech] = useState<string | null>(null);
+  const [speakingAgentId, setSpeakingAgentId] = useState<string | null>(null);
+  const [audioIndicatorState, setAudioIndicatorState] = useState<AudioIndicatorState>('idle');
+  const [audioAgentId, setAudioAgentId] = useState<string | null>(null);
   const transcriptRef = useRef<RevisitMessage[]>([]);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const audioUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
     transcriptRef.current = messages;
   }, [messages]);
-
-  useEffect(() => {
-    return () => {
-      audioRef.current?.pause();
-      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
-    };
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -140,9 +135,44 @@ export default function RevisitChallengePage() {
   const currentPage = pages[pageIndex];
   const currentPageState = pageStates[pageIndex];
   const passedCount = pageStates.filter((state) => state.passed).length;
+  const allPagesPassed = pages.length > 0 && passedCount === pages.length;
   const progressLabel = t('revisit.challenge.progress', {
     current: pages.length ? pageIndex + 1 : 0,
     total: pages.length,
+  });
+  const allAgents = useMemo(() => Object.values(agentsRecord), [agentsRecord]);
+  const revisitAgentIds = useMemo(() => resolveRevisitAgentIds(allAgents), [allAgents]);
+  const skeletonScenes = useMemo(
+    () =>
+      classroom && blueprint
+        ? buildRevisitSkeletonScenes({ stage: classroom.stage, blueprint })
+        : [],
+    [blueprint, classroom],
+  );
+  const currentSkeletonScene = skeletonScenes[pageIndex] ?? null;
+  const revisitParticipants = useMemo(
+    () =>
+      buildRevisitParticipants({
+        agents: allAgents,
+        agentIds: revisitAgentIds,
+        teacherName: t('common.you'),
+      }),
+    [allAgents, revisitAgentIds, t],
+  );
+  const ttsAgents = useMemo(
+    () =>
+      [revisitAgentIds.assistantAgentId, ...revisitAgentIds.studentAgentIds]
+        .map((agentId) => agentsRecord[agentId])
+        .filter((agent): agent is AgentConfig => Boolean(agent)),
+    [agentsRecord, revisitAgentIds],
+  );
+  const discussionTTS = useDiscussionTTS({
+    enabled: ttsEnabled && !ttsMuted,
+    agents: ttsAgents,
+    onAudioStateChange: (agentId, state) => {
+      setAudioAgentId(agentId);
+      setAudioIndicatorState(state);
+    },
   });
 
   const updatePageState = useCallback((index: number, update: Partial<RevisitSessionPageState>) => {
@@ -151,9 +181,16 @@ export default function RevisitChallengePage() {
     );
   }, []);
 
-  const advancePage = useCallback(() => {
-    setPageIndex((prev) => Math.min(prev + 1, Math.max(0, pages.length - 1)));
-  }, [pages.length]);
+  const navigatePage = useCallback(
+    (targetIndex: number) => {
+      setPageIndex((prev) =>
+        canNavigateRevisitPage(pageStates, prev, targetIndex, demoGateSkipEnabled)
+          ? targetIndex
+          : prev,
+      );
+    },
+    [demoGateSkipEnabled, pageStates],
+  );
 
   const applyGate = useCallback(
     (gate: RevisitGateDecision | null) => {
@@ -171,7 +208,6 @@ export default function RevisitChallengePage() {
 
       if (decision.status === 'pass') {
         updatePageState(pageIndex, { passed: true });
-        if (pageIndex < pages.length - 1) advancePage();
         return;
       }
 
@@ -200,19 +236,11 @@ export default function RevisitChallengePage() {
           : currentPageState.askedProbeIds,
       });
     },
-    [
-      advancePage,
-      blueprint,
-      currentPage,
-      currentPageState,
-      pageIndex,
-      pages.length,
-      updatePageState,
-    ],
+    [blueprint, currentPage, currentPageState, pageIndex, updatePageState],
   );
 
-  async function submitTurn() {
-    const text = draft.trim();
+  async function submitTurn(rawText: string) {
+    const text = rawText.trim();
     if (!text || !classroom || !blueprint || !currentPageState || running || judging || report) {
       return;
     }
@@ -220,7 +248,9 @@ export default function RevisitChallengePage() {
     const teacherMessage = createTeacherRevisitMessage(text);
     const nextMessages = [...transcriptRef.current, teacherMessage];
     setMessages(nextMessages);
-    setDraft('');
+    setLiveSpeech(null);
+    setSpeakingAgentId(null);
+    discussionTTS.cleanup();
 
     if (demoGateSkipEnabled) {
       updatePageState(pageIndex, { passed: true });
@@ -230,14 +260,12 @@ export default function RevisitChallengePage() {
         reason: 'demo-skip',
         confidence: 1,
       });
-      if (pageIndex < pages.length - 1) advancePage();
       return;
     }
 
     setRunning(true);
     try {
       const modelConfig = getCurrentModelConfig();
-      const revisitAgentIds = resolveRevisitAgentIds(useAgentRegistry.getState().listAgents());
       const request = createRevisitChatRequest({
         stage: classroom.stage,
         scenes: classroom.scenes,
@@ -268,6 +296,7 @@ export default function RevisitChallengePage() {
       toast.error(t('revisit.challenge.chatFailed'));
       setError(err instanceof Error ? err.message : String(err));
     } finally {
+      setSpeakingAgentId(null);
       setRunning(false);
     }
   }
@@ -293,10 +322,13 @@ export default function RevisitChallengePage() {
         };
         agentTextByMessageId[event.data.messageId] = '';
         agentIdByMessageId[event.data.messageId] = event.data.agentId;
+        setSpeakingAgentId(event.data.agentId);
+        setLiveSpeech('');
         setMessages((prev) => [...prev, nextMessage]);
       } else if (event.type === 'text_delta' && event.data.messageId) {
         agentTextByMessageId[event.data.messageId] =
           (agentTextByMessageId[event.data.messageId] || '') + event.data.content;
+        setLiveSpeech((prev) => `${prev ?? ''}${event.data.content}`);
         setMessages((prev) =>
           prev.map((message) =>
             message.id === event.data.messageId
@@ -308,7 +340,12 @@ export default function RevisitChallengePage() {
         const text = agentTextByMessageId[event.data.messageId]?.trim();
         const agentId = agentIdByMessageId[event.data.messageId];
         if (text && agentId) {
-          void playAgentSpeech(text, agentId);
+          discussionTTS.handleSegmentSealed(
+            event.data.messageId,
+            `${event.data.messageId}:revisit`,
+            text,
+            agentId,
+          );
         }
       } else if (event.type === 'revisit_gate') {
         gate = event.data;
@@ -336,76 +373,6 @@ export default function RevisitChallengePage() {
       }
     }
     applyGate(gate);
-  }
-
-  async function playAgentSpeech(text: string, agentId: string) {
-    const settings = useSettingsStore.getState();
-    if (!settings.ttsEnabled || settings.ttsMuted || !text.trim()) return;
-
-    if (settings.ttsProviderId === BROWSER_NATIVE_TTS_PROVIDER_ID) {
-      if (!('speechSynthesis' in window)) return;
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      if (classroom?.stage.languageDirective) {
-        utterance.lang = classroom.stage.languageDirective;
-      }
-      utterance.rate = settings.ttsSpeed;
-      utterance.volume = settings.ttsVolume;
-      window.speechSynthesis.speak(utterance);
-      return;
-    }
-
-    const providerConfig = settings.ttsProvidersConfig?.[settings.ttsProviderId];
-    if (!isTTSProviderEnabled(settings.ttsProviderId, providerConfig)) return;
-
-    try {
-      const agent = useAgentRegistry.getState().getAgent(agentId);
-      const providerOptions = await resolveAgentVoiceOptions(agent, {
-        providerId: settings.ttsProviderId,
-        providerConfig,
-        voiceId: settings.ttsVoice,
-        language: classroom?.stage.languageDirective,
-      });
-      const response = await fetch('/api/generate/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text,
-          audioId: `revisit-${Date.now()}`,
-          ttsProviderId: settings.ttsProviderId,
-          ttsModelId: providerConfig?.modelId,
-          ttsVoice: settings.ttsVoice,
-          ttsSpeed: settings.ttsSpeed,
-          ttsApiKey: providerConfig?.apiKey || undefined,
-          ttsBaseUrl: providerConfig?.baseUrl || providerConfig?.customDefaultBaseUrl || undefined,
-          ttsProviderOptions: providerOptions,
-        }),
-      });
-      if (!response.ok) return;
-      const data = (await response.json()) as {
-        success?: boolean;
-        base64?: string;
-        format?: string;
-      };
-      if (!data.success || !data.base64 || !data.format) return;
-
-      const binary = atob(data.base64);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i += 1) {
-        bytes[i] = binary.charCodeAt(i);
-      }
-      const blobUrl = URL.createObjectURL(new Blob([bytes], { type: `audio/${data.format}` }));
-      audioRef.current?.pause();
-      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
-      audioUrlRef.current = blobUrl;
-      const audio = new Audio(blobUrl);
-      audio.volume = settings.ttsVolume;
-      audio.playbackRate = settings.ttsSpeed;
-      audioRef.current = audio;
-      await audio.play();
-    } catch {
-      // Voice is helpful, not session-critical.
-    }
   }
 
   async function finishChallenge() {
@@ -439,7 +406,7 @@ export default function RevisitChallengePage() {
     return <CenteredState title={t('revisit.challenge.loading')} loading />;
   }
 
-  if (loadState === 'error' || !classroom || !blueprint || !currentPage) {
+  if (loadState === 'error' || !classroom || !blueprint || !currentPage || !currentSkeletonScene) {
     return (
       <CenteredState
         title={t('revisit.challenge.loadFailed')}
@@ -450,8 +417,8 @@ export default function RevisitChallengePage() {
   }
 
   return (
-    <main className="flex h-screen min-h-0 flex-col bg-background text-foreground">
-      <header className="flex h-14 shrink-0 items-center justify-between border-b px-4">
+    <main className="flex h-screen min-h-0 flex-col overflow-hidden bg-gray-50 text-foreground dark:bg-gray-900">
+      <header className="z-10 flex h-16 shrink-0 items-center justify-between gap-4 border-b bg-background/95 px-5">
         <div className="flex min-w-0 items-center gap-3">
           <Button
             variant="ghost"
@@ -463,155 +430,155 @@ export default function RevisitChallengePage() {
           </Button>
           <div className="min-w-0">
             <h1 className="truncate text-sm font-semibold">{classroom.stage.name}</h1>
-            <p className="text-xs text-muted-foreground">{progressLabel}</p>
+            <p className="truncate text-xs text-muted-foreground">
+              {progressLabel} · {currentPage.title}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <Badge variant="secondary">
+            {t('revisit.challenge.passed', { count: passedCount, total: pages.length })}
+          </Badge>
           {lastGate ? (
             <Badge variant={lastGate.status === 'pass' ? 'default' : 'secondary'}>
               {t(`revisit.challenge.gate.${lastGate.status}`)}
             </Badge>
           ) : null}
-          <Button onClick={finishChallenge} disabled={judging || running || messages.length === 0}>
+          <Button
+            onClick={finishChallenge}
+            disabled={judging || running || messages.length === 0 || !allPagesPassed}
+          >
             {judging ? <Loader2 className="animate-spin" /> : <CheckCircle2 />}
             {t('revisit.challenge.finish')}
           </Button>
         </div>
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(300px,0.9fr)_minmax(0,1.4fr)]">
-        <aside className="min-h-0 border-b bg-muted/20 p-4 lg:border-b-0 lg:border-r">
-          <div className="flex h-full min-h-0 flex-col gap-4">
-            <div className="flex items-center justify-between gap-3">
-              <Badge variant="secondary">
-                {t('revisit.challenge.passed', { count: passedCount, total: pages.length })}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <section className="relative min-h-0 flex-1 overflow-hidden">
+          <div className="absolute left-4 top-4 z-20 flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="icon"
+              onClick={() => navigatePage(pageIndex - 1)}
+              disabled={pageIndex === 0}
+              aria-label={t('revisit.challenge.previousPage')}
+            >
+              <ChevronLeft className="size-4" />
+            </Button>
+            <Button
+              variant="secondary"
+              size="icon"
+              onClick={() => navigatePage(pageIndex + 1)}
+              disabled={
+                pageIndex >= pages.length - 1 ||
+                !canNavigateRevisitPage(pageStates, pageIndex, pageIndex + 1, demoGateSkipEnabled)
+              }
+              aria-label={t('revisit.challenge.nextPage')}
+            >
+              <ChevronRight className="size-4" />
+            </Button>
+            {currentPageState?.passed ? (
+              <Badge className="gap-1 bg-emerald-600 text-white">
+                <CheckCircle2 className="size-3.5" />
+                {t('revisit.challenge.gate.pass')}
               </Badge>
-              <div className="flex gap-1">
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => setPageIndex((prev) => Math.max(0, prev - 1))}
-                  disabled={pageIndex === 0}
-                  aria-label={t('revisit.challenge.previousPage')}
-                >
-                  <ChevronLeft className="size-4" />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => setPageIndex((prev) => Math.min(pages.length - 1, prev + 1))}
-                  disabled={pageIndex >= pages.length - 1}
-                  aria-label={t('revisit.challenge.nextPage')}
-                >
-                  <ChevronRight className="size-4" />
-                </Button>
-              </div>
-            </div>
-
-            <section className="min-h-0 flex-1 overflow-auto rounded-lg border bg-background p-4">
-              <div className="mb-3 flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-xs font-medium uppercase text-muted-foreground">
-                    {t('revisit.challenge.skeleton')}
-                  </p>
-                  <h2 className="mt-1 text-xl font-semibold tracking-normal">
-                    {currentPage.title}
-                  </h2>
-                </div>
-                {currentPageState?.passed ? (
-                  <CheckCircle2 className="mt-1 size-5 shrink-0 text-emerald-500" />
-                ) : null}
-              </div>
-              <p className="text-sm leading-6 text-muted-foreground">{currentPage.summary}</p>
-              <div className="mt-5 space-y-2">
-                {currentPage.cues.map((cue, index) => (
-                  <div key={`${cue}-${index}`} className="rounded-md bg-muted/50 px-3 py-2 text-sm">
-                    {cue}
-                  </div>
-                ))}
-              </div>
-              <div className="mt-5 grid gap-2">
-                {pages.map((page, index) => (
-                  <button
-                    key={page.id}
-                    onClick={() => setPageIndex(index)}
-                    className={cn(
-                      'flex items-center justify-between rounded-md border px-3 py-2 text-left text-sm transition-colors',
-                      index === pageIndex ? 'border-primary bg-primary/5' : 'hover:bg-muted/50',
-                    )}
-                  >
-                    <span className="truncate">{page.title}</span>
-                    {pageStates[index]?.passed ? (
-                      <CheckCircle2 className="size-4 shrink-0 text-emerald-500" />
-                    ) : null}
-                  </button>
-                ))}
-              </div>
-            </section>
-          </div>
-        </aside>
-
-        <section className="flex min-h-0 flex-col">
-          <div className="min-h-0 flex-1 overflow-auto px-4 py-5">
-            {report ? (
-              <ReportView report={report} />
-            ) : messages.length === 0 ? (
-              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                <GraduationCap className="mr-2 size-4" />
-                {t('revisit.challenge.emptyTranscript')}
-              </div>
-            ) : (
-              <div className="mx-auto flex max-w-3xl flex-col gap-3">
-                {messages.map((message) => (
-                  <MessageBubble key={message.id} message={message} />
-                ))}
-                {running ? (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Loader2 className="size-4 animate-spin" />
-                    {t('revisit.challenge.thinking')}
-                  </div>
-                ) : null}
-              </div>
-            )}
+            ) : null}
           </div>
 
-          {!report ? (
-            <div className="border-t bg-background p-4">
-              <div className="mx-auto flex max-w-3xl gap-3">
-                <div className="relative min-w-0 flex-1">
-                  <Textarea
-                    value={draft}
-                    onChange={(event) => setDraft(event.target.value)}
-                    placeholder={t('revisit.challenge.teacherPlaceholder')}
-                    disabled={running || judging}
-                    className="min-h-24 resize-none pr-12"
-                  />
-                  <SpeechButton
-                    size="sm"
-                    disabled={running || judging}
-                    className="absolute bottom-3 left-3"
-                    onTranscription={(text) =>
-                      setDraft((prev) => `${prev}${prev ? ' ' : ''}${text}`)
-                    }
-                  />
-                  <Mic className="pointer-events-none absolute bottom-4 right-4 size-4 text-muted-foreground/60" />
-                </div>
-                <Button
-                  className="h-24 w-14 shrink-0"
-                  size="icon"
-                  onClick={submitTurn}
-                  disabled={!draft.trim() || running || judging}
-                  aria-label={t('revisit.challenge.send')}
-                >
-                  {running ? <Loader2 className="animate-spin" /> : <Send />}
-                </Button>
+          <div className="flex h-full items-center justify-center p-3">
+            <div className="relative aspect-[16/9] h-full max-h-full max-w-full overflow-hidden rounded-lg bg-white shadow-2xl ring-1 ring-gray-950/5 dark:bg-gray-800 dark:ring-white/10">
+              <RevisitSlideCanvas scene={currentSkeletonScene} />
+              <div className="pointer-events-none absolute right-4 top-4 text-4xl font-black text-gray-200 opacity-60 mix-blend-multiply dark:text-gray-700 dark:mix-blend-screen">
+                {(pageIndex + 1).toString().padStart(2, '0')}
               </div>
+              {report ? (
+                <div className="absolute inset-0 overflow-auto bg-background/95 p-6 backdrop-blur">
+                  <ReportView report={report} />
+                </div>
+              ) : null}
             </div>
-          ) : null}
+          </div>
         </section>
+
+        {!report ? (
+          <div className="shrink-0 border-t bg-background">
+            <Roundtable
+              mode="playback"
+              initialParticipants={revisitParticipants}
+              currentSpeech={liveSpeech}
+              engineMode={running ? 'live' : 'idle'}
+              isStreaming={running}
+              speakingAgentId={speakingAgentId}
+              audioIndicatorState={audioIndicatorState}
+              audioAgentId={audioAgentId}
+              thinkingState={running && !speakingAgentId ? { stage: 'director' } : null}
+              onMessageSend={(message) => {
+                void submitTurn(message);
+              }}
+              onPrevSlide={() => navigatePage(pageIndex - 1)}
+              onNextSlide={() => navigatePage(pageIndex + 1)}
+              onPlayPause={() => {}}
+              currentSceneIndex={pageIndex}
+              scenesCount={pages.length}
+              sidebarCollapsed
+              chatCollapsed
+            />
+          </div>
+        ) : null}
       </div>
     </main>
   );
+}
+
+function RevisitSlideCanvas({ scene }: { scene: Scene }) {
+  const controller = useMemo<SceneDataController<SlideContent>>(
+    () => ({
+      sceneId: scene.id,
+      sceneType: scene.type,
+      getSnapshot: () => scene.content as SlideContent,
+      updateSceneData: () => {},
+    }),
+    [scene],
+  );
+
+  if (scene.content.type !== 'slide') return null;
+
+  return (
+    <SceneProvider controller={controller}>
+      <ScreenCanvas />
+    </SceneProvider>
+  );
+}
+
+function buildRevisitParticipants(args: {
+  agents: AgentConfig[];
+  agentIds: RevisitAgentIds;
+  teacherName: string;
+}): Participant[] {
+  const byId = new Map(args.agents.map((agent) => [agent.id, agent]));
+  const agentIds = Array.from(
+    new Set([...args.agentIds.studentAgentIds, args.agentIds.assistantAgentId]),
+  );
+  return [
+    {
+      id: 'user-1',
+      name: args.teacherName,
+      role: 'teacher',
+      avatar: USER_AVATAR,
+      isOnline: true,
+    },
+    ...agentIds
+      .map((agentId) => byId.get(agentId))
+      .filter((agent): agent is AgentConfig => Boolean(agent))
+      .map((agent) => ({
+        id: agent.id,
+        name: agent.name,
+        role: 'student' as const,
+        avatar: agent.avatar,
+        isOnline: true,
+      })),
+  ];
 }
 
 async function loadClassroomData(classroomId: string): Promise<LoadedClassroom | null> {
@@ -675,41 +642,6 @@ function CenteredState({
         ) : null}
       </div>
     </main>
-  );
-}
-
-function MessageBubble({ message }: { message: RevisitMessage }) {
-  const { t } = useI18n();
-  const isTeacher = message.role === 'teacher';
-  const label = isTeacher
-    ? t('revisit.challenge.teacher')
-    : message.role === 'assistant'
-      ? t('revisit.challenge.assistant')
-      : t('revisit.challenge.student');
-  const Icon = isTeacher ? UserRound : message.role === 'assistant' ? Bot : GraduationCap;
-
-  return (
-    <div className={cn('flex gap-3', isTeacher && 'flex-row-reverse')}>
-      <div
-        className={cn(
-          'flex size-8 shrink-0 items-center justify-center rounded-lg',
-          isTeacher ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground',
-        )}
-      >
-        <Icon className="size-4" />
-      </div>
-      <div className={cn('max-w-[78%] space-y-1', isTeacher && 'items-end text-right')}>
-        <div className="text-xs font-medium text-muted-foreground">{label}</div>
-        <div
-          className={cn(
-            'rounded-lg border px-3 py-2 text-sm leading-6 shadow-sm',
-            isTeacher ? 'bg-primary text-primary-foreground' : 'bg-background',
-          )}
-        >
-          {message.text || '...'}
-        </div>
-      </div>
-    </div>
   );
 }
 

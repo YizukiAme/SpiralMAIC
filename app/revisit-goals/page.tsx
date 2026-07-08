@@ -2,7 +2,6 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { ArrowLeft, BrainCircuit, CheckCircle2, LockKeyhole, Map } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -10,37 +9,56 @@ import { Badge } from '@/components/ui/badge';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { useSettingsStore } from '@/lib/store/settings';
 import { computeLessonMemory } from '@/lib/revisit/memory';
-import { installRevisitDemoCourse } from '@/lib/revisit/demo-course';
 import type { LessonMemorySummary, UserConceptState } from '@/lib/revisit/types';
 
 const DAY = 24 * 60 * 60 * 1000;
 
 const DEMO_NODES = [
   {
-    id: 'fallacy-basics',
+    id: 'core-ideas',
     titleKey: 'revisit.goalMap.nodes.basics',
     offset: 'lg:translate-x-0',
     states: [
-      { conceptId: 'straw-man', label: 'Straw man', hDays: 21, lastRetrievalDaysAgo: 1 },
-      { conceptId: 'ad-hominem', label: 'Ad hominem', hDays: 14, lastRetrievalDaysAgo: 2 },
+      {
+        conceptId: 'core-definition',
+        label: 'Core definition',
+        hDays: 21,
+        lastRetrievalDaysAgo: 1,
+      },
+      { conceptId: 'key-example', label: 'Key example', hDays: 14, lastRetrievalDaysAgo: 2 },
     ],
   },
   {
-    id: 'causal',
+    id: 'transfer',
     titleKey: 'revisit.goalMap.nodes.causal',
     offset: 'lg:translate-x-14',
     states: [
-      { conceptId: 'post-hoc', label: 'Post hoc', hDays: 7, lastRetrievalDaysAgo: 5 },
-      { conceptId: 'false-cause', label: 'False cause', hDays: 6, lastRetrievalDaysAgo: 5 },
+      { conceptId: 'new-context', label: 'New context', hDays: 7, lastRetrievalDaysAgo: 5 },
+      {
+        conceptId: 'compare-cases',
+        label: 'Compare cases',
+        hDays: 6,
+        lastRetrievalDaysAgo: 5,
+      },
     ],
   },
   {
-    id: 'choice-traps',
+    id: 'correction',
     titleKey: 'revisit.goalMap.nodes.choiceTraps',
     offset: 'lg:-translate-x-10',
     states: [
-      { conceptId: 'false-dilemma', label: 'False dilemma', hDays: 4, lastRetrievalDaysAgo: 6 },
-      { conceptId: 'slippery-slope', label: 'Slippery slope', hDays: 3, lastRetrievalDaysAgo: 7 },
+      {
+        conceptId: 'common-mistake',
+        label: 'Common mistake',
+        hDays: 4,
+        lastRetrievalDaysAgo: 6,
+      },
+      {
+        conceptId: 'repair-explanation',
+        label: 'Repair explanation',
+        hDays: 3,
+        lastRetrievalDaysAgo: 7,
+      },
     ],
   },
   {
@@ -54,12 +72,10 @@ const DEMO_NODES = [
 
 export default function RevisitGoalMapPage() {
   const { t } = useI18n();
-  const router = useRouter();
   const stableSuccessesRequired = useSettingsStore((s) => s.stableSuccessesRequired);
   const forgettingSpeedMultiplier = useSettingsStore((s) => s.forgettingSpeedMultiplier);
   const demoAcceleratedClockEnabled = useSettingsStore((s) => s.demoAcceleratedClockEnabled);
   const [now] = useState(() => Date.now());
-  const [installing, setInstalling] = useState(false);
 
   const summaries = DEMO_NODES.map((node) => ({
     ...node,
@@ -103,20 +119,6 @@ export default function RevisitGoalMapPage() {
               {t('revisit.goalMap.subtitle')}
             </p>
           </div>
-          <Button
-            onClick={async () => {
-              setInstalling(true);
-              try {
-                const stageId = await installRevisitDemoCourse();
-                router.push(`/classroom/${stageId}/revisit`);
-              } finally {
-                setInstalling(false);
-              }
-            }}
-            disabled={installing}
-          >
-            {t('revisit.goalMap.openDemoCourse')}
-          </Button>
         </div>
 
         <div className="relative grid gap-5 py-2">
@@ -146,7 +148,7 @@ function createDemoState(
   now: number,
 ): UserConceptState {
   return {
-    stageId: 'demo-fallacies',
+    stageId: 'goal-map-preview',
     conceptId: state.conceptId,
     label: state.label,
     hDays: state.hDays,

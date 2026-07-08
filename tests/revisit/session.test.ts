@@ -5,6 +5,7 @@ import {
   buildRevisitProbeContext,
   createRevisitChatRequest,
   createTeacherRevisitMessage,
+  canNavigateRevisitPage,
   parseRevisitChatSse,
   REVISIT_ASSISTANT_AGENT_ID,
   REVISIT_PAGE_PROBE_CAP,
@@ -156,19 +157,21 @@ describe('revisit session helpers', () => {
   });
 
   test('resolves revisit seats by role before falling back to defaults', () => {
-    expect(
-      resolveRevisitAgentIds([
-        { id: 'custom-student-low', role: 'student', priority: 1 },
-        { id: 'custom-student-high', role: 'student', priority: 9 },
-        { id: 'custom-assistant', role: 'assistant', priority: 3 },
-      ]),
-    ).toEqual({
+    const resolved = resolveRevisitAgentIds([
+      { id: 'custom-student-low', role: 'student', priority: 1 },
+      { id: 'custom-student-mid', role: 'student', priority: 5 },
+      { id: 'custom-student-high', role: 'student', priority: 9 },
+      { id: 'custom-assistant', role: 'assistant', priority: 3 },
+    ]);
+    expect(resolved).toMatchObject({
       studentAgentId: 'custom-student-high',
+      studentAgentIds: ['custom-student-high', 'custom-student-mid', 'custom-student-low'],
       assistantAgentId: 'custom-assistant',
     });
 
     expect(resolveRevisitAgentIds([])).toEqual({
       studentAgentId: REVISIT_STUDENT_AGENT_ID,
+      studentAgentIds: [REVISIT_STUDENT_AGENT_ID],
       assistantAgentId: REVISIT_ASSISTANT_AGENT_ID,
     });
   });
@@ -176,6 +179,7 @@ describe('revisit session helpers', () => {
   test('classifies assistant turns using resolved revisit seats', () => {
     const agentIds = {
       studentAgentId: 'custom-student',
+      studentAgentIds: ['custom-student'],
       assistantAgentId: 'custom-assistant',
     };
     const sse = [
@@ -189,6 +193,23 @@ describe('revisit session helpers', () => {
     expect(roleForRevisitAgent('custom-assistant', agentIds)).toBe('assistant');
     expect(roleForRevisitAgent('custom-student', agentIds)).toBe('student');
     expect(parseRevisitChatSse(sse, agentIds).events.messages[0]?.role).toBe('assistant');
+  });
+
+  test('locks forward revisit navigation until the current page passes', () => {
+    const states: RevisitSessionPageState[] = [
+      { ...pageState, pageIndex: 0, passed: false },
+      { ...pageState, pageIndex: 1, passed: false },
+      { ...pageState, pageIndex: 2, passed: false },
+    ];
+
+    expect(canNavigateRevisitPage(states, 0, 1, false)).toBe(false);
+    expect(canNavigateRevisitPage(states, 0, 0, false)).toBe(true);
+
+    const unlocked = [{ ...states[0], passed: true }, states[1], states[2]];
+    expect(canNavigateRevisitPage(unlocked, 0, 1, false)).toBe(true);
+    expect(canNavigateRevisitPage(unlocked, 1, 2, false)).toBe(false);
+    expect(canNavigateRevisitPage(unlocked, 1, 0, false)).toBe(true);
+    expect(canNavigateRevisitPage(unlocked, 1, 2, true)).toBe(true);
   });
 
   test('parses revisit gate and streamed agent text from SSE', () => {

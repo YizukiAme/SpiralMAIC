@@ -22,6 +22,7 @@ export interface RevisitAgentCandidate {
 
 export interface RevisitAgentIds {
   studentAgentId: string;
+  studentAgentIds: string[];
   assistantAgentId: string;
 }
 
@@ -164,8 +165,12 @@ export function createRevisitChatRequest(args: {
   const page = args.blueprint.skeleton.pages[args.pageState.pageIndex];
   const agentIds = args.agentIds ?? {
     studentAgentId: REVISIT_STUDENT_AGENT_ID,
+    studentAgentIds: [REVISIT_STUDENT_AGENT_ID],
     assistantAgentId: REVISIT_ASSISTANT_AGENT_ID,
   };
+  const studentAgentIds = agentIds.studentAgentIds.length
+    ? agentIds.studentAgentIds
+    : [agentIds.studentAgentId];
 
   return {
     messages: revisitMessagesToUiMessages(args.messages),
@@ -177,7 +182,7 @@ export function createRevisitChatRequest(args: {
       whiteboardOpen: false,
     },
     config: {
-      agentIds: [agentIds.studentAgentId, agentIds.assistantAgentId],
+      agentIds: [...studentAgentIds, agentIds.assistantAgentId],
       sessionType: 'discussion',
       discussionTopic: page?.title || args.stage.name,
       revisitProbeContext: buildRevisitProbeContext({
@@ -200,14 +205,18 @@ export function createRevisitChatRequest(args: {
 }
 
 export function resolveRevisitAgentIds(candidates: RevisitAgentCandidate[]): RevisitAgentIds {
-  const byRolePriority = (role: string, fallback: string) =>
+  const byRolePriority = (role: string) =>
     candidates
       .filter((candidate) => candidate.role === role)
-      .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))[0]?.id ?? fallback;
+      .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+  const studentIds = byRolePriority('student')
+    .slice(0, 3)
+    .map((candidate) => candidate.id);
 
   return {
-    studentAgentId: byRolePriority('student', REVISIT_STUDENT_AGENT_ID),
-    assistantAgentId: byRolePriority('assistant', REVISIT_ASSISTANT_AGENT_ID),
+    studentAgentId: studentIds[0] ?? REVISIT_STUDENT_AGENT_ID,
+    studentAgentIds: studentIds.length ? studentIds : [REVISIT_STUDENT_AGENT_ID],
+    assistantAgentId: byRolePriority('assistant')[0]?.id ?? REVISIT_ASSISTANT_AGENT_ID,
   };
 }
 
@@ -215,10 +224,26 @@ export function roleForRevisitAgent(
   agentId: string,
   agentIds: RevisitAgentIds = {
     studentAgentId: REVISIT_STUDENT_AGENT_ID,
+    studentAgentIds: [REVISIT_STUDENT_AGENT_ID],
     assistantAgentId: REVISIT_ASSISTANT_AGENT_ID,
   },
 ): RevisitMessage['role'] {
   return agentId === agentIds.assistantAgentId ? 'assistant' : 'student';
+}
+
+export function canNavigateRevisitPage(
+  pageStates: RevisitSessionPageState[],
+  currentPageIndex: number,
+  targetPageIndex: number,
+  gateSkipEnabled = false,
+): boolean {
+  if (targetPageIndex < 0 || targetPageIndex >= pageStates.length) return false;
+  if (targetPageIndex <= currentPageIndex) return true;
+  if (gateSkipEnabled) return true;
+
+  return pageStates
+    .slice(currentPageIndex, targetPageIndex)
+    .every((state) => Boolean(state.passed));
 }
 
 export function parseRevisitChatSse(
