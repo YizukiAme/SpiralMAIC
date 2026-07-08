@@ -2,23 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import {
-  ArrowLeft,
-  CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
-  GraduationCap,
-  Loader2,
-} from 'lucide-react';
+import { ArrowLeft, CheckCircle2, GraduationCap, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
-import { Roundtable } from '@/components/roundtable';
+import { Stage as ClassroomStage } from '@/components/stage';
 import type { AudioIndicatorState } from '@/components/roundtable/audio-indicator';
-import { ScreenCanvas } from '@/components/slide-renderer/Editor/ScreenCanvas';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { SceneProvider, type SceneDataController } from '@/lib/contexts/scene-context';
+import { MediaStageProvider } from '@/lib/contexts/media-stage-context';
 import { useI18n } from '@/lib/hooks/use-i18n';
+import { ThemeProvider } from '@/lib/hooks/use-theme';
 import { useDiscussionTTS } from '@/lib/hooks/use-discussion-tts';
 import { ensureRevisitBlueprint, submitRevisitAttempt } from '@/lib/revisit/client';
 import {
@@ -40,9 +33,10 @@ import type {
   RevisitPageReport,
 } from '@/lib/revisit/types';
 import type { StatelessEvent, DirectorState } from '@/lib/types/chat';
-import type { Scene, SlideContent, Stage } from '@/lib/types/stage';
+import type { Scene, Stage as StageModel } from '@/lib/types/stage';
 import { loadStageData } from '@/lib/utils/stage-storage';
 import { getCurrentModelConfig } from '@/lib/utils/model-config';
+import { useStageStore } from '@/lib/store';
 import { useSettingsStore } from '@/lib/store/settings';
 import { useAgentRegistry } from '@/lib/orchestration/registry/store';
 import type { AgentConfig } from '@/lib/orchestration/registry/types';
@@ -50,7 +44,7 @@ import type { Participant } from '@/lib/types/roundtable';
 import { USER_AVATAR } from '@/lib/types/roundtable';
 
 interface LoadedClassroom {
-  stage: Stage;
+  stage: StageModel;
   scenes: Scene[];
 }
 
@@ -150,6 +144,23 @@ export default function RevisitChallengePage() {
     [blueprint, classroom],
   );
   const currentSkeletonScene = skeletonScenes[pageIndex] ?? null;
+  useEffect(() => {
+    if (!classroom || skeletonScenes.length === 0) return;
+    const currentSceneId = skeletonScenes[pageIndex]?.id ?? skeletonScenes[0]?.id ?? null;
+    useStageStore.setState({
+      stage: classroom.stage,
+      scenes: skeletonScenes,
+      currentSceneId,
+      chats: [],
+      mode: 'playback',
+      generatingOutlines: [],
+      outlines: [],
+      generationComplete: true,
+      generationStatus: 'idle',
+      currentGeneratingOrder: -1,
+      failedOutlines: [],
+    });
+  }, [classroom, pageIndex, skeletonScenes]);
   const revisitParticipants = useMemo(
     () =>
       buildRevisitParticipants({
@@ -190,6 +201,13 @@ export default function RevisitChallengePage() {
       );
     },
     [demoGateSkipEnabled, pageStates],
+  );
+  const navigateScene = useCallback(
+    (sceneId: string) => {
+      const targetIndex = skeletonScenes.findIndex((scene) => scene.id === sceneId);
+      if (targetIndex >= 0) navigatePage(targetIndex);
+    },
+    [navigatePage, skeletonScenes],
   );
 
   const applyGate = useCallback(
@@ -416,138 +434,73 @@ export default function RevisitChallengePage() {
     );
   }
 
-  return (
-    <main className="flex h-screen min-h-0 flex-col overflow-hidden bg-gray-50 text-foreground dark:bg-gray-900">
-      <header className="z-10 flex h-16 shrink-0 items-center justify-between gap-4 border-b bg-background/95 px-5">
-        <div className="flex min-w-0 items-center gap-3">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => router.back()}
-            aria-label={t('common.back')}
-          >
-            <ArrowLeft className="size-4" />
-          </Button>
-          <div className="min-w-0">
-            <h1 className="truncate text-sm font-semibold">{classroom.stage.name}</h1>
-            <p className="truncate text-xs text-muted-foreground">
-              {progressLabel} · {currentPage.title}
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Badge variant="secondary">
-            {t('revisit.challenge.passed', { count: passedCount, total: pages.length })}
-          </Badge>
-          {lastGate ? (
-            <Badge variant={lastGate.status === 'pass' ? 'default' : 'secondary'}>
-              {t(`revisit.challenge.gate.${lastGate.status}`)}
-            </Badge>
-          ) : null}
-          <Button
-            onClick={finishChallenge}
-            disabled={judging || running || messages.length === 0 || !allPagesPassed}
-          >
-            {judging ? <Loader2 className="animate-spin" /> : <CheckCircle2 />}
-            {t('revisit.challenge.finish')}
-          </Button>
-        </div>
-      </header>
-
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <section className="relative min-h-0 flex-1 overflow-hidden">
-          <div className="absolute left-4 top-4 z-20 flex items-center gap-2">
-            <Button
-              variant="secondary"
-              size="icon"
-              onClick={() => navigatePage(pageIndex - 1)}
-              disabled={pageIndex === 0}
-              aria-label={t('revisit.challenge.previousPage')}
-            >
-              <ChevronLeft className="size-4" />
-            </Button>
-            <Button
-              variant="secondary"
-              size="icon"
-              onClick={() => navigatePage(pageIndex + 1)}
-              disabled={
-                pageIndex >= pages.length - 1 ||
-                !canNavigateRevisitPage(pageStates, pageIndex, pageIndex + 1, demoGateSkipEnabled)
-              }
-              aria-label={t('revisit.challenge.nextPage')}
-            >
-              <ChevronRight className="size-4" />
-            </Button>
-            {currentPageState?.passed ? (
-              <Badge className="gap-1 bg-emerald-600 text-white">
-                <CheckCircle2 className="size-3.5" />
-                {t('revisit.challenge.gate.pass')}
-              </Badge>
-            ) : null}
-          </div>
-
-          <div className="flex h-full items-center justify-center p-3">
-            <div className="relative aspect-[16/9] h-full max-h-full max-w-full overflow-hidden rounded-lg bg-white shadow-2xl ring-1 ring-gray-950/5 dark:bg-gray-800 dark:ring-white/10">
-              <RevisitSlideCanvas scene={currentSkeletonScene} />
-              <div className="pointer-events-none absolute right-4 top-4 text-4xl font-black text-gray-200 opacity-60 mix-blend-multiply dark:text-gray-700 dark:mix-blend-screen">
-                {(pageIndex + 1).toString().padStart(2, '0')}
-              </div>
-              {report ? (
-                <div className="absolute inset-0 overflow-auto bg-background/95 p-6 backdrop-blur">
-                  <ReportView report={report} />
-                </div>
-              ) : null}
-            </div>
-          </div>
-        </section>
-
-        {!report ? (
-          <div className="shrink-0 border-t bg-background">
-            <Roundtable
-              mode="playback"
-              initialParticipants={revisitParticipants}
-              currentSpeech={liveSpeech}
-              engineMode={running ? 'live' : 'idle'}
-              isStreaming={running}
-              speakingAgentId={speakingAgentId}
-              audioIndicatorState={audioIndicatorState}
-              audioAgentId={audioAgentId}
-              thinkingState={running && !speakingAgentId ? { stage: 'director' } : null}
-              onMessageSend={(message) => {
-                void submitTurn(message);
-              }}
-              onPrevSlide={() => navigatePage(pageIndex - 1)}
-              onNextSlide={() => navigatePage(pageIndex + 1)}
-              onPlayPause={() => {}}
-              currentSceneIndex={pageIndex}
-              scenesCount={pages.length}
-              sidebarCollapsed
-              chatCollapsed
-            />
-          </div>
-        ) : null}
-      </div>
-    </main>
+  const canGoPrev = pageIndex > 0;
+  const canGoNext =
+    pageIndex < pages.length - 1 &&
+    canNavigateRevisitPage(pageStates, pageIndex, pageIndex + 1, demoGateSkipEnabled);
+  const headerSlot = (
+    <div className="flex items-center gap-2">
+      <Badge variant="secondary" className="hidden sm:inline-flex">
+        {progressLabel}
+      </Badge>
+      <Badge variant="secondary">
+        {t('revisit.challenge.passed', { count: passedCount, total: pages.length })}
+      </Badge>
+      {lastGate ? (
+        <Badge variant={lastGate.status === 'pass' ? 'default' : 'secondary'}>
+          {t(`revisit.challenge.gate.${lastGate.status}`)}
+        </Badge>
+      ) : null}
+      <Button
+        onClick={finishChallenge}
+        disabled={judging || running || messages.length === 0 || !allPagesPassed}
+        size="sm"
+      >
+        {judging ? <Loader2 className="animate-spin" /> : <CheckCircle2 />}
+        {t('revisit.challenge.finish')}
+      </Button>
+    </div>
   );
-}
-
-function RevisitSlideCanvas({ scene }: { scene: Scene }) {
-  const controller = useMemo<SceneDataController<SlideContent>>(
-    () => ({
-      sceneId: scene.id,
-      sceneType: scene.type,
-      getSnapshot: () => scene.content as SlideContent,
-      updateSceneData: () => {},
-    }),
-    [scene],
-  );
-
-  if (scene.content.type !== 'slide') return null;
+  const canvasOverlay = report ? (
+    <div className="absolute inset-0 z-[130] overflow-auto bg-background/95 p-6 backdrop-blur">
+      <ReportView report={report} />
+    </div>
+  ) : currentPageState?.passed ? (
+    <div className="absolute left-4 top-4 z-[120]">
+      <Badge className="gap-1 bg-emerald-600 text-white">
+        <CheckCircle2 className="size-3.5" />
+        {t('revisit.challenge.gate.pass')}
+      </Badge>
+    </div>
+  ) : null;
 
   return (
-    <SceneProvider controller={controller}>
-      <ScreenCanvas />
-    </SceneProvider>
+    <ThemeProvider>
+      <MediaStageProvider value={classroomId}>
+        <div className="flex h-screen flex-col overflow-hidden">
+          <ClassroomStage
+            revisitConfig={{
+              participants: revisitParticipants,
+              headerSlot,
+              canvasOverlay,
+              currentSpeech: liveSpeech,
+              engineMode: running ? 'live' : 'idle',
+              isStreaming: running,
+              speakingAgentId,
+              audioIndicatorState,
+              audioAgentId,
+              thinkingState: running && !speakingAgentId ? { stage: 'director' } : null,
+              onMessageSend: submitTurn,
+              onPrevScene: () => navigatePage(pageIndex - 1),
+              onNextScene: () => navigatePage(pageIndex + 1),
+              onSceneSelect: navigateScene,
+              canGoPrev,
+              canGoNext,
+            }}
+          />
+        </div>
+      </MediaStageProvider>
+    </ThemeProvider>
   );
 }
 

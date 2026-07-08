@@ -8,6 +8,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from 'react';
 import { useStageStore } from '@/lib/store';
 import { PENDING_SCENE_ID } from '@/lib/store/stage';
@@ -26,6 +27,7 @@ import { useDiscussionTTS } from '@/lib/hooks/use-discussion-tts';
 import { useWidgetIframeStore } from '@/lib/store/widget-iframe';
 import type { AudioIndicatorState } from '@/components/roundtable/audio-indicator';
 import type { Action, DiscussionAction, SpeechAction } from '@/lib/types/action';
+import type { Participant } from '@/lib/types/roundtable';
 import { cn } from '@/lib/utils';
 // Playback state persistence removed — refresh always starts from the beginning
 import { ChatArea, type ChatAreaRef } from '@/components/chat/chat-area';
@@ -54,12 +56,32 @@ export interface PlaybackChromeRootHandle {
   teardown: () => Promise<void>;
 }
 
+export interface RevisitPlaybackConfig {
+  readonly participants: Participant[];
+  readonly headerSlot?: ReactNode;
+  readonly canvasOverlay?: ReactNode;
+  readonly currentSpeech?: string | null;
+  readonly engineMode?: EngineMode;
+  readonly isStreaming?: boolean;
+  readonly speakingAgentId?: string | null;
+  readonly audioIndicatorState?: AudioIndicatorState;
+  readonly audioAgentId?: string | null;
+  readonly thinkingState?: { stage: string; agentId?: string } | null;
+  readonly onMessageSend: (message: string) => void | Promise<void>;
+  readonly onPrevScene: () => void;
+  readonly onNextScene: () => void;
+  readonly onSceneSelect: (sceneId: string) => void;
+  readonly canGoPrev: boolean;
+  readonly canGoNext: boolean;
+}
+
 interface PlaybackChromeRootProps {
   readonly onRetryOutline?: (outlineId: string) => Promise<void>;
   /** Whether the Pro Switch in Header should be enabled. */
   readonly canEnterProMode?: boolean;
   /** Pro Switch click handler — parent coordinates editLock + teardown. */
   readonly onEnterProMode?: () => void;
+  readonly revisitConfig?: RevisitPlaybackConfig;
 }
 
 /**
@@ -70,7 +92,10 @@ interface PlaybackChromeRootProps {
  * the engine wind down cleanly.
  */
 export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackChromeRootProps>(
-  function PlaybackChromeRoot({ onRetryOutline, canEnterProMode, onEnterProMode }, ref) {
+  function PlaybackChromeRoot(
+    { onRetryOutline, canEnterProMode, onEnterProMode, revisitConfig },
+    ref,
+  ) {
     const { t } = useI18n();
     const {
       mode,
@@ -149,8 +174,8 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
 
     // Generate participants from selected agents
     const participants = useMemo(
-      () => agentsToParticipants(selectedAgentIds, t),
-      [selectedAgentIds, t],
+      () => revisitConfig?.participants ?? agentsToParticipants(selectedAgentIds, t),
+      [revisitConfig?.participants, selectedAgentIds, t],
     );
 
     // Resolved AgentConfig array for hooks that need full agent objects
@@ -749,6 +774,10 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
     const gatedSceneSwitch = useCallback(
       (targetSceneId: string): boolean => {
         if (targetSceneId === currentSceneId) return false;
+        if (revisitConfig) {
+          revisitConfig.onSceneSelect(targetSceneId);
+          return true;
+        }
         if (isTopicActive) {
           setPendingSceneId(targetSceneId);
           return false;
@@ -756,7 +785,7 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
         setCurrentSceneId(targetSceneId);
         return true;
       },
-      [currentSceneId, isTopicActive, setCurrentSceneId],
+      [currentSceneId, isTopicActive, revisitConfig, setCurrentSceneId],
     );
 
     /** User confirmed scene switch via AlertDialog */
@@ -828,6 +857,10 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
 
     // previous scene (gated)
     const handlePreviousScene = useCallback(() => {
+      if (revisitConfig) {
+        revisitConfig.onPrevScene();
+        return;
+      }
       if (isPendingScene) {
         // From pending page → go to last real scene
         if (scenes.length > 0) {
@@ -839,10 +872,14 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
       if (currentIndex > 0) {
         gatedSceneSwitch(scenes[currentIndex - 1].id);
       }
-    }, [currentSceneId, gatedSceneSwitch, isPendingScene, scenes]);
+    }, [currentSceneId, gatedSceneSwitch, isPendingScene, revisitConfig, scenes]);
 
     // next scene (gated)
     const handleNextScene = useCallback(() => {
+      if (revisitConfig) {
+        revisitConfig.onNextScene();
+        return;
+      }
       if (isPendingScene) return; // Already on pending, nowhere to go
       const currentIndex = scenes.findIndex((s) => s.id === currentSceneId);
       if (currentIndex < scenes.length - 1) {
@@ -856,6 +893,7 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
       gatedSceneSwitch,
       canAdvanceToPendingSlot,
       isPendingScene,
+      revisitConfig,
       scenes,
       setCurrentSceneId,
     ]);
@@ -1056,8 +1094,9 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
                 (isCourseComplete && isPendingScene ? t('stage.courseComplete') : '')
               }
               mode={mode}
-              canEdit={!!canEnterProMode}
+              canEdit={!!canEnterProMode && !revisitConfig}
               onToggleEditMode={onEnterProMode}
+              rightSlot={revisitConfig?.headerSlot}
             />
           )}
 
@@ -1078,22 +1117,30 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
               mode={mode}
               engineState={canvasEngineState}
               isLiveSession={
-                chatIsStreaming || isTopicPending || engineMode === 'live' || !!chatSessionType
+                revisitConfig
+                  ? !!revisitConfig.isStreaming
+                  : chatIsStreaming || isTopicPending || engineMode === 'live' || !!chatSessionType
               }
               whiteboardOpen={whiteboardOpen}
               sidebarCollapsed={sidebarCollapsed}
-              chatCollapsed={chatAreaCollapsed}
+              chatCollapsed={revisitConfig ? true : chatAreaCollapsed}
               onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
-              onToggleChat={() => setChatAreaCollapsed(!chatAreaCollapsed)}
+              onToggleChat={
+                revisitConfig ? undefined : () => setChatAreaCollapsed(!chatAreaCollapsed)
+              }
               onPrevSlide={handlePreviousScene}
               onNextSlide={handleNextScene}
+              canGoPrevOverride={revisitConfig?.canGoPrev}
+              canGoNextOverride={revisitConfig?.canGoNext}
               onPlayPause={handlePlayPause}
               onWhiteboardClose={handleWhiteboardToggle}
               isPresenting={isPresenting}
               onTogglePresentation={togglePresentation}
               showStopDiscussion={
-                engineMode === 'live' ||
-                (chatIsStreaming && (chatSessionType === 'qa' || chatSessionType === 'discussion'))
+                !revisitConfig &&
+                (engineMode === 'live' ||
+                  (chatIsStreaming &&
+                    (chatSessionType === 'qa' || chatSessionType === 'discussion')))
               }
               onStopDiscussion={handleStopDiscussion}
               hideToolbar={mode === 'playback' || (isPresenting && !controlsVisible)}
@@ -1107,6 +1154,7 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
                   ? () => onRetryOutline(generatingOutlines[0].id)
                   : undefined
               }
+              overlay={revisitConfig?.canvasOverlay}
             />
           </div>
 
@@ -1122,31 +1170,37 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
               <Roundtable
                 mode={mode}
                 initialParticipants={participants}
-                playbackView={playbackView}
-                currentSpeech={liveSpeech}
-                lectureSpeech={lectureSpeech}
-                idleText={firstSpeechText}
-                playbackCompleted={playbackCompleted}
-                discussionRequest={discussionRequest}
-                engineMode={engineMode}
-                isStreaming={chatIsStreaming}
-                audioIndicatorState={audioIndicatorState}
-                audioAgentId={audioAgentId}
+                playbackView={revisitConfig ? undefined : playbackView}
+                currentSpeech={revisitConfig ? revisitConfig.currentSpeech : liveSpeech}
+                lectureSpeech={revisitConfig ? null : lectureSpeech}
+                idleText={revisitConfig ? null : firstSpeechText}
+                playbackCompleted={revisitConfig ? false : playbackCompleted}
+                discussionRequest={revisitConfig ? null : discussionRequest}
+                engineMode={revisitConfig?.engineMode ?? engineMode}
+                isStreaming={revisitConfig?.isStreaming ?? chatIsStreaming}
+                audioIndicatorState={revisitConfig?.audioIndicatorState ?? audioIndicatorState}
+                audioAgentId={revisitConfig?.audioAgentId ?? audioAgentId}
                 sessionType={
-                  chatSessionType === 'qa'
+                  revisitConfig
                     ? 'qa'
-                    : chatSessionType === 'discussion'
-                      ? 'discussion'
-                      : undefined
+                    : chatSessionType === 'qa'
+                      ? 'qa'
+                      : chatSessionType === 'discussion'
+                        ? 'discussion'
+                        : undefined
                 }
-                speakingAgentId={speakingAgentId}
-                speechProgress={speechProgress}
-                showEndFlash={showEndFlash}
+                speakingAgentId={revisitConfig?.speakingAgentId ?? speakingAgentId}
+                speechProgress={revisitConfig ? null : speechProgress}
+                showEndFlash={revisitConfig ? false : showEndFlash}
                 endFlashSessionType={endFlashSessionType}
-                thinkingState={thinkingState}
-                isCueUser={isCueUser}
-                isTopicPending={isTopicPending}
+                thinkingState={revisitConfig?.thinkingState ?? thinkingState}
+                isCueUser={revisitConfig ? false : isCueUser}
+                isTopicPending={revisitConfig ? false : isTopicPending}
                 onMessageSend={async (msg) => {
+                  if (revisitConfig) {
+                    await revisitConfig.onMessageSend(msg);
+                    return;
+                  }
                   // Always clear Level-1 pause state — the closure may hold a stale
                   // isDiscussionPaused value (e.g. voice input's onTranscription callback
                   // captures onMessageSend before React re-renders with the updated state).
@@ -1198,6 +1252,7 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
                   engineRef.current?.skipDiscussion();
                 }}
                 onStopDiscussion={handleStopDiscussion}
+                showStopDiscussionOverride={revisitConfig ? false : undefined}
                 onInputActivate={() => {
                   // Level-1 pause: freeze buffer tick + TTS audio while SSE keeps buffering.
                   // User resumes manually via Space / pause button after closing the input.
@@ -1236,11 +1291,15 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
                 scenesCount={totalScenesCount}
                 whiteboardOpen={whiteboardOpen}
                 sidebarCollapsed={sidebarCollapsed}
-                chatCollapsed={chatAreaCollapsed}
+                chatCollapsed={revisitConfig ? true : chatAreaCollapsed}
                 onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
-                onToggleChat={() => setChatAreaCollapsed(!chatAreaCollapsed)}
+                onToggleChat={
+                  revisitConfig ? undefined : () => setChatAreaCollapsed(!chatAreaCollapsed)
+                }
                 onPrevSlide={handlePreviousScene}
                 onNextSlide={handleNextScene}
+                canGoPrevOverride={revisitConfig?.canGoPrev}
+                canGoNextOverride={revisitConfig?.canGoNext}
                 onWhiteboardClose={handleWhiteboardToggle}
                 isPresenting={isPresenting}
                 controlsVisible={controlsVisible}
@@ -1252,64 +1311,65 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
           )}
         </div>
 
-        {/* Chat Area — playback / autonomous always renders it here; Pro
-          (edit) mode unmounts this whole PlaybackChromeRoot, so the
-          edit branch has no chat. */}
-        <div className="flex shrink-0">
-          <ChatArea
-            ref={chatAreaRef}
-            width={chatAreaWidth}
-            onWidthChange={setChatAreaWidth}
-            collapsed={chatAreaCollapsed}
-            onCollapseChange={setChatAreaCollapsed}
-            activeBubbleId={activeBubbleId}
-            onActiveBubble={(id) => setActiveBubbleId(id)}
-            currentSceneId={currentSceneId}
-            onLiveSpeech={(text, agentId) => {
-              // Capture epoch at call time — discard if scene has changed since
-              const epoch = sceneEpochRef.current;
-              // Use queueMicrotask to let any pending scene-switch reset settle first
-              queueMicrotask(() => {
-                if (sceneEpochRef.current !== epoch) return; // stale — scene changed
-                setLiveSpeech(text);
-                if (agentId !== undefined) {
-                  setSpeakingAgentId(agentId);
-                }
-                if (text !== null || agentId) {
-                  setChatIsStreaming(true);
-                  setChatSessionType(chatAreaRef.current?.getActiveSessionType?.() ?? null);
-                  setIsTopicPending(false);
-                } else if (text === null && agentId === null) {
-                  setChatIsStreaming(false);
-                  // Don't clear chatSessionType here — it's needed by the stop
-                  // button when director cues user (cue_user → done → liveSpeech null).
-                  // It gets properly cleared in doSessionCleanup and scene change.
-                }
-              });
-            }}
-            onSpeechProgress={(ratio) => {
-              const epoch = sceneEpochRef.current;
-              queueMicrotask(() => {
-                if (sceneEpochRef.current !== epoch) return;
-                setSpeechProgress(ratio);
-              });
-            }}
-            onThinking={(state) => {
-              const epoch = sceneEpochRef.current;
-              queueMicrotask(() => {
-                if (sceneEpochRef.current !== epoch) return;
-                setThinkingState(state);
-              });
-            }}
-            onCueUser={(_fromAgentId, _prompt) => {
-              setIsCueUser(true);
-            }}
-            onLiveSessionError={handleLiveSessionError}
-            onStopSession={doSessionCleanup}
-            onSegmentSealed={discussionTTS.handleSegmentSealed}
-            shouldHoldAfterReveal={discussionTTS.shouldHold}
-          />
-        </div>
+        {/* Chat Area — hidden for reverse challenges so transient skeleton
+          scenes never flow through the persisted chat/session path. */}
+        {!revisitConfig && (
+          <div className="flex shrink-0">
+            <ChatArea
+              ref={chatAreaRef}
+              width={chatAreaWidth}
+              onWidthChange={setChatAreaWidth}
+              collapsed={chatAreaCollapsed}
+              onCollapseChange={setChatAreaCollapsed}
+              activeBubbleId={activeBubbleId}
+              onActiveBubble={(id) => setActiveBubbleId(id)}
+              currentSceneId={currentSceneId}
+              onLiveSpeech={(text, agentId) => {
+                // Capture epoch at call time — discard if scene has changed since
+                const epoch = sceneEpochRef.current;
+                // Use queueMicrotask to let any pending scene-switch reset settle first
+                queueMicrotask(() => {
+                  if (sceneEpochRef.current !== epoch) return; // stale — scene changed
+                  setLiveSpeech(text);
+                  if (agentId !== undefined) {
+                    setSpeakingAgentId(agentId);
+                  }
+                  if (text !== null || agentId) {
+                    setChatIsStreaming(true);
+                    setChatSessionType(chatAreaRef.current?.getActiveSessionType?.() ?? null);
+                    setIsTopicPending(false);
+                  } else if (text === null && agentId === null) {
+                    setChatIsStreaming(false);
+                    // Don't clear chatSessionType here — it's needed by the stop
+                    // button when director cues user (cue_user → done → liveSpeech null).
+                    // It gets properly cleared in doSessionCleanup and scene change.
+                  }
+                });
+              }}
+              onSpeechProgress={(ratio) => {
+                const epoch = sceneEpochRef.current;
+                queueMicrotask(() => {
+                  if (sceneEpochRef.current !== epoch) return;
+                  setSpeechProgress(ratio);
+                });
+              }}
+              onThinking={(state) => {
+                const epoch = sceneEpochRef.current;
+                queueMicrotask(() => {
+                  if (sceneEpochRef.current !== epoch) return;
+                  setThinkingState(state);
+                });
+              }}
+              onCueUser={(_fromAgentId, _prompt) => {
+                setIsCueUser(true);
+              }}
+              onLiveSessionError={handleLiveSessionError}
+              onStopSession={doSessionCleanup}
+              onSegmentSealed={discussionTTS.handleSegmentSealed}
+              shouldHoldAfterReveal={discussionTTS.shouldHold}
+            />
+          </div>
+        )}
 
         {/* Scene switch confirmation dialog */}
         <AlertDialog

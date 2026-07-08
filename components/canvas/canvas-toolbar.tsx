@@ -33,6 +33,8 @@ export interface CanvasToolbarProps {
   readonly onToggleChat?: () => void;
   readonly onPrevSlide: () => void;
   readonly onNextSlide: () => void;
+  readonly canGoPrevOverride?: boolean;
+  readonly canGoNextOverride?: boolean;
   readonly onPlayPause: () => void;
   readonly onWhiteboardClose: () => void;
   readonly showStopDiscussion?: boolean;
@@ -92,6 +94,8 @@ export function CanvasToolbar({
   onToggleChat,
   onPrevSlide,
   onNextSlide,
+  canGoPrevOverride,
+  canGoNextOverride,
   onPlayPause,
   onWhiteboardClose,
   showStopDiscussion,
@@ -110,8 +114,8 @@ export function CanvasToolbar({
   onCycleSpeed,
 }: CanvasToolbarProps) {
   const { t } = useI18n();
-  const canGoPrev = currentSceneIndex > 0;
-  const canGoNext = currentSceneIndex < scenesCount - 1;
+  const canGoPrev = canGoPrevOverride ?? currentSceneIndex > 0;
+  const canGoNext = canGoNextOverride ?? currentSceneIndex < scenesCount - 1;
   const showPlayPause = !isLiveSession;
 
   const whiteboardElementCount = useStageStore(

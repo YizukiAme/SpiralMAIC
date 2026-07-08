@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import { useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Play } from 'lucide-react';
@@ -21,6 +22,7 @@ interface CanvasAreaProps extends CanvasToolbarProps {
   readonly isCourseComplete?: boolean;
   readonly isGenerationFailed?: boolean;
   readonly onRetryGeneration?: () => void;
+  readonly overlay?: ReactNode;
 }
 
 export function CanvasArea({
@@ -48,6 +50,9 @@ export function CanvasArea({
   isCourseComplete,
   isGenerationFailed,
   onRetryGeneration,
+  canGoPrevOverride,
+  canGoNextOverride,
+  overlay,
 }: CanvasAreaProps) {
   const { t } = useI18n();
   const showControls = mode === 'playback' && !whiteboardOpen;
@@ -199,6 +204,8 @@ export function CanvasArea({
             </div>
           )}
 
+          {overlay}
+
           {/* Play hint — breathing button when idle or paused (slides only) */}
           <AnimatePresence>
             {showPlayHint && (
@@ -261,6 +268,8 @@ export function CanvasArea({
           onToggleChat={onToggleChat}
           onPrevSlide={onPrevSlide}
           onNextSlide={onNextSlide}
+          canGoPrevOverride={canGoPrevOverride}
+          canGoNextOverride={canGoNextOverride}
           onPlayPause={onPlayPause}
           onWhiteboardClose={onWhiteboardClose}
           isPresenting={isPresenting}
