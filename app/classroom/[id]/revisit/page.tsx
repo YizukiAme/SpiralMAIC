@@ -28,6 +28,7 @@ import {
   createTeacherRevisitMessage,
   REVISIT_ASSISTANT_AGENT_ID,
   REVISIT_PAGE_PROBE_CAP,
+  resolveRevisitAgentIds,
   type RevisitMessage,
   type RevisitSessionPageState,
 } from '@/lib/revisit/session';
@@ -248,6 +249,7 @@ export default function RevisitChallengePage() {
         apiKey: modelConfig.apiKey,
         baseUrl: modelConfig.baseUrl,
         providerType: modelConfig.providerType,
+        agentIds: resolveRevisitAgentIds(useAgentRegistry.getState().listAgents()),
       });
 
       const response = await fetch('/api/chat', {
