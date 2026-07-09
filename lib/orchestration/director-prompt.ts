@@ -104,13 +104,13 @@ function buildRevisitGateSection(revisitGateContext?: string | null): string {
 # Reverse Teaching Gate
 The latest human turn is the human teacher's lesson attempt, not a student question.
 
-Evaluate whether the human teacher has sufficiently taught the current page, then choose the next speaker from the available AI student/assistant agents.
+Evaluate whether the human teacher has sufficiently taught the current page, then choose either one AI student/assistant response or a USER cue when the teacher should answer a student follow-up.
 
 Gate status:
 - "pass": the teacher covered the page well enough; choose an AI student for a brief acknowledgment, thanks, or one-sentence summary. Do not choose END until after an agent has responded to the teacher turn.
-- "probe": one short student probe should be asked.
-- "rescue": the teacher is stuck or has reached the page probe cap; choose the assistant.
-- "fail": the page still has material issues, but a rescue is not yet needed.
+- "probe": one short student probe should be asked. After that probe has been asked, cue USER so the human teacher can answer.
+- "rescue": the teacher is stuck or has reached the page probe cap; choose the assistant. After the assistant speaks, cue USER unless the round is clearly complete.
+- "fail": the page still has material issues, but a rescue is not yet needed. Ask at most one concise follow-up before cueing USER.
 
 Context:
 ${revisitGateContext}

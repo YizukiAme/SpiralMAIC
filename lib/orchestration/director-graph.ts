@@ -113,19 +113,20 @@ export function resolveDirectorDecisionForAvailableAgents({
     : null;
 
   if (decision.nextAgentId === 'USER') {
-    return revisitMode && fallbackAgentId
-      ? {
-          nextAgentId: fallbackAgentId,
-          shouldEnd: false,
-          cueUser: false,
-          fallbackUsed: true,
-        }
-      : {
-          nextAgentId: null,
-          shouldEnd: true,
-          cueUser: true,
-          fallbackUsed: false,
-        };
+    if (revisitMode && !agentRespondedAfterLatestHuman && fallbackAgentId) {
+      return {
+        nextAgentId: fallbackAgentId,
+        shouldEnd: false,
+        cueUser: false,
+        fallbackUsed: true,
+      };
+    }
+    return {
+      nextAgentId: null,
+      shouldEnd: true,
+      cueUser: true,
+      fallbackUsed: false,
+    };
   }
 
   if (decision.shouldEnd || !decision.nextAgentId) {

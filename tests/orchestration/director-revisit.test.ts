@@ -113,6 +113,38 @@ describe('revisit director decision fallback', () => {
     });
   });
 
+  test('revisit mode honors USER cue after an agent has already responded to the teacher', () => {
+    const resolved = resolveDirectorDecisionForAvailableAgents({
+      decision: { nextAgentId: 'USER', shouldEnd: false },
+      agents: [studentLow, assistant],
+      revisitMode: true,
+      agentRespondedAfterLatestHuman: true,
+    });
+
+    expect(resolved).toEqual({
+      nextAgentId: null,
+      shouldEnd: true,
+      cueUser: true,
+      fallbackUsed: false,
+    });
+  });
+
+  test('revisit mode still prevents USER cue before the first agent response to a teacher turn', () => {
+    const resolved = resolveDirectorDecisionForAvailableAgents({
+      decision: { nextAgentId: 'USER', shouldEnd: false },
+      agents: [studentLow, assistant],
+      revisitMode: true,
+      agentRespondedAfterLatestHuman: false,
+    });
+
+    expect(resolved).toMatchObject({
+      nextAgentId: 'student-low',
+      shouldEnd: false,
+      cueUser: false,
+      fallbackUsed: true,
+    });
+  });
+
   test('revisit pass does not treat older agent turns as a response to the latest teacher turn', () => {
     const messages = [
       { id: 'teacher-1', role: 'user', parts: [{ type: 'text', text: '第一轮' }] },

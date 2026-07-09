@@ -10,6 +10,7 @@ import { SceneProvider } from '@/lib/contexts/scene-context';
 import { Whiteboard } from '@/components/whiteboard';
 import { CanvasToolbar } from '@/components/canvas/canvas-toolbar';
 import type { CanvasToolbarProps } from '@/components/canvas/canvas-toolbar';
+import { shouldShowCanvasPlayHint } from '@/components/canvas/playback-control-policy';
 import type { Scene, StageMode } from '@/lib/types/stage';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { ClassroomCompletePageConnected } from '@/components/scene-renderers/classroom-complete';
@@ -23,6 +24,7 @@ interface CanvasAreaProps extends CanvasToolbarProps {
   readonly isGenerationFailed?: boolean;
   readonly onRetryGeneration?: () => void;
   readonly overlay?: ReactNode;
+  readonly hidePlaybackControls?: boolean;
 }
 
 export function CanvasArea({
@@ -53,19 +55,31 @@ export function CanvasArea({
   canGoPrevOverride,
   canGoNextOverride,
   overlay,
+  hidePlaybackControls,
 }: CanvasAreaProps) {
   const { t } = useI18n();
   const showControls = mode === 'playback' && !whiteboardOpen;
   const showPlayHint =
     showControls &&
-    engineState !== 'playing' &&
-    currentScene?.type === 'slide' &&
-    !isLiveSession &&
-    !isPendingScene;
+    shouldShowCanvasPlayHint({
+      mode,
+      engineState,
+      sceneType: currentScene?.type,
+      isLiveSession: Boolean(isLiveSession),
+      isPendingScene,
+      hidePlaybackControls,
+    });
 
   const handleSlideClick = useCallback(
     (e: React.MouseEvent) => {
-      if (!showControls || isLiveSession || currentScene?.type !== 'slide') return;
+      if (
+        hidePlaybackControls ||
+        !showControls ||
+        isLiveSession ||
+        currentScene?.type !== 'slide'
+      ) {
+        return;
+      }
       // Don't trigger page play/pause when clicking inside a video element's visual area.
       // Video elements may be visually covered by other slide elements (e.g. text),
       // so we check click coordinates against all video element bounding rects.
@@ -84,7 +98,7 @@ export function CanvasArea({
       }
       onPlayPause();
     },
-    [showControls, isLiveSession, onPlayPause, currentScene?.type],
+    [hidePlaybackControls, showControls, isLiveSession, onPlayPause, currentScene?.type],
   );
 
   return (
@@ -276,6 +290,7 @@ export function CanvasArea({
           onTogglePresentation={onTogglePresentation}
           showStopDiscussion={showStopDiscussion}
           onStopDiscussion={onStopDiscussion}
+          hidePlaybackControls={hidePlaybackControls}
         />
       )}
     </div>

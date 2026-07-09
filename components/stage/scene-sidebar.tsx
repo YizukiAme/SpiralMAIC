@@ -12,6 +12,8 @@ import {
   AlertCircle,
   RefreshCw,
   Trophy,
+  CheckCircle2,
+  LockKeyhole,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { SlideThumbnail } from '@/components/slide-renderer/SlideThumbnail';
@@ -27,6 +29,7 @@ interface SceneSidebarProps {
   readonly onSceneSelect?: (sceneId: string) => void;
   readonly onRetryOutline?: (outlineId: string) => Promise<void>;
   readonly isCourseComplete?: boolean;
+  readonly sceneStatuses?: Record<string, { passed?: boolean; locked?: boolean }>;
 }
 
 const DEFAULT_WIDTH = 220;
@@ -39,6 +42,7 @@ export function SceneSidebar({
   onSceneSelect,
   onRetryOutline,
   isCourseComplete,
+  sceneStatuses,
 }: SceneSidebarProps) {
   const { t } = useI18n();
   const router = useRouter();
@@ -152,6 +156,7 @@ export function SceneSidebar({
             const isInteractive = scene.type === 'interactive';
             const slideContent = isSlide ? (scene.content as SlideContent) : null;
             const interactiveContent = isInteractive ? (scene.content as InteractiveContent) : null;
+            const status = sceneStatuses?.[scene.id];
 
             return (
               <div
@@ -196,6 +201,17 @@ export function SceneSidebar({
                       {scene.title}
                     </span>
                   </div>
+                  {status?.passed ? (
+                    <CheckCircle2
+                      className="size-3.5 shrink-0 text-emerald-500"
+                      aria-label={t('revisit.challenge.gate.pass')}
+                    />
+                  ) : status?.locked ? (
+                    <LockKeyhole
+                      className="size-3.5 shrink-0 text-gray-400 dark:text-gray-500"
+                      aria-label={t('revisit.challenge.locked')}
+                    />
+                  ) : null}
                 </div>
 
                 {/* Thumbnail */}

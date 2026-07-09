@@ -1,18 +1,9 @@
-import type { Scene, Stage } from '@/lib/types/stage';
 import type {
   RevisitConcept,
-  RevisitDimension,
   RevisitExamBlueprint,
   RevisitProbe,
   RevisitSkeletonPage,
 } from '@/lib/revisit/types';
-
-const DIMENSIONS: RevisitDimension[] = [
-  'clarity',
-  'doubtResolution',
-  'transfer',
-  'errorCorrection',
-];
 
 function slugify(value: string, fallback: string): string {
   const slug = value
@@ -80,25 +71,6 @@ function buildConceptLookup(concepts: RevisitConcept[]): Map<string, string> {
   return map;
 }
 
-function fallbackConcept(label: string, stageId: string, generatedAt: number): RevisitConcept {
-  const id = slugify(label, `concept-${generatedAt}`);
-  return {
-    id,
-    label,
-    summary: label,
-    anchors: normalizeAnchors({}, label),
-    probes: [
-      {
-        id: `${id}-probe-01`,
-        conceptId: id,
-        pageIndex: 0,
-        kind: 'confusion',
-        prompt: `I am not sure I can tell the key idea of ${label} apart from a nearby idea. Could you compare them?`,
-      },
-    ],
-  };
-}
-
 export function normalizeBlueprint(
   raw: unknown,
   meta: { stageId: string; generatedAt: number; sourceHash: string },
@@ -122,7 +94,7 @@ export function normalizeBlueprint(
   });
 
   if (concepts.length === 0) {
-    concepts.push(fallbackConcept('Core idea', meta.stageId, meta.generatedAt));
+    throw new Error('Revisit blueprint response has no concepts');
   }
 
   const lookup = buildConceptLookup(concepts);
@@ -152,13 +124,7 @@ export function normalizeBlueprint(
   });
 
   if (pages.length === 0) {
-    pages.push({
-      id: 'page-01',
-      title: concepts[0].label,
-      summary: concepts[0].summary,
-      conceptIds: [concepts[0].id],
-      cues: DIMENSIONS.map((dimension) => concepts[0].anchors[dimension][0]).filter(Boolean),
-    });
+    throw new Error('Revisit blueprint response has no skeleton pages');
   }
 
   const pageIndexByConcept = new Map<string, number>();
@@ -171,21 +137,12 @@ export function normalizeBlueprint(
   for (const [conceptIndex, concept] of concepts.entries()) {
     const rawConcept = rawConcepts[conceptIndex] as Record<string, unknown> | undefined;
     const rawProbes = Array.isArray(rawConcept?.probes) ? rawConcept.probes : [];
-    concept.probes = rawProbes.length
-      ? rawProbes.map((probe, probeIndex) =>
-          normalizeProbe(probe, concept.id, probeIndex, pageIndexByConcept.get(concept.id)),
-        )
-      : [
-          normalizeProbe(
-            {
-              prompt: `I think I understand ${concept.label}, but could you show how it works in a new example?`,
-              kind: 'transfer',
-            },
-            concept.id,
-            0,
-            pageIndexByConcept.get(concept.id),
-          ),
-        ];
+    if (rawProbes.length === 0) {
+      throw new Error(`Revisit blueprint concept "${concept.label}" has no probes`);
+    }
+    concept.probes = rawProbes.map((probe, probeIndex) =>
+      normalizeProbe(probe, concept.id, probeIndex, pageIndexByConcept.get(concept.id)),
+    );
   }
 
   return {
@@ -197,68 +154,6 @@ export function normalizeBlueprint(
     concepts,
     skeleton: { pages },
     raw,
-  };
-}
-
-function extractSlideText(scene: Scene): string {
-  if (scene.content.type !== 'slide') return '';
-  const elements = scene.content.canvas.elements as Array<{ type?: string; content?: unknown }>;
-  return elements
-    .filter((element) => element.type === 'text')
-    .map((element) => String(element.content || ''))
-    .filter(Boolean)
-    .join(' ');
-}
-
-export function createFallbackBlueprint(
-  stage: Stage,
-  scenes: Scene[],
-  generatedAt = Date.now(),
-): RevisitExamBlueprint {
-  const sourceHash = simpleSourceHash(`${stage.id}:${stage.updatedAt}:${scenes.length}`);
-  const learningScenes = scenes.filter((scene) => scene.type === 'slide' || scene.type === 'quiz');
-  const seedScenes = learningScenes.length ? learningScenes : scenes;
-  const concepts = seedScenes.slice(0, 6).map((scene, index) => {
-    const label = scene.title?.trim() || `Concept ${index + 1}`;
-    const id = slugify(label, `concept-${index + 1}`);
-    const text = extractSlideText(scene);
-    return {
-      id,
-      label,
-      summary: text || label,
-      anchors: normalizeAnchors({}, label),
-      probes: [
-        {
-          id: `${id}-probe-01`,
-          conceptId: id,
-          pageIndex: index,
-          kind: 'confusion',
-          prompt: `Can you explain the important point of "${label}" without reading the page?`,
-        },
-      ],
-    } satisfies RevisitConcept;
-  });
-
-  const finalConcepts = concepts.length
-    ? concepts
-    : [fallbackConcept(stage.name || 'Core idea', stage.id, generatedAt)];
-  const pages = finalConcepts.map((concept, index) => ({
-    id: `page-${String(index + 1).padStart(2, '0')}`,
-    title: concept.label,
-    summary: concept.summary,
-    conceptIds: [concept.id],
-    cues: [concept.anchors.clarity[0], concept.anchors.transfer[0]].filter(Boolean),
-  }));
-
-  return {
-    id: `${stage.id}:${sourceHash}`,
-    stageId: stage.id,
-    generatedAt,
-    language: stage.languageDirective || 'auto',
-    sourceHash,
-    concepts: finalConcepts,
-    skeleton: { pages },
-    raw: { fallback: true },
   };
 }
 
