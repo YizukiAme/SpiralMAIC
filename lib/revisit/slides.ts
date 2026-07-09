@@ -1,127 +1,210 @@
 import { CURRENT_SLIDE_CONTENT_SCHEMA_VERSION } from '@/lib/edit/slide-schema';
 import type { RevisitExamBlueprint, RevisitSkeletonPage } from '@/lib/revisit/types';
+import type { GeneratedSlideContent, SceneOutline } from '@/lib/types/generation';
 import type { Scene, Stage } from '@/lib/types/stage';
-import type { PPTTextElement } from '@openmaic/dsl';
 
-export function buildRevisitSkeletonScenes(args: {
-  stage: Stage;
-  blueprint: RevisitExamBlueprint;
-  now?: number;
-}): Scene[] {
-  const now = args.now ?? Date.now();
-  return args.blueprint.skeleton.pages.map((page, index) =>
-    createSkeletonSlideScene({
-      stageId: args.stage.id,
-      page,
-      order: index,
-      now,
-    }),
-  );
+type SlideSceneContent = Extract<Scene['content'], { type: 'slide' }>;
+type SlideTheme = SlideSceneContent['canvas']['theme'];
+type SlideBackground = SlideSceneContent['canvas']['background'];
+
+interface RevisitSlideModelConfig {
+  modelString: string;
+  apiKey: string;
+  baseUrl?: string;
+  providerType?: string;
+  requiresApiKey?: boolean;
+  isServerConfigured?: boolean;
+  thinkingConfig?: unknown;
 }
 
-function createSkeletonSlideScene(args: {
-  stageId: string;
+const DEFAULT_REVISIT_SKELETON_PAGE_TIMEOUT_MS = 120_000;
+
+export async function generateRevisitSkeletonScenes(args: {
+  stage: Stage;
+  blueprint: RevisitExamBlueprint;
+  sourceScenes: Scene[];
+  modelConfig: RevisitSlideModelConfig;
+  onScene?: (scene: Scene, index: number) => void;
+  now?: number;
+  pageTimeoutMs?: number;
+}): Promise<Scene[]> {
+  const canCallModel =
+    !args.modelConfig.requiresApiKey ||
+    args.modelConfig.isServerConfigured ||
+    args.modelConfig.apiKey;
+  if (!canCallModel) {
+    throw new Error('Revisit skeleton generation model is unavailable');
+  }
+
+  const outlines = buildRevisitSkeletonOutlines(args.blueprint);
+  const sourceStyle = findSourceSlideStyle(args.sourceScenes);
+  const scenes: Scene[] = [];
+
+  for (const [index, outline] of outlines.entries()) {
+    const content = await requestSkeletonSlideContent({
+      stage: args.stage,
+      outline,
+      allOutlines: outlines,
+      modelConfig: args.modelConfig,
+      timeoutMs: args.pageTimeoutMs ?? DEFAULT_REVISIT_SKELETON_PAGE_TIMEOUT_MS,
+    });
+    const page = args.blueprint.skeleton.pages[index];
+    if (!page) continue;
+    const scene = createGeneratedRevisitSkeletonScene({
+      stage: args.stage,
+      page,
+      order: index,
+      content,
+      sourceTheme: sourceStyle?.theme,
+      sourceBackground: sourceStyle?.background,
+      now: args.now,
+    });
+    scenes[index] = scene;
+    args.onScene?.(scene, index);
+  }
+
+  return scenes;
+}
+
+export function buildRevisitSkeletonOutlines(blueprint: RevisitExamBlueprint): SceneOutline[] {
+  return blueprint.skeleton.pages.map((page, index) => ({
+    id: `revisit-${page.id}`,
+    type: 'slide',
+    title: toPlainText(page.title),
+    description:
+      'Create a sparse reverse-teaching outline slide. The learner is the teacher and should fill in the explanation orally. Do not include full explanations, definitions, examples, answers, probe solutions, or detailed notes.',
+    keyPoints: [page.summary, ...page.cues].map(toPlainText).filter(Boolean).slice(0, 5),
+    teachingObjective:
+      'Provide only high-level cues that help the human teacher reconstruct the lesson.',
+    estimatedDuration: 90,
+    order: index,
+    languageNote: blueprint.language,
+  }));
+}
+
+export function createGeneratedRevisitSkeletonScene(args: {
+  stage: Stage;
   page: RevisitSkeletonPage;
   order: number;
-  now: number;
+  content: GeneratedSlideContent;
+  sourceTheme?: SlideTheme;
+  sourceBackground?: SlideBackground;
+  now?: number;
 }): Scene {
-  const sceneId = `${args.stageId}:revisit:${args.page.id}`;
-  const title = toPlainText(args.page.title);
-  const summary = toPlainText(args.page.summary);
-  const cues = args.page.cues.map(toPlainText).filter(Boolean).slice(0, 5);
+  const now = args.now ?? Date.now();
+  const sceneId = `${args.stage.id}:revisit:${args.page.id}`;
   return {
     id: sceneId,
-    stageId: args.stageId,
+    stageId: args.stage.id,
     type: 'slide',
-    title,
+    title: toPlainText(args.page.title),
     order: args.order,
-    createdAt: args.now,
-    updatedAt: args.now,
+    createdAt: now,
+    updatedAt: now,
     content: {
       type: 'slide',
       canvas: {
         id: `${sceneId}:canvas`,
         viewportSize: 1000,
         viewportRatio: 0.5625,
-        theme: {
-          backgroundColor: '#f8fafc',
-          themeColors: ['#111827', '#2563eb', '#10b981'],
-          fontColor: '#111827',
-          fontName: 'Inter',
-        },
-        background: { type: 'solid', color: '#f8fafc' },
-        elements: [
-          textElement({
-            id: `${sceneId}:title`,
-            content: title,
-            left: 82,
-            top: 78,
-            width: 836,
-            height: 76,
-            fontSize: 42,
-            bold: true,
-          }),
-          textElement({
-            id: `${sceneId}:summary`,
-            content: summary,
-            left: 86,
-            top: 178,
-            width: 828,
-            height: 96,
-            fontSize: 24,
-            color: '#475569',
-          }),
-          ...cues.map((cue, index) =>
-            textElement({
-              id: `${sceneId}:cue-${index + 1}`,
-              content: cue,
-              left: 112,
-              top: 318 + index * 54,
-              width: 776,
-              height: 42,
-              fontSize: 24,
-              color: '#0f172a',
-            }),
-          ),
-        ],
+        theme:
+          args.sourceTheme ??
+          ({
+            backgroundColor: '#ffffff',
+            themeColors: ['#5b9bd5', '#ed7d31', '#a5a5a5', '#ffc000', '#4472c4'],
+            fontColor: '#333333',
+            fontName: 'Microsoft YaHei',
+          } satisfies SlideTheme),
+        background:
+          args.sourceBackground ??
+          (args.sourceTheme
+            ? { type: 'solid', color: args.sourceTheme.backgroundColor }
+            : args.content.background),
+        elements: args.content.elements,
       },
       schemaVersion: CURRENT_SLIDE_CONTENT_SCHEMA_VERSION,
     },
   };
 }
 
-function textElement(args: {
-  id: string;
-  content: string;
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-  fontSize: number;
-  bold?: boolean;
-  color?: string;
-}): PPTTextElement {
-  return {
-    id: args.id,
-    type: 'text',
-    left: args.left,
-    top: args.top,
-    width: args.width,
-    height: args.height,
-    rotate: 0,
-    content: `<p style="font-size: ${args.fontSize}px; font-weight: ${args.bold ? 700 : 400}; color: ${args.color ?? '#111827'};">${escapeHtml(args.content)}</p>`,
-    defaultFontName: 'Inter',
-    defaultColor: args.color ?? '#111827',
-    lineHeight: 1.25,
-  };
+function findSourceSlideStyle(
+  scenes: Scene[],
+): { theme: SlideTheme; background?: SlideBackground } | undefined {
+  for (const scene of scenes) {
+    if (scene.content.type === 'slide') {
+      return {
+        theme: scene.content.canvas.theme,
+        background: scene.content.canvas.background,
+      };
+    }
+  }
+  return undefined;
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+async function requestSkeletonSlideContent(args: {
+  stage: Stage;
+  outline: SceneOutline;
+  allOutlines: SceneOutline[];
+  modelConfig: RevisitSlideModelConfig;
+  timeoutMs: number;
+}): Promise<GeneratedSlideContent> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'x-model': args.modelConfig.modelString,
+    'x-api-key': args.modelConfig.apiKey,
+  };
+  if (args.modelConfig.baseUrl) headers['x-base-url'] = args.modelConfig.baseUrl;
+  if (args.modelConfig.providerType) headers['x-provider-type'] = args.modelConfig.providerType;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () =>
+      controller.abort(
+        new DOMException(
+          `Skeleton page "${args.outline.title}" generation timed out after ${Math.round(args.timeoutMs / 1000)}s`,
+          'TimeoutError',
+        ),
+      ),
+    args.timeoutMs,
+  );
+  let response: Response;
+  try {
+    response = await fetch('/api/generate/scene-content', {
+      method: 'POST',
+      headers,
+      signal: controller.signal,
+      body: JSON.stringify({
+        outline: args.outline,
+        allOutlines: args.allOutlines,
+        stageId: args.stage.id,
+        stageInfo: {
+          name: args.stage.name,
+          style: 'Reverse teaching review skeleton',
+        },
+        languageDirective: args.stage.languageDirective,
+        requirements: {
+          customInstructions:
+            'Reverse challenge skeleton: Only title and bullet-like cue text elements are allowed. No charts, images, icons, decorative shapes, dense layouts, animations, full definitions, examples, answers, probe solutions, or speaker notes. Keep the slide sparse so the human teacher must explain the details aloud.',
+        },
+        // Skeleton pages are deliberately sparse; provider "thinking" adds
+        // minutes of latency for zero content gain, and a page that outlives
+        // the timeout aborts the whole deck. Force it off for this call.
+        thinkingConfig: { mode: 'disabled', enabled: false },
+      }),
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const data = (await response.json()) as {
+    success?: boolean;
+    content?: GeneratedSlideContent;
+  };
+  if (!data.success || !data.content) {
+    throw new Error('Revisit skeleton response missing slide content');
+  }
+  return data.content;
 }
 
 function toPlainText(value: string): string {
