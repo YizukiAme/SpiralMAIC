@@ -4,8 +4,13 @@ import {
   buildRevisitGateContext,
   buildRevisitProbeContext,
   createRevisitChatRequest,
+  createAssistantRevisitMessage,
   createTeacherRevisitMessage,
+  buildRevisitSceneStatuses,
+  buildRevisitChatSession,
   canNavigateRevisitPage,
+  getRevisitCueUserLabelKey,
+  getRevisitStudentStatusEmoji,
   parseRevisitChatSse,
   REVISIT_ASSISTANT_AGENT_ID,
   REVISIT_DEFAULT_STUDENT_AGENT_IDS,
@@ -14,6 +19,7 @@ import {
   resolveRevisitAgentIds,
   roleForRevisitAgent,
   type RevisitSessionPageState,
+  reduceRevisitCueUserPrompt,
   selectPageProbes,
 } from '@/lib/revisit/session';
 import type { RevisitExamBlueprint } from '@/lib/revisit/types';
@@ -160,6 +166,111 @@ describe('revisit session helpers', () => {
     expect(request.messages[0].metadata?.originalRole).toBe('teacher');
   });
 
+  test('builds a non-persisted chat session for the revisit transcript surface', () => {
+    const session = buildRevisitChatSession({
+      id: 'session-1',
+      title: 'Review challenge',
+      messages: [
+        createTeacherRevisitMessage('I will teach it.', 10),
+        {
+          id: 'student-1',
+          role: 'student',
+          text: 'Can you give an example?',
+          agentId: 'agent-1',
+          agentName: 'Student',
+          agentAvatar: '/avatars/student.png',
+          createdAt: 20,
+        },
+      ],
+      status: 'active',
+    });
+
+    expect(session).toMatchObject({
+      id: 'session-1',
+      type: 'discussion',
+      title: 'Review challenge',
+      status: 'active',
+      toolCalls: [],
+      pendingToolCalls: [],
+    });
+    expect(session.messages[0]?.role).toBe('user');
+    expect(session.messages[0]?.metadata?.originalRole).toBe('teacher');
+    expect(session.messages[1]?.role).toBe('assistant');
+    expect(session.messages[1]?.metadata?.agentId).toBe('agent-1');
+    expect(session.messages[1]?.metadata?.senderAvatar).toBe('/avatars/student.png');
+  });
+
+  test('creates a themed assistant opening message for the resolved assistant seat', () => {
+    const message = createAssistantRevisitMessage({
+      text: '这场挑战会围绕「虚拟语气」展开，第一页是「什么是虚拟语气」。我会在旁边帮大家守住节奏。',
+      agentId: 'custom-assistant',
+      agentName: 'AI助教',
+      agentAvatar: '/avatars/assistant.png',
+      now: 30,
+    });
+
+    expect(message).toMatchObject({
+      id: 'revisit-assistant-opening-30',
+      role: 'assistant',
+      agentId: 'custom-assistant',
+      agentName: 'AI助教',
+      agentAvatar: '/avatars/assistant.png',
+      createdAt: 30,
+    });
+    expect(message.text).toContain('虚拟语气');
+    expect(message.text).toContain('什么是虚拟语气');
+  });
+
+  test('chat request carries generated revisit agent configs to the stateless server', () => {
+    const message = createTeacherRevisitMessage('Let me teach it.', 10);
+    const request = createRevisitChatRequest({
+      stage,
+      scenes: [scene],
+      blueprint,
+      messages: [message],
+      pageState,
+      latestTeacherText: message.text,
+      elapsedMinutes: 1,
+      model: 'openai:gpt-4.1-mini',
+      apiKey: 'key',
+      agentIds: {
+        studentAgentId: 'gen-student',
+        studentAgentIds: ['gen-student'],
+        assistantAgentId: 'gen-assistant',
+      },
+      agentConfigs: [
+        {
+          id: 'gen-student',
+          name: 'Custom Student',
+          role: 'student',
+          persona: 'Curious',
+          avatar: '/avatars/custom-student.png',
+          color: '#22c55e',
+          allowedActions: [],
+          priority: 9,
+          isGenerated: true,
+        },
+        {
+          id: 'gen-assistant',
+          name: 'Custom Assistant',
+          role: 'assistant',
+          persona: 'Helpful',
+          avatar: '/avatars/custom-assistant.png',
+          color: '#f59e0b',
+          allowedActions: [],
+          priority: 8,
+          isGenerated: true,
+        },
+      ],
+    });
+
+    expect(request.config.agentIds).toEqual(['gen-student', 'gen-assistant']);
+    expect(request.config.agentConfigs).toEqual([
+      expect.objectContaining({ id: 'gen-student', role: 'student' }),
+      expect.objectContaining({ id: 'gen-assistant', role: 'assistant' }),
+    ]);
+  });
+
   test('resolves revisit seats by role before falling back to defaults', () => {
     const resolved = resolveRevisitAgentIds([
       { id: 'custom-student-low', role: 'student', priority: 1 },
@@ -214,6 +325,44 @@ describe('revisit session helpers', () => {
     expect(canNavigateRevisitPage(unlocked, 1, 2, false)).toBe(false);
     expect(canNavigateRevisitPage(unlocked, 1, 0, false)).toBe(true);
     expect(canNavigateRevisitPage(unlocked, 1, 2, true)).toBe(true);
+  });
+
+  test('maps revisit page state to classroom sidebar scene statuses', () => {
+    const scenes = [{ id: 'scene-1' }, { id: 'scene-2' }, { id: 'scene-3' }];
+    const states: RevisitSessionPageState[] = [
+      { ...pageState, pageIndex: 0, passed: true },
+      { ...pageState, pageIndex: 1, passed: false },
+      { ...pageState, pageIndex: 2, passed: false },
+    ];
+
+    expect(buildRevisitSceneStatuses(scenes, states, 1, false)).toEqual({
+      'scene-1': { passed: true, locked: false, current: false },
+      'scene-2': { passed: false, locked: false, current: true },
+      'scene-3': { passed: false, locked: true, current: false },
+    });
+    expect(buildRevisitSceneStatuses(scenes, states, 1, true)['scene-3']?.locked).toBe(false);
+  });
+
+  test('maps page progress to lightweight student status emoji', () => {
+    expect(getRevisitStudentStatusEmoji({ ...pageState, additionalProbeCount: 0 }, false)).toBe(
+      '🤔',
+    );
+    expect(getRevisitStudentStatusEmoji({ ...pageState, additionalProbeCount: 0 }, true)).toBe(
+      '👂',
+    );
+    expect(getRevisitStudentStatusEmoji({ ...pageState, additionalProbeCount: 1 }, false)).toBe(
+      '🤨',
+    );
+    expect(getRevisitStudentStatusEmoji({ ...pageState, passed: true }, false)).toBe('🤓');
+    expect(getRevisitStudentStatusEmoji({ ...pageState, rescued: true }, false)).toBe('🤔');
+  });
+
+  test('uses the teach-this-page cue only when entering a revisit page', () => {
+    expect(getRevisitCueUserLabelKey('teach-page')).toBe('revisit.challenge.teachThisPage');
+    expect(getRevisitCueUserLabelKey('default')).toBeUndefined();
+    expect(reduceRevisitCueUserPrompt('default', 'enter-page')).toBe('teach-page');
+    expect(reduceRevisitCueUserPrompt('teach-page', 'teacher-submit')).toBe('default');
+    expect(reduceRevisitCueUserPrompt('teach-page', 'agent-cued-user')).toBe('default');
   });
 
   test('parses revisit gate and streamed agent text from SSE', () => {

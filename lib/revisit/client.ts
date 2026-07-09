@@ -4,15 +4,17 @@ import type {
   RevisitExamBlueprint,
   RevisitJudgeReport,
   RevisitPageReport,
+  RevisitSkeletonDeck,
 } from '@/lib/revisit/types';
-import { createFallbackBlueprint } from '@/lib/revisit/blueprint';
+import { generateRevisitSkeletonScenes } from '@/lib/revisit/slides';
 import {
   getConceptStates,
   getLatestExamBlueprint,
+  getLatestSkeletonDeck,
   saveEvidenceAndUpdateState,
   saveBlueprintAndInitializeState,
+  saveSkeletonDeck,
 } from '@/lib/revisit/db';
-import { normalizeJudgeReport } from '@/lib/revisit/judge';
 import { computeLessonMemory } from '@/lib/revisit/memory';
 import type { RevisitMessage } from '@/lib/revisit/session';
 import { getCurrentModelConfig } from '@/lib/utils/model-config';
@@ -80,14 +82,72 @@ export async function ensureRevisitBlueprint(args: {
   const modelConfig = args.modelConfig ?? getCurrentModelConfig();
   const canCallModel =
     !modelConfig.requiresApiKey || modelConfig.isServerConfigured || modelConfig.apiKey;
-  const blueprint = canCallModel
-    ? await requestBlueprintFromApi(args.stage, args.scenes, modelConfig).catch(() =>
-        createFallbackBlueprint(args.stage, args.scenes, args.learnedAt ?? Date.now()),
-      )
-    : createFallbackBlueprint(args.stage, args.scenes, args.learnedAt ?? Date.now());
+  if (!canCallModel) {
+    throw new Error('Revisit blueprint model is unavailable; challenge cannot start.');
+  }
+
+  let blueprint: RevisitExamBlueprint;
+  try {
+    blueprint = await requestBlueprintFromApi(args.stage, args.scenes, modelConfig);
+  } catch (error) {
+    throw new Error(
+      `Revisit blueprint failed; challenge cannot start. ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 
   await saveBlueprintAndInitializeState(blueprint, args.learnedAt ?? Date.now());
   return blueprint;
+}
+
+export async function ensureRevisitSkeletonDeck(args: {
+  stage: Stage;
+  blueprint: RevisitExamBlueprint;
+  sourceScenes: Scene[];
+  modelConfig?: ModelConfig;
+  forceRegenerate?: boolean;
+  onScene?: (scene: Scene, index: number) => void;
+}): Promise<RevisitSkeletonDeck> {
+  if (!args.forceRegenerate) {
+    const existing = await getLatestSkeletonDeck(args.stage.id, args.blueprint.id);
+    if (existing?.scenes.length) return existing;
+  }
+
+  const modelConfig = args.modelConfig ?? getCurrentModelConfig();
+  const canCallModel =
+    !modelConfig.requiresApiKey || modelConfig.isServerConfigured || modelConfig.apiKey;
+  if (!canCallModel) {
+    throw new Error('Revisit skeleton model is unavailable; challenge cannot start.');
+  }
+
+  let scenes: Scene[];
+  try {
+    scenes = await generateRevisitSkeletonScenes({
+      stage: args.stage,
+      blueprint: args.blueprint,
+      sourceScenes: args.sourceScenes,
+      modelConfig,
+      onScene: args.onScene,
+    });
+  } catch (error) {
+    throw new Error(
+      `Revisit skeleton failed; challenge cannot start. ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+
+  const deck: RevisitSkeletonDeck = {
+    id: `${args.stage.id}:${args.blueprint.id}:${Date.now()}`,
+    stageId: args.stage.id,
+    blueprintId: args.blueprint.id,
+    sourceHash: args.blueprint.sourceHash,
+    generatedAt: Date.now(),
+    scenes,
+  };
+  await saveSkeletonDeck(deck);
+  return deck;
 }
 
 export async function markPlaybackCompleteForRevisit(args: {
@@ -95,10 +155,15 @@ export async function markPlaybackCompleteForRevisit(args: {
   scenes: Scene[];
   learnedAt?: number;
 }): Promise<void> {
-  await ensureRevisitBlueprint({
+  const blueprint = await ensureRevisitBlueprint({
     stage: args.stage,
     scenes: args.scenes,
     learnedAt: args.learnedAt ?? Date.now(),
+  });
+  await ensureRevisitSkeletonDeck({
+    stage: args.stage,
+    blueprint,
+    sourceScenes: args.scenes,
   });
 }
 
@@ -116,28 +181,27 @@ export async function submitRevisitAttempt(args: {
   const canCallModel =
     !modelConfig.requiresApiKey || modelConfig.isServerConfigured || modelConfig.apiKey;
 
-  const report = canCallModel
-    ? await requestJudgeFromApi({
-        attemptId: args.attemptId,
-        stage: args.stage,
-        blueprint: args.blueprint,
-        transcript: args.transcript,
-        pageReports: args.pageReports,
-        modelConfig,
-      }).catch(() =>
-        createLocalJudgeReport({
-          attemptId: args.attemptId,
-          stageId: args.stage.id,
-          blueprint: args.blueprint,
-          pageReports: args.pageReports,
-        }),
-      )
-    : createLocalJudgeReport({
-        attemptId: args.attemptId,
-        stageId: args.stage.id,
-        blueprint: args.blueprint,
-        pageReports: args.pageReports,
-      });
+  if (!canCallModel) {
+    throw new Error('Revisit judge model is unavailable; attempt was not counted.');
+  }
+
+  let report: RevisitJudgeReport;
+  try {
+    report = await requestJudgeFromApi({
+      attemptId: args.attemptId,
+      stage: args.stage,
+      blueprint: args.blueprint,
+      transcript: args.transcript,
+      pageReports: args.pageReports,
+      modelConfig,
+    });
+  } catch (error) {
+    throw new Error(
+      `Revisit judge failed; attempt was not counted. ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 
   await saveEvidenceAndUpdateState(report, {
     stableSuccessesRequired: args.stableSuccessesRequired,
@@ -222,51 +286,4 @@ async function requestJudgeFromApi(args: {
     throw new Error('Judge response missing report');
   }
   return data.report;
-}
-
-function createLocalJudgeReport(args: {
-  attemptId: string;
-  stageId: string;
-  blueprint: RevisitExamBlueprint;
-  pageReports: RevisitPageReport[];
-}): RevisitJudgeReport {
-  const completedAt = Date.now();
-  const passedPageIds = new Set(
-    args.pageReports.filter((report) => report.passed).map((report) => report.pageId),
-  );
-  const passedRatio =
-    args.pageReports.length > 0 ? passedPageIds.size / args.pageReports.length : 0.5;
-  const score = Math.max(0.35, Math.min(0.9, 0.45 + passedRatio * 0.4));
-
-  return normalizeJudgeReport({
-    attemptId: args.attemptId,
-    stageId: args.stageId,
-    completedAt,
-    summary: 'Local fallback report generated from page gate results.',
-    dimensions: {
-      clarity: score,
-      doubtResolution: score,
-      transfer: Math.max(0.35, score - 0.05),
-      errorCorrection: Math.max(0.35, score - 0.08),
-    },
-    conceptScores: args.blueprint.concepts.map((concept) => {
-      const relatedPages = args.blueprint.skeleton.pages.filter((page) =>
-        page.conceptIds.includes(concept.id),
-      );
-      const relatedPassed = relatedPages.some((page) => passedPageIds.has(page.id));
-      const conceptScore = relatedPassed ? score : Math.max(0.25, score - 0.2);
-      return {
-        conceptId: concept.id,
-        scores: {
-          clarity: conceptScore,
-          doubtResolution: conceptScore,
-          transfer: Math.max(0.25, conceptScore - 0.05),
-          errorCorrection: Math.max(0.25, conceptScore - 0.08),
-        },
-        notes: concept.summary,
-      };
-    }),
-    errors: [],
-    pageReports: args.pageReports,
-  });
 }

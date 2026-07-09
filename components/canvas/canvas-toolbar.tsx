@@ -20,6 +20,10 @@ import { cn } from '@/lib/utils';
 import { useStageStore } from '@/lib/store';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import {
+  shouldShowAutoPlayControl,
+  shouldShowPlaybackButton,
+} from '@/components/canvas/playback-control-policy';
 
 export interface CanvasToolbarProps {
   readonly currentSceneIndex: number;
@@ -52,6 +56,7 @@ export interface CanvasToolbarProps {
   readonly onToggleAutoPlay?: () => void;
   readonly playbackSpeed?: number;
   readonly onCycleSpeed?: () => void;
+  readonly hidePlaybackControls?: boolean;
 }
 
 /* Compact control button */
@@ -112,11 +117,20 @@ export function CanvasToolbar({
   onToggleAutoPlay,
   playbackSpeed = 1,
   onCycleSpeed,
+  hidePlaybackControls,
 }: CanvasToolbarProps) {
   const { t } = useI18n();
   const canGoPrev = canGoPrevOverride ?? currentSceneIndex > 0;
   const canGoNext = canGoNextOverride ?? currentSceneIndex < scenesCount - 1;
-  const showPlayPause = !isLiveSession;
+  const showPlayPause = shouldShowPlaybackButton({
+    isLiveSession: !!isLiveSession,
+    hidePlaybackControls,
+  });
+  const showAutoPlay = shouldShowAutoPlayControl({
+    hasToggleAutoPlay: Boolean(onToggleAutoPlay),
+    hidePlaybackControls,
+  });
+  const showSpeed = Boolean(onCycleSpeed) && !hidePlaybackControls;
 
   const whiteboardElementCount = useStageStore(
     (s) => s.stage?.whiteboard?.[0]?.elements?.length || 0,
@@ -249,7 +263,7 @@ export function CanvasToolbar({
           )}
 
           {/* Speed */}
-          {onCycleSpeed && (
+          {showSpeed && (
             <TooltipProvider delayDuration={0}>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -352,7 +366,7 @@ export function CanvasToolbar({
           <CtrlDivider />
 
           {/* Auto-play */}
-          {onToggleAutoPlay && (
+          {showAutoPlay && (
             <TooltipProvider delayDuration={0}>
               <Tooltip>
                 <TooltipTrigger asChild>

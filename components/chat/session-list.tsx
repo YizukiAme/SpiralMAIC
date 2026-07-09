@@ -13,7 +13,7 @@ interface SessionListProps {
   isStreaming: boolean;
   activeBubbleId?: string | null;
   onToggleExpand: (sessionId: string) => void;
-  onEndSession: (sessionId: string) => Promise<void>;
+  onEndSession?: (sessionId: string) => Promise<void>;
 }
 
 const sessionBadgeStyles = {

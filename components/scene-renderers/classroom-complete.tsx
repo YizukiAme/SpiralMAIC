@@ -525,7 +525,9 @@ export function ClassroomCompletePageConnected() {
 
   useEffect(() => {
     if (!stage) return;
-    void markPlaybackCompleteForRevisit({ stage, scenes });
+    void markPlaybackCompleteForRevisit({ stage, scenes }).catch(() => {
+      // Revisit prep is opportunistic here; the challenge page surfaces retry.
+    });
   }, [stage, scenes]);
 
   return (

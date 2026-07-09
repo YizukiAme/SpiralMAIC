@@ -31,8 +31,10 @@ import type { Participant } from '@/lib/types/roundtable';
 import { cn } from '@/lib/utils';
 // Playback state persistence removed — refresh always starts from the beginning
 import { ChatArea, type ChatAreaRef } from '@/components/chat/chat-area';
+import { RevisitTranscriptArea } from '@/components/chat/revisit-transcript-area';
 import { agentsToParticipants, useAgentRegistry } from '@/lib/orchestration/registry/store';
 import type { AgentConfig } from '@/lib/orchestration/registry/types';
+import type { ChatSession } from '@/lib/types/chat';
 import {
   AlertDialog,
   AlertDialogContent,
@@ -67,12 +69,17 @@ export interface RevisitPlaybackConfig {
   readonly audioIndicatorState?: AudioIndicatorState;
   readonly audioAgentId?: string | null;
   readonly thinkingState?: { stage: string; agentId?: string } | null;
+  readonly isCueUser?: boolean;
+  readonly cueUserLabel?: string;
   readonly onMessageSend: (message: string) => void | Promise<void>;
   readonly onPrevScene: () => void;
   readonly onNextScene: () => void;
   readonly onSceneSelect: (sceneId: string) => void;
   readonly canGoPrev: boolean;
   readonly canGoNext: boolean;
+  readonly sceneStatuses?: Record<string, { passed?: boolean; locked?: boolean }>;
+  readonly transcriptSession?: ChatSession;
+  readonly transcriptActiveBubbleId?: string | null;
 }
 
 interface PlaybackChromeRootProps {
@@ -952,6 +959,7 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
             break;
           case ' ':
           case 'Spacebar':
+            if (revisitConfig) break;
             // During active QA/discussion, Roundtable owns Space for
             // buffer-level pause/resume — don't also fire engine play/pause.
             if (chatSessionType === 'qa' || chatSessionType === 'discussion') break;
@@ -1007,6 +1015,7 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
       isPresentationInteractionActive,
       isPresentationShortcutTarget,
       resetPresentationIdleTimer,
+      revisitConfig,
       setChatAreaCollapsed,
       setSidebarCollapsed,
       setTTSMuted,
@@ -1079,6 +1088,7 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
           onSceneSelect={gatedSceneSwitch}
           onRetryOutline={onRetryOutline}
           isCourseComplete={isCourseComplete}
+          sceneStatuses={revisitConfig?.sceneStatuses}
         />
 
         {/* Main Content Area */}
@@ -1123,10 +1133,12 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
               }
               whiteboardOpen={whiteboardOpen}
               sidebarCollapsed={sidebarCollapsed}
-              chatCollapsed={revisitConfig ? true : chatAreaCollapsed}
+              chatCollapsed={chatAreaCollapsed}
               onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
               onToggleChat={
-                revisitConfig ? undefined : () => setChatAreaCollapsed(!chatAreaCollapsed)
+                revisitConfig && !revisitConfig.transcriptSession
+                  ? undefined
+                  : () => setChatAreaCollapsed(!chatAreaCollapsed)
               }
               onPrevSlide={handlePreviousScene}
               onNextSlide={handleNextScene}
@@ -1155,6 +1167,7 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
                   : undefined
               }
               overlay={revisitConfig?.canvasOverlay}
+              hidePlaybackControls={Boolean(revisitConfig)}
             />
           </div>
 
@@ -1194,7 +1207,8 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
                 showEndFlash={revisitConfig ? false : showEndFlash}
                 endFlashSessionType={endFlashSessionType}
                 thinkingState={revisitConfig?.thinkingState ?? thinkingState}
-                isCueUser={revisitConfig ? false : isCueUser}
+                isCueUser={revisitConfig ? !!revisitConfig.isCueUser : isCueUser}
+                cueUserLabel={revisitConfig?.cueUserLabel}
                 isTopicPending={revisitConfig ? false : isTopicPending}
                 onMessageSend={async (msg) => {
                   if (revisitConfig) {
@@ -1291,10 +1305,12 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
                 scenesCount={totalScenesCount}
                 whiteboardOpen={whiteboardOpen}
                 sidebarCollapsed={sidebarCollapsed}
-                chatCollapsed={revisitConfig ? true : chatAreaCollapsed}
+                chatCollapsed={chatAreaCollapsed}
                 onToggleSidebar={() => setSidebarCollapsed(!sidebarCollapsed)}
                 onToggleChat={
-                  revisitConfig ? undefined : () => setChatAreaCollapsed(!chatAreaCollapsed)
+                  revisitConfig && !revisitConfig.transcriptSession
+                    ? undefined
+                    : () => setChatAreaCollapsed(!chatAreaCollapsed)
                 }
                 onPrevSlide={handlePreviousScene}
                 onNextSlide={handleNextScene}
@@ -1305,15 +1321,25 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
                 controlsVisible={controlsVisible}
                 onTogglePresentation={togglePresentation}
                 onPresentationInteractionChange={setIsPresentationInteractionActive}
+                hidePlaybackControls={Boolean(revisitConfig)}
                 fullscreenContainerRef={stageRef}
               />
             </div>
           )}
         </div>
 
-        {/* Chat Area — hidden for reverse challenges so transient skeleton
-          scenes never flow through the persisted chat/session path. */}
-        {!revisitConfig && (
+        {revisitConfig?.transcriptSession ? (
+          <div className="flex shrink-0">
+            <RevisitTranscriptArea
+              width={chatAreaWidth}
+              collapsed={chatAreaCollapsed}
+              onCollapseChange={setChatAreaCollapsed}
+              session={revisitConfig.transcriptSession}
+              isStreaming={!!revisitConfig.isStreaming}
+              activeBubbleId={revisitConfig.transcriptActiveBubbleId}
+            />
+          </div>
+        ) : !revisitConfig ? (
           <div className="flex shrink-0">
             <ChatArea
               ref={chatAreaRef}
@@ -1369,7 +1395,7 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
               shouldHoldAfterReveal={discussionTTS.shouldHold}
             />
           </div>
-        )}
+        ) : null}
 
         {/* Scene switch confirmation dialog */}
         <AlertDialog

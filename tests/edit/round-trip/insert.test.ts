@@ -19,8 +19,8 @@ import {
  * Round-trip gate: tests element.add on default text and image elements.
  *
  * (a) Text element: verifies default content survives PPTX export.
- * (b) Image element with remote URL: verifies that the export pipeline
- *     does NOT crash when network-fetched images cannot be embedded (CI has no network);
+ * (b) Image element with unreachable URL: verifies that the export pipeline
+ *     does NOT crash when fetched images cannot be embedded;
  *     the real image round-trip (data-URL) is covered by image-data-url.test.ts.
  */
 async function exportSlideContent(content: SlideContent, scene: Scene): Promise<Blob> {
@@ -61,18 +61,18 @@ describe('round-trip: element.add inserts (PR2 gate)', () => {
     expect(slideXml).toContain(DEFAULT_TEXT_NEEDLE);
   });
 
-  it('(b) inserted default image element (remote URL) — slide XML is non-empty', async () => {
+  it('(b) inserted default image element (unreachable URL) — slide XML is non-empty', async () => {
     const { scene, content } = makeSlideFixture();
 
     const after = applySlideEditOperation(content, {
       type: 'element.add',
-      element: createDefaultImageElement('rt-img-1', 'https://example.com/x.png'),
+      element: createDefaultImageElement('rt-img-1', 'http://127.0.0.1:9/x.png'),
     });
 
     const blob = await exportSlideContent(after, scene);
 
-    // (b) Tests that element.add on a remote-URL image does NOT crash or corrupt
-    // export. The remote URL cannot be fetched in CI (no network), so the exporter
+    // (b) Tests that element.add on an unreachable URL image does NOT crash or corrupt
+    // export. The loopback URL refuses quickly without external network, so the exporter
     // logs "Failed to convert image to base64, skipping element" and omits the image.
     // This case gates that export pipeline is resilient; the REAL image round-trip
     // (data-URL, the PR2 local-upload path) is covered by image-data-url.test.ts

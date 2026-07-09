@@ -9,6 +9,7 @@ describe('SpiralMAIC revisit Dexie schema', () => {
       'conceptEvidence',
       'examBlueprints',
       'revisitReports',
+      'skeletonDecks',
       'userConceptState',
     ]);
   });

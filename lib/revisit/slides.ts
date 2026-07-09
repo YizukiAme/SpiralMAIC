@@ -18,7 +18,10 @@ interface RevisitSlideModelConfig {
   thinkingConfig?: unknown;
 }
 
-const DEFAULT_REVISIT_SKELETON_PAGE_TIMEOUT_MS = 120_000;
+// Observed post-slimming per-page latency on GLM: 30s-2min. Budget must
+// clear the tail; the real cure is generating at playback-completion and
+// caching, so challenge entry never waits on this at all.
+const DEFAULT_REVISIT_SKELETON_PAGE_TIMEOUT_MS = 180_000;
 
 export async function generateRevisitSkeletonScenes(args: {
   stage: Stage;

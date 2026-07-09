@@ -1,3 +1,5 @@
+import type { Scene } from '@/lib/types/stage';
+
 export type RevisitDimension = 'clarity' | 'doubtResolution' | 'transfer' | 'errorCorrection';
 
 export type RevisitDimensionScores = Record<RevisitDimension, number>;
@@ -43,6 +45,15 @@ export interface RevisitExamBlueprint {
   concepts: RevisitConcept[];
   skeleton: RevisitSkeleton;
   raw?: unknown;
+}
+
+export interface RevisitSkeletonDeck {
+  id: string;
+  stageId: string;
+  blueprintId: string;
+  sourceHash: string;
+  generatedAt: number;
+  scenes: Scene[];
 }
 
 export interface UserConceptState {

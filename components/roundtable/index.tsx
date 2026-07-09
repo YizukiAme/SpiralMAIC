@@ -59,6 +59,7 @@ interface RoundtableProps {
   readonly endFlashSessionType?: 'qa' | 'discussion';
   readonly thinkingState?: { stage: string; agentId?: string } | null;
   readonly isCueUser?: boolean;
+  readonly cueUserLabel?: string;
   readonly isTopicPending?: boolean;
   readonly onMessageSend?: (message: string) => void;
   readonly onDiscussionStart?: (request: DiscussionAction) => void;
@@ -91,6 +92,7 @@ interface RoundtableProps {
   readonly controlsVisible?: boolean;
   readonly onTogglePresentation?: () => void;
   readonly onPresentationInteractionChange?: (active: boolean) => void;
+  readonly hidePlaybackControls?: boolean;
   /** Ref to the fullscreen container — passed to ProactiveCard so its portal
    *  renders inside the top-layer during presentation mode. */
   readonly fullscreenContainerRef?: React.RefObject<HTMLDivElement | null>;
@@ -150,6 +152,7 @@ export function Roundtable({
   endFlashSessionType = 'discussion',
   thinkingState,
   isCueUser,
+  cueUserLabel,
   isTopicPending,
   onMessageSend,
   onDiscussionStart,
@@ -179,9 +182,11 @@ export function Roundtable({
   controlsVisible,
   onTogglePresentation,
   onPresentationInteractionChange,
+  hidePlaybackControls,
   fullscreenContainerRef,
 }: RoundtableProps) {
   const { t } = useI18n();
+  const cueUserText = cueUserLabel ?? t('roundtable.yourTurn');
   const ttsMuted = useSettingsStore((s) => s.ttsMuted);
   const setTTSMuted = useSettingsStore((s) => s.setTTSMuted);
   const ttsEnabled = useSettingsStore((state) => state.ttsEnabled);
@@ -372,7 +377,7 @@ export function Roundtable({
     setIsInputOpen(false);
   };
 
-  const handleToggleInput = () => {
+  const handleToggleInput = useCallback(() => {
     if (isSendCooldown) return;
     if (!isInputOpen) {
       onInputActivate?.();
@@ -383,9 +388,9 @@ export function Roundtable({
       cancelRecording();
       setIsVoiceOpen(false);
     }
-  };
+  }, [cancelRecording, isInputOpen, isProcessing, isSendCooldown, isVoiceOpen, onInputActivate]);
 
-  const handleToggleVoice = () => {
+  const handleToggleVoice = useCallback(() => {
     if (isVoiceOpen) {
       if (isRecording) {
         stopRecording();
@@ -398,7 +403,15 @@ export function Roundtable({
       setIsInputOpen(false);
       startRecording();
     }
-  };
+  }, [
+    isVoiceOpen,
+    isRecording,
+    stopRecording,
+    isSendCooldown,
+    isProcessing,
+    onInputActivate,
+    startRecording,
+  ]);
 
   // Keyboard shortcuts for roundtable interaction (#255)
   // T = toggle text input, V = toggle voice input, Escape = dismiss panels,
@@ -468,6 +481,9 @@ export function Roundtable({
     isVoiceOpen,
     isRecording,
     isProcessing,
+    cancelRecording,
+    handleToggleInput,
+    handleToggleVoice,
   ]);
 
   const isPresentationInteractionActive = isInputOpen || isVoiceOpen || isRecording || isProcessing;
@@ -600,7 +616,9 @@ export function Roundtable({
       }
       return;
     }
-    onPlayPause?.();
+    if (!hidePlaybackControls) {
+      onPlayPause?.();
+    }
   }, [
     isTopicPending,
     isInLiveFlow,
@@ -611,6 +629,7 @@ export function Roundtable({
     onDiscussionResume,
     onDiscussionPause,
     onPlayPause,
+    hidePlaybackControls,
   ]);
   const showPresentationDock =
     !!controlsVisible ||
@@ -657,6 +676,7 @@ export function Roundtable({
       onToggleAutoPlay={() => setAutoPlayLecture(!autoPlayLecture)}
       playbackSpeed={playbackSpeed}
       onCycleSpeed={handleCycleSpeed}
+      hidePlaybackControls={hidePlaybackControls}
     />
   );
 
@@ -836,7 +856,7 @@ export function Roundtable({
                   className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/70 dark:bg-black/50 backdrop-blur-xl border border-amber-400/50 dark:border-amber-500/50 shadow-[0_0_16px_rgba(245,158,11,0.2),0_8px_32px_rgba(0,0,0,0.06)] dark:shadow-[0_0_16px_rgba(245,158,11,0.25),0_8px_32px_rgba(0,0,0,0.4)] text-amber-600 dark:text-amber-400 text-sm font-semibold tracking-wide hover:bg-gray-100/80 dark:hover:bg-black/60 hover:border-amber-500/70 dark:hover:border-amber-400/70 hover:shadow-[0_0_24px_rgba(245,158,11,0.25)] dark:hover:shadow-[0_0_24px_rgba(245,158,11,0.35)] transition-all active:scale-95 animate-pulse"
                 >
                   {asrEnabled ? <Mic className="w-4 h-4" /> : <MessageSquare className="w-4 h-4" />}
-                  {t('roundtable.yourTurn')}
+                  {cueUserText}
                 </button>
               </motion.div>
             )}
@@ -1523,7 +1543,7 @@ export function Roundtable({
                         : 'text-purple-600/70 dark:text-purple-400/60',
                     )}
                   >
-                    {t('roundtable.yourTurn')}
+                    {cueUserText}
                   </motion.span>
                 </motion.div>
               )}
@@ -1570,7 +1590,9 @@ export function Roundtable({
                           return;
                         }
                         // Lecture playback: toggle play/pause
-                        onPlayPause?.();
+                        if (!hidePlaybackControls) {
+                          onPlayPause?.();
+                        }
                       }}
                       className={cn(
                         'relative px-4 pt-2 pb-3 rounded-2xl text-[15px] leading-relaxed transition-all border w-[min(420px,calc(100%-3rem))] group/bubble flex flex-col max-h-[110px]',
@@ -1889,6 +1911,15 @@ export function Roundtable({
                             {isThinkingAgent && (
                               <div className="absolute inset-0 rounded-full border-2 border-purple-400 border-t-transparent animate-spin z-20" />
                             )}
+                            {student.statusEmoji && (
+                              <div
+                                className="absolute -bottom-1 -right-1 z-30 flex size-5 items-center justify-center rounded-full border border-white bg-white text-[12px] shadow-sm dark:border-gray-800 dark:bg-gray-900"
+                                aria-label={student.statusEmoji}
+                                title={student.statusEmoji}
+                              >
+                                {student.statusEmoji}
+                              </div>
+                            )}
                           </div>
                         </HoverCardTrigger>
                         <HoverCardContent
@@ -2089,7 +2120,7 @@ export function Roundtable({
                     exit={{ opacity: 0, y: 4, scale: 0.9 }}
                     className="absolute -bottom-2 left-1/2 -translate-x-1/2 whitespace-nowrap px-2 py-0.5 bg-amber-500 text-white text-[9px] font-bold rounded-full shadow-sm z-30"
                   >
-                    {t('roundtable.yourTurn')}
+                    {cueUserText}
                   </motion.div>
                 )}
               </AnimatePresence>

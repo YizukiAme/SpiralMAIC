@@ -3,6 +3,8 @@ import type { UIMessage } from 'ai';
 import type {
   DirectorState,
   ChatMessageMetadata,
+  ChatSession,
+  SessionStatus,
   StatelessChatRequest,
   StatelessEvent,
 } from '@/lib/types/chat';
@@ -37,6 +39,7 @@ export interface RevisitMessage {
   text: string;
   agentId?: string;
   agentName?: string;
+  agentAvatar?: string;
   createdAt: number;
 }
 
@@ -64,6 +67,25 @@ export function createTeacherRevisitMessage(text: string, now = Date.now()): Rev
   };
 }
 
+export function createAssistantRevisitMessage(args: {
+  text: string;
+  agentId: string;
+  agentName?: string;
+  agentAvatar?: string;
+  now?: number;
+}): RevisitMessage {
+  const now = args.now ?? Date.now();
+  return {
+    id: `revisit-assistant-opening-${now}`,
+    role: 'assistant',
+    text: args.text,
+    agentId: args.agentId,
+    agentName: args.agentName,
+    agentAvatar: args.agentAvatar,
+    createdAt: now,
+  };
+}
+
 export function revisitMessagesToUiMessages(
   messages: RevisitMessage[],
 ): UIMessage<ChatMessageMetadata>[] {
@@ -77,10 +99,37 @@ export function revisitMessagesToUiMessages(
         message.role === 'teacher'
           ? 'Teacher (Human)'
           : message.agentName || (message.role === 'assistant' ? 'AI Assistant' : 'AI Student'),
+      senderAvatar: message.agentAvatar,
       agentId: message.agentId,
       createdAt: message.createdAt,
     },
   }));
+}
+
+export function buildRevisitChatSession(args: {
+  id: string;
+  title: string;
+  messages: RevisitMessage[];
+  status: SessionStatus;
+  now?: number;
+}): ChatSession {
+  const now = args.now ?? Date.now();
+  return {
+    id: args.id,
+    type: 'discussion',
+    title: args.title,
+    status: args.status,
+    messages: revisitMessagesToUiMessages(args.messages),
+    config: {
+      agentIds: Array.from(
+        new Set(args.messages.map((message) => message.agentId).filter((id): id is string => !!id)),
+      ),
+    },
+    toolCalls: [],
+    pendingToolCalls: [],
+    createdAt: now,
+    updatedAt: now,
+  };
 }
 
 export function selectPageProbes(
@@ -166,6 +215,7 @@ export function createRevisitChatRequest(args: {
   baseUrl?: string;
   providerType?: string;
   agentIds?: RevisitAgentIds;
+  agentConfigs?: NonNullable<StatelessChatRequest['config']['agentConfigs']>;
 }): StatelessChatRequest {
   const page = args.blueprint.skeleton.pages[args.pageState.pageIndex];
   const agentIds = args.agentIds ?? {
@@ -188,6 +238,7 @@ export function createRevisitChatRequest(args: {
     },
     config: {
       agentIds: [...studentAgentIds, agentIds.assistantAgentId],
+      ...(args.agentConfigs?.length ? { agentConfigs: args.agentConfigs } : {}),
       sessionType: 'discussion',
       discussionTopic: page?.title || args.stage.name,
       revisitProbeContext: buildRevisitProbeContext({
@@ -256,6 +307,58 @@ export function canNavigateRevisitPage(
     .every((state) => Boolean(state.passed));
 }
 
+export interface RevisitSceneStatus {
+  passed: boolean;
+  locked: boolean;
+  current: boolean;
+}
+
+export function buildRevisitSceneStatuses(
+  scenes: Array<{ id: string }>,
+  pageStates: RevisitSessionPageState[],
+  currentPageIndex: number,
+  gateSkipEnabled = false,
+): Record<string, RevisitSceneStatus> {
+  return Object.fromEntries(
+    scenes.map((scene, index) => [
+      scene.id,
+      {
+        passed: Boolean(pageStates[index]?.passed),
+        locked: !canNavigateRevisitPage(pageStates, currentPageIndex, index, gateSkipEnabled),
+        current: index === currentPageIndex,
+      },
+    ]),
+  );
+}
+
+export function getRevisitStudentStatusEmoji(
+  pageState: RevisitSessionPageState | undefined,
+  teacherTurnActive: boolean,
+): string {
+  if (teacherTurnActive) return '👂';
+  if (!pageState) return '🤔';
+  if (pageState.passed) return '🤓';
+  if (pageState.rescued || pageState.additionalProbeCount >= REVISIT_PAGE_PROBE_CAP) return '🤔';
+  if (pageState.additionalProbeCount > 0) return '🤨';
+  return '🤔';
+}
+
+export type RevisitCueUserPrompt = 'teach-page' | 'default';
+export type RevisitCueUserPromptEvent = 'enter-page' | 'teacher-submit' | 'agent-cued-user';
+
+export function reduceRevisitCueUserPrompt(
+  _current: RevisitCueUserPrompt,
+  event: RevisitCueUserPromptEvent,
+): RevisitCueUserPrompt {
+  return event === 'enter-page' ? 'teach-page' : 'default';
+}
+
+export function getRevisitCueUserLabelKey(
+  prompt: RevisitCueUserPrompt,
+): 'revisit.challenge.teachThisPage' | undefined {
+  return prompt === 'teach-page' ? 'revisit.challenge.teachThisPage' : undefined;
+}
+
 export function parseRevisitChatSse(
   input: string,
   agentIds?: RevisitAgentIds,
@@ -289,6 +392,7 @@ export function parseRevisitChatSse(
           role: roleForRevisitAgent(event.data.agentId, agentIds),
           agentId: event.data.agentId,
           agentName: event.data.agentName,
+          agentAvatar: event.data.agentAvatar,
           text: '',
           createdAt: Date.now(),
         };

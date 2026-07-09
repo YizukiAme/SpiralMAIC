@@ -4,6 +4,7 @@ import type {
   ConceptEvidence,
   RevisitExamBlueprint,
   RevisitJudgeReport,
+  RevisitSkeletonDeck,
   UserConceptState,
 } from '@/lib/revisit/types';
 import {
@@ -18,6 +19,7 @@ class RevisitDatabase extends Dexie {
   userConceptState!: EntityTable<UserConceptState, 'conceptId'>;
   conceptEvidence!: EntityTable<ConceptEvidence, 'id'>;
   examBlueprints!: EntityTable<RevisitExamBlueprint, 'id'>;
+  skeletonDecks!: EntityTable<RevisitSkeletonDeck, 'id'>;
   revisitReports!: EntityTable<RevisitJudgeReport, 'attemptId'>;
 
   constructor() {
@@ -29,6 +31,16 @@ class RevisitDatabase extends Dexie {
       conceptEvidence:
         'id, stageId, conceptId, attemptId, timestamp, [stageId+timestamp], [stageId+conceptId]',
       examBlueprints: 'id, stageId, generatedAt, sourceHash',
+      revisitReports: 'attemptId, stageId, completedAt',
+    });
+
+    this.version(2).stores({
+      userConceptState:
+        '[stageId+conceptId], stageId, conceptId, lastRetrievalAt, stableAt, updatedAt',
+      conceptEvidence:
+        'id, stageId, conceptId, attemptId, timestamp, [stageId+timestamp], [stageId+conceptId]',
+      examBlueprints: 'id, stageId, generatedAt, sourceHash',
+      skeletonDecks: 'id, stageId, blueprintId, generatedAt, sourceHash',
       revisitReports: 'attemptId, stageId, completedAt',
     });
   }
@@ -45,6 +57,20 @@ export async function getLatestExamBlueprint(
 
 export async function saveExamBlueprint(blueprint: RevisitExamBlueprint): Promise<void> {
   await revisitDb.examBlueprints.put(blueprint);
+}
+
+export async function getLatestSkeletonDeck(
+  stageId: string,
+  blueprintId?: string,
+): Promise<RevisitSkeletonDeck | undefined> {
+  const records = await revisitDb.skeletonDecks.where('stageId').equals(stageId).toArray();
+  return records
+    .filter((record) => !blueprintId || record.blueprintId === blueprintId)
+    .sort((a, b) => b.generatedAt - a.generatedAt)[0];
+}
+
+export async function saveSkeletonDeck(deck: RevisitSkeletonDeck): Promise<void> {
+  await revisitDb.skeletonDecks.put(deck);
 }
 
 export async function saveBlueprintAndInitializeState(
@@ -132,12 +158,14 @@ export async function deleteRevisitStageData(stageId: string): Promise<void> {
       revisitDb.userConceptState,
       revisitDb.conceptEvidence,
       revisitDb.examBlueprints,
+      revisitDb.skeletonDecks,
       revisitDb.revisitReports,
     ],
     async () => {
       await revisitDb.userConceptState.where('stageId').equals(stageId).delete();
       await revisitDb.conceptEvidence.where('stageId').equals(stageId).delete();
       await revisitDb.examBlueprints.where('stageId').equals(stageId).delete();
+      await revisitDb.skeletonDecks.where('stageId').equals(stageId).delete();
       await revisitDb.revisitReports.where('stageId').equals(stageId).delete();
     },
   );
