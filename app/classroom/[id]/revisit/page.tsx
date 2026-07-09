@@ -13,26 +13,39 @@ import { MediaStageProvider } from '@/lib/contexts/media-stage-context';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { ThemeProvider } from '@/lib/hooks/use-theme';
 import { useDiscussionTTS } from '@/lib/hooks/use-discussion-tts';
-import { ensureRevisitBlueprint, submitRevisitAttempt } from '@/lib/revisit/client';
 import {
+  ensureRevisitBlueprint,
+  ensureRevisitSkeletonDeck,
+  submitRevisitAttempt,
+} from '@/lib/revisit/client';
+import { runRevisitAgentLoop } from '@/lib/revisit/chat-loop';
+import { buildRevisitSkeletonOutlines } from '@/lib/revisit/slides';
+import { PENDING_SCENE_ID } from '@/lib/store/stage';
+import {
+  buildRevisitSceneStatuses,
+  buildRevisitChatSession,
   canNavigateRevisitPage,
+  createAssistantRevisitMessage,
   createRevisitChatRequest,
   createTeacherRevisitMessage,
+  getRevisitCueUserLabelKey,
+  getRevisitStudentStatusEmoji,
   REVISIT_PAGE_PROBE_CAP,
+  reduceRevisitCueUserPrompt,
+  revisitMessagesToUiMessages,
   resolveRevisitAgentIds,
-  roleForRevisitAgent,
   type RevisitAgentIds,
+  type RevisitCueUserPrompt,
   type RevisitMessage,
   type RevisitSessionPageState,
 } from '@/lib/revisit/session';
-import { buildRevisitSkeletonScenes } from '@/lib/revisit/slides';
 import type {
   RevisitExamBlueprint,
   RevisitGateDecision,
   RevisitJudgeReport,
   RevisitPageReport,
 } from '@/lib/revisit/types';
-import type { StatelessEvent, DirectorState } from '@/lib/types/chat';
+import type { DirectorState, StatelessChatRequest } from '@/lib/types/chat';
 import type { Scene, Stage as StageModel } from '@/lib/types/stage';
 import { loadStageData } from '@/lib/utils/stage-storage';
 import { getCurrentModelConfig } from '@/lib/utils/model-config';
@@ -49,6 +62,7 @@ interface LoadedClassroom {
 }
 
 type LoadState = 'loading' | 'ready' | 'error';
+type SkeletonLoadState = 'idle' | 'generating' | 'ready' | 'error';
 
 export default function RevisitChallengePage() {
   const params = useParams();
@@ -64,6 +78,7 @@ export default function RevisitChallengePage() {
   const agentsRecord = useAgentRegistry((s) => s.agents);
 
   const [loadState, setLoadState] = useState<LoadState>('loading');
+  const [loadRetryKey, setLoadRetryKey] = useState(0);
   const [classroom, setClassroom] = useState<LoadedClassroom | null>(null);
   const [blueprint, setBlueprint] = useState<RevisitExamBlueprint | null>(null);
   const [pageIndex, setPageIndex] = useState(0);
@@ -74,14 +89,24 @@ export default function RevisitChallengePage() {
   const [report, setReport] = useState<RevisitJudgeReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [directorState, setDirectorState] = useState<DirectorState | undefined>();
+  const [thinkingState, setThinkingState] = useState<{ stage: string; agentId?: string } | null>(
+    null,
+  );
   const [attemptId] = useState(() => `revisit-${Date.now()}`);
   const [startedAt] = useState(() => Date.now());
-  const [lastGate, setLastGate] = useState<RevisitGateDecision | null>(null);
   const [liveSpeech, setLiveSpeech] = useState<string | null>(null);
   const [speakingAgentId, setSpeakingAgentId] = useState<string | null>(null);
   const [audioIndicatorState, setAudioIndicatorState] = useState<AudioIndicatorState>('idle');
   const [audioAgentId, setAudioAgentId] = useState<string | null>(null);
+  const [activeBubbleId, setActiveBubbleId] = useState<string | null>(null);
+  const [isCueUser, setIsCueUser] = useState(true);
+  const [cueUserPrompt, setCueUserPrompt] = useState<RevisitCueUserPrompt>('teach-page');
+  const [generatedSkeletonScenes, setGeneratedSkeletonScenes] = useState<Scene[]>([]);
+  const [skeletonLoadState, setSkeletonLoadState] = useState<SkeletonLoadState>('idle');
+  const [skeletonRetryKey, setSkeletonRetryKey] = useState(0);
   const transcriptRef = useRef<RevisitMessage[]>([]);
+  const openingInjectedRef = useRef(false);
+  const openingClearTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     transcriptRef.current = messages;
@@ -93,6 +118,12 @@ export default function RevisitChallengePage() {
     async function load() {
       try {
         setLoadState('loading');
+        setError(null);
+        setClassroom(null);
+        setBlueprint(null);
+        setGeneratedSkeletonScenes([]);
+        setSkeletonLoadState('idle');
+        openingInjectedRef.current = false;
         const data = await loadClassroomData(classroomId);
         if (!data) throw new Error('missing classroom');
         const nextBlueprint = await ensureRevisitBlueprint({
@@ -123,52 +154,110 @@ export default function RevisitChallengePage() {
     return () => {
       cancelled = true;
     };
-  }, [classroomId]);
+  }, [classroomId, loadRetryKey]);
 
   const pages = blueprint?.skeleton.pages ?? [];
   const currentPage = pages[pageIndex];
   const currentPageState = pageStates[pageIndex];
   const passedCount = pageStates.filter((state) => state.passed).length;
   const allPagesPassed = pages.length > 0 && passedCount === pages.length;
-  const progressLabel = t('revisit.challenge.progress', {
-    current: pages.length ? pageIndex + 1 : 0,
-    total: pages.length,
-  });
   const allAgents = useMemo(() => Object.values(agentsRecord), [agentsRecord]);
   const revisitAgentIds = useMemo(() => resolveRevisitAgentIds(allAgents), [allAgents]);
-  const skeletonScenes = useMemo(
-    () =>
-      classroom && blueprint
-        ? buildRevisitSkeletonScenes({ stage: classroom.stage, blueprint })
-        : [],
-    [blueprint, classroom],
-  );
-  const currentSkeletonScene = skeletonScenes[pageIndex] ?? null;
   useEffect(() => {
-    if (!classroom || skeletonScenes.length === 0) return;
-    const currentSceneId = skeletonScenes[pageIndex]?.id ?? skeletonScenes[0]?.id ?? null;
+    if (!classroom || !blueprint) return;
+    let cancelled = false;
+    setGeneratedSkeletonScenes([]);
+    setSkeletonLoadState('generating');
+    setError(null);
+
+    const modelConfig = getCurrentModelConfig();
+    void ensureRevisitSkeletonDeck({
+      stage: classroom.stage,
+      blueprint,
+      sourceScenes: classroom.scenes,
+      modelConfig,
+      forceRegenerate: skeletonRetryKey > 0,
+      onScene: (scene, index) => {
+        if (cancelled) return;
+        setGeneratedSkeletonScenes((prev) => {
+          const next = [...prev];
+          next[index] = scene;
+          return next;
+        });
+      },
+    })
+      .then((deck) => {
+        if (cancelled) return;
+        setGeneratedSkeletonScenes(deck.scenes);
+        setSkeletonLoadState('ready');
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : String(err));
+        setSkeletonLoadState('error');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [blueprint, classroom, skeletonRetryKey]);
+  const skeletonScenes = generatedSkeletonScenes;
+  const currentSkeletonScene = skeletonScenes[pageIndex] ?? null;
+  const sceneStatuses = useMemo(
+    () => buildRevisitSceneStatuses(skeletonScenes, pageStates, pageIndex, demoGateSkipEnabled),
+    [demoGateSkipEnabled, pageIndex, pageStates, skeletonScenes],
+  );
+  const studentStatusEmoji = getRevisitStudentStatusEmoji(currentPageState, running);
+  const cueUserLabelKey = getRevisitCueUserLabelKey(cueUserPrompt);
+  const skeletonOutlines = useMemo(
+    () => (blueprint ? buildRevisitSkeletonOutlines(blueprint) : []),
+    [blueprint],
+  );
+  useEffect(() => {
+    if (!classroom || skeletonOutlines.length === 0) return;
+    // Feed the same store fields forward generation feeds, so the classroom's
+    // native generation UI (sidebar pending placeholder, generating canvas
+    // state, failed-outline retry) renders for the skeleton deck too.
+    const denseScenes = skeletonScenes.filter(Boolean);
+    const pendingOutlines = skeletonOutlines.slice(denseScenes.length);
+    const generating = skeletonLoadState === 'generating' && pendingOutlines.length > 0;
+    const failed = skeletonLoadState === 'error' && pendingOutlines.length > 0;
+    const currentSceneId =
+      skeletonScenes[pageIndex]?.id ??
+      (generating || failed ? PENDING_SCENE_ID : (denseScenes[0]?.id ?? null));
     useStageStore.setState({
       stage: classroom.stage,
-      scenes: skeletonScenes,
+      scenes: denseScenes,
       currentSceneId,
       chats: [],
       mode: 'playback',
-      generatingOutlines: [],
-      outlines: [],
-      generationComplete: true,
-      generationStatus: 'idle',
-      currentGeneratingOrder: -1,
-      failedOutlines: [],
+      outlines: skeletonOutlines,
+      generatingOutlines: generating || failed ? pendingOutlines : [],
+      generationComplete: !generating && !failed,
+      generationStatus: generating ? 'generating' : failed ? 'error' : 'completed',
+      currentGeneratingOrder: generating ? denseScenes.length : -1,
+      failedOutlines: failed && pendingOutlines[0] ? [pendingOutlines[0]] : [],
     });
-  }, [classroom, pageIndex, skeletonScenes]);
+  }, [classroom, pageIndex, skeletonLoadState, skeletonOutlines, skeletonScenes]);
   const revisitParticipants = useMemo(
     () =>
       buildRevisitParticipants({
         agents: allAgents,
         agentIds: revisitAgentIds,
         teacherName: t('common.you'),
+        studentStatusEmoji,
       }),
-    [allAgents, revisitAgentIds, t],
+    [allAgents, revisitAgentIds, studentStatusEmoji, t],
+  );
+  const transcriptSession = useMemo(
+    () =>
+      buildRevisitChatSession({
+        id: attemptId,
+        title: currentPage?.title || t('revisit.challenge.open'),
+        messages,
+        status: running ? 'active' : report ? 'completed' : 'idle',
+      }),
+    [attemptId, currentPage?.title, messages, report, running, t],
   );
   const ttsAgents = useMemo(
     () =>
@@ -177,6 +266,7 @@ export default function RevisitChallengePage() {
         .filter((agent): agent is AgentConfig => Boolean(agent)),
     [agentsRecord, revisitAgentIds],
   );
+  const revisitAgentConfigs = useMemo(() => ttsAgents.map(toStatelessAgentConfig), [ttsAgents]);
   const discussionTTS = useDiscussionTTS({
     enabled: ttsEnabled && !ttsMuted,
     agents: ttsAgents,
@@ -185,6 +275,63 @@ export default function RevisitChallengePage() {
       setAudioIndicatorState(state);
     },
   });
+  useEffect(() => {
+    if (openingInjectedRef.current || !classroom || !blueprint || !currentSkeletonScene) return;
+    const firstPage = blueprint.skeleton.pages[0];
+    const assistantAgent = agentsRecord[revisitAgentIds.assistantAgentId];
+    const text = t('revisit.challenge.assistantOpening', {
+      stage: classroom.stage.name,
+      page: firstPage?.title || classroom.stage.name,
+    });
+    const openingMessage = createAssistantRevisitMessage({
+      text,
+      agentId: revisitAgentIds.assistantAgentId,
+      agentName: assistantAgent?.name ?? t('revisit.challenge.assistant'),
+      agentAvatar: assistantAgent?.avatar,
+    });
+
+    openingInjectedRef.current = true;
+    setMessages((prev) => {
+      const next = prev.length ? prev : [openingMessage];
+      transcriptRef.current = next;
+      return next;
+    });
+    setActiveBubbleId(openingMessage.id);
+    setLiveSpeech(openingMessage.text);
+    setSpeakingAgentId(openingMessage.agentId ?? null);
+    setIsCueUser(true);
+    discussionTTS.handleSegmentSealed(
+      openingMessage.id,
+      `${openingMessage.id}:opening`,
+      openingMessage.text,
+      openingMessage.agentId ?? null,
+    );
+
+    const displayMs = Math.min(8000, Math.max(3000, openingMessage.text.length * 110));
+    if (openingClearTimerRef.current != null) {
+      window.clearTimeout(openingClearTimerRef.current);
+    }
+    openingClearTimerRef.current = window.setTimeout(() => {
+      setLiveSpeech((current) => (current === openingMessage.text ? null : current));
+      setSpeakingAgentId((current) => (current === openingMessage.agentId ? null : current));
+      setActiveBubbleId((current) => (current === openingMessage.id ? null : current));
+    }, displayMs);
+  }, [
+    agentsRecord,
+    blueprint,
+    classroom,
+    currentSkeletonScene,
+    discussionTTS,
+    revisitAgentIds.assistantAgentId,
+    t,
+  ]);
+  useEffect(() => {
+    return () => {
+      if (openingClearTimerRef.current != null) {
+        window.clearTimeout(openingClearTimerRef.current);
+      }
+    };
+  }, []);
 
   const updatePageState = useCallback((index: number, update: Partial<RevisitSessionPageState>) => {
     setPageStates((prev) =>
@@ -194,13 +341,13 @@ export default function RevisitChallengePage() {
 
   const navigatePage = useCallback(
     (targetIndex: number) => {
-      setPageIndex((prev) =>
-        canNavigateRevisitPage(pageStates, prev, targetIndex, demoGateSkipEnabled)
-          ? targetIndex
-          : prev,
-      );
+      if (!canNavigateRevisitPage(pageStates, pageIndex, targetIndex, demoGateSkipEnabled)) return;
+      if (targetIndex !== pageIndex) {
+        setCueUserPrompt((current) => reduceRevisitCueUserPrompt(current, 'enter-page'));
+      }
+      setPageIndex(targetIndex);
     },
-    [demoGateSkipEnabled, pageStates],
+    [demoGateSkipEnabled, pageIndex, pageStates],
   );
   const navigateScene = useCallback(
     (sceneId: string) => {
@@ -209,6 +356,13 @@ export default function RevisitChallengePage() {
     },
     [navigatePage, skeletonScenes],
   );
+  useEffect(() => {
+    if (report || running || judging || !currentPageState) return;
+    setIsCueUser(!currentPageState.passed);
+  }, [currentPageState, judging, report, running]);
+  useEffect(() => {
+    setCueUserPrompt((current) => reduceRevisitCueUserPrompt(current, 'enter-page'));
+  }, [pageIndex]);
 
   const applyGate = useCallback(
     (gate: RevisitGateDecision | null) => {
@@ -221,8 +375,6 @@ export default function RevisitChallengePage() {
           pageIndex,
           reason: '',
         } satisfies RevisitGateDecision);
-
-      setLastGate(decision);
 
       if (decision.status === 'pass') {
         updatePageState(pageIndex, { passed: true });
@@ -259,26 +411,33 @@ export default function RevisitChallengePage() {
 
   async function submitTurn(rawText: string) {
     const text = rawText.trim();
-    if (!text || !classroom || !blueprint || !currentPageState || running || judging || report) {
+    if (
+      !text ||
+      !classroom ||
+      !blueprint ||
+      !currentPageState ||
+      !currentSkeletonScene ||
+      running ||
+      judging ||
+      report
+    ) {
       return;
     }
 
     const teacherMessage = createTeacherRevisitMessage(text);
     const nextMessages = [...transcriptRef.current, teacherMessage];
+    let loopMessages = nextMessages;
     setMessages(nextMessages);
     setLiveSpeech(null);
     setSpeakingAgentId(null);
+    setActiveBubbleId(null);
+    setThinkingState(null);
+    setIsCueUser(false);
+    setCueUserPrompt((current) => reduceRevisitCueUserPrompt(current, 'teacher-submit'));
     discussionTTS.cleanup();
 
     if (demoGateSkipEnabled) {
       updatePageState(pageIndex, { passed: true });
-      setLastGate({
-        status: 'pass',
-        pageIndex,
-        reason: 'demo-skip',
-        confidence: 1,
-      });
-      return;
     }
 
     setRunning(true);
@@ -286,7 +445,7 @@ export default function RevisitChallengePage() {
       const modelConfig = getCurrentModelConfig();
       const request = createRevisitChatRequest({
         stage: classroom.stage,
-        scenes: classroom.scenes,
+        scenes: skeletonScenes,
         blueprint,
         messages: nextMessages,
         pageState: currentPageState,
@@ -298,101 +457,73 @@ export default function RevisitChallengePage() {
         baseUrl: modelConfig.baseUrl,
         providerType: modelConfig.providerType,
         agentIds: revisitAgentIds,
+        agentConfigs: revisitAgentConfigs,
       });
 
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const loopResult = await runRevisitAgentLoop({
+        request: {
           ...request,
           ...(modelConfig.thinkingConfig ? { thinkingConfig: modelConfig.thinkingConfig } : {}),
+        },
+        agentIds: revisitAgentIds,
+        getStoreState: () => ({
+          stage: classroom.stage,
+          scenes: skeletonScenes,
+          currentSceneId: skeletonScenes[pageIndex]?.id ?? skeletonScenes[0]?.id ?? null,
+          mode: 'playback',
+          whiteboardOpen: false,
         }),
+        getMessages: () => revisitMessagesToUiMessages(loopMessages),
+        callbacks: {
+          onAgentMessageStart: (message) => {
+            setActiveBubbleId(message.id);
+            loopMessages = [...loopMessages, message];
+            setMessages(loopMessages);
+          },
+          onAgentMessageText: (messageId, text) => {
+            loopMessages = loopMessages.map((message) =>
+              message.id === messageId ? { ...message, text } : message,
+            );
+            setMessages(loopMessages);
+          },
+          onAgentMessageEnd: (messageId) => {
+            loopMessages = loopMessages.filter(
+              (message) => message.id !== messageId || message.text.trim().length > 0,
+            );
+            setMessages(loopMessages);
+            setActiveBubbleId((current) => (current === messageId ? null : current));
+          },
+          onLiveSpeech: (text, agentId) => {
+            setLiveSpeech(text);
+            setSpeakingAgentId(agentId);
+          },
+          onSpeechProgress: () => {},
+          onThinking: setThinkingState,
+          onCueUser: () => {
+            setIsCueUser(true);
+            setCueUserPrompt((current) => reduceRevisitCueUserPrompt(current, 'agent-cued-user'));
+            setActiveBubbleId(null);
+          },
+          onGate: applyGate,
+          onError: (message) => {
+            setError(message);
+          },
+          onSegmentSealed: (messageId, partId, text, agentId) => {
+            if (text.trim() && agentId) {
+              discussionTTS.handleSegmentSealed(messageId, partId, text, agentId);
+            }
+          },
+          shouldHoldAfterReveal: discussionTTS.shouldHold,
+        },
       });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      await readChatStream(response, revisitAgentIds);
+      setDirectorState(loopResult.outcome.directorState);
     } catch (err) {
       toast.error(t('revisit.challenge.chatFailed'));
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      // Keep speakingAgentId paired with liveSpeech: nulling only the speaker
-      // leaves an unattributed bubble that Roundtable re-hangs on the user's
-      // seat ("你" flash). Both reset together at the next submitTurn.
+      setThinkingState(null);
       setRunning(false);
     }
-  }
-
-  async function readChatStream(response: Response, agentIds: RevisitAgentIds) {
-    const reader = response.body?.getReader();
-    if (!reader) throw new Error('missing stream');
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let gate: RevisitGateDecision | null = null;
-    const agentTextByMessageId: Record<string, string> = {};
-    const agentIdByMessageId: Record<string, string> = {};
-
-    const processEvent = (event: StatelessEvent) => {
-      if (event.type === 'agent_start') {
-        const nextMessage: RevisitMessage = {
-          id: event.data.messageId,
-          role: roleForRevisitAgent(event.data.agentId, agentIds),
-          agentId: event.data.agentId,
-          agentName: event.data.agentName,
-          text: '',
-          createdAt: Date.now(),
-        };
-        agentTextByMessageId[event.data.messageId] = '';
-        agentIdByMessageId[event.data.messageId] = event.data.agentId;
-        setSpeakingAgentId(event.data.agentId);
-        setLiveSpeech('');
-        setMessages((prev) => [...prev, nextMessage]);
-      } else if (event.type === 'text_delta' && event.data.messageId) {
-        agentTextByMessageId[event.data.messageId] =
-          (agentTextByMessageId[event.data.messageId] || '') + event.data.content;
-        setLiveSpeech((prev) => `${prev ?? ''}${event.data.content}`);
-        setMessages((prev) =>
-          prev.map((message) =>
-            message.id === event.data.messageId
-              ? { ...message, text: message.text + event.data.content }
-              : message,
-          ),
-        );
-      } else if (event.type === 'agent_end') {
-        const text = agentTextByMessageId[event.data.messageId]?.trim();
-        const agentId = agentIdByMessageId[event.data.messageId];
-        if (text && agentId) {
-          discussionTTS.handleSegmentSealed(
-            event.data.messageId,
-            `${event.data.messageId}:revisit`,
-            text,
-            agentId,
-          );
-        }
-      } else if (event.type === 'revisit_gate') {
-        gate = event.data;
-      } else if (event.type === 'done') {
-        setDirectorState(event.data.directorState);
-      } else if (event.type === 'error') {
-        throw new Error(event.data.message);
-      }
-    };
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const blocks = buffer.replace(/\r\n/g, '\n').split('\n\n');
-      buffer = blocks.pop() ?? '';
-      for (const block of blocks) {
-        const data = block
-          .split('\n')
-          .filter((line) => line.startsWith('data:'))
-          .map((line) => line.slice('data:'.length).trimStart())
-          .join('\n');
-        if (!data) continue;
-        processEvent(JSON.parse(data) as StatelessEvent);
-      }
-    }
-    applyGate(gate);
   }
 
   async function finishChallenge() {
@@ -418,6 +549,12 @@ export default function RevisitChallengePage() {
     }
   }
 
+  useEffect(() => {
+    if (!allPagesPassed || report || judging || running) return;
+    void finishChallenge();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- finishChallenge reads current refs/state and is guarded above.
+  }, [allPagesPassed, judging, report, running]);
+
   if (!reverseChallengeEnabled) {
     return <CenteredState title={t('revisit.challenge.disabled')} onBack={() => router.back()} />;
   }
@@ -426,64 +563,54 @@ export default function RevisitChallengePage() {
     return <CenteredState title={t('revisit.challenge.loading')} loading />;
   }
 
-  if (loadState === 'error' || !classroom || !blueprint || !currentPage || !currentSkeletonScene) {
+  if (loadState === 'error' || !classroom || !blueprint || !currentPage) {
     return (
       <CenteredState
         title={t('revisit.challenge.loadFailed')}
         detail={error ?? undefined}
         onBack={() => router.push('/')}
+        onRetry={() => setLoadRetryKey((key) => key + 1)}
       />
     );
   }
 
+  // No early return while the skeleton deck generates: the classroom mounts
+  // immediately and the store-driven generation UI (same as forward
+  // generation) shows pages arriving; failures surface as a failed outline
+  // with the classroom-native retry affordance.
+
   const canGoPrev = pageIndex > 0;
   const canGoNext =
     pageIndex < pages.length - 1 &&
+    Boolean(skeletonScenes[pageIndex + 1]) &&
     canNavigateRevisitPage(pageStates, pageIndex, pageIndex + 1, demoGateSkipEnabled);
-  const headerSlot = (
-    <div className="flex items-center gap-2">
-      <Badge variant="secondary" className="hidden sm:inline-flex">
-        {progressLabel}
-      </Badge>
-      <Badge variant="secondary">
-        {t('revisit.challenge.passed', { count: passedCount, total: pages.length })}
-      </Badge>
-      {lastGate ? (
-        <Badge variant={lastGate.status === 'pass' ? 'default' : 'secondary'}>
-          {t(`revisit.challenge.gate.${lastGate.status}`)}
-        </Badge>
-      ) : null}
-      <Button
-        onClick={finishChallenge}
-        disabled={judging || running || messages.length === 0 || !allPagesPassed}
-        size="sm"
-      >
-        {judging ? <Loader2 className="animate-spin" /> : <CheckCircle2 />}
-        {t('revisit.challenge.finish')}
-      </Button>
-    </div>
-  );
   const canvasOverlay = report ? (
     <div className="absolute inset-0 z-[130] overflow-auto bg-background/95 p-6 backdrop-blur">
       <ReportView report={report} />
     </div>
-  ) : currentPageState?.passed ? (
-    <div className="absolute left-4 top-4 z-[120]">
-      <Badge className="gap-1 bg-emerald-600 text-white">
-        <CheckCircle2 className="size-3.5" />
-        {t('revisit.challenge.gate.pass')}
-      </Badge>
-    </div>
-  ) : null;
+  ) : (
+    <>
+      {currentPageState?.passed ? (
+        <div className="absolute left-4 top-4 z-[120]">
+          <Badge className="gap-1 bg-emerald-600 text-white">
+            <CheckCircle2 className="size-3.5" />
+            {t('revisit.challenge.gate.pass')}
+          </Badge>
+        </div>
+      ) : null}
+    </>
+  );
 
   return (
     <ThemeProvider>
       <MediaStageProvider value={classroomId}>
         <div className="flex h-screen flex-col overflow-hidden">
           <ClassroomStage
+            onRetryOutline={async () => {
+              setSkeletonRetryKey((key) => key + 1);
+            }}
             revisitConfig={{
               participants: revisitParticipants,
-              headerSlot,
               canvasOverlay,
               currentSpeech: liveSpeech,
               engineMode: running ? 'live' : 'idle',
@@ -491,13 +618,18 @@ export default function RevisitChallengePage() {
               speakingAgentId,
               audioIndicatorState,
               audioAgentId,
-              thinkingState: running && !speakingAgentId ? { stage: 'director' } : null,
+              thinkingState,
+              isCueUser,
+              cueUserLabel: cueUserLabelKey ? t(cueUserLabelKey) : undefined,
+              transcriptSession,
+              transcriptActiveBubbleId: activeBubbleId,
               onMessageSend: submitTurn,
               onPrevScene: () => navigatePage(pageIndex - 1),
               onNextScene: () => navigatePage(pageIndex + 1),
               onSceneSelect: navigateScene,
               canGoPrev,
               canGoNext,
+              sceneStatuses,
             }}
           />
         </div>
@@ -510,6 +642,7 @@ function buildRevisitParticipants(args: {
   agents: AgentConfig[];
   agentIds: RevisitAgentIds;
   teacherName: string;
+  studentStatusEmoji: string;
 }): Participant[] {
   const byId = new Map(args.agents.map((agent) => [agent.id, agent]));
   const agentIds = Array.from(
@@ -532,8 +665,31 @@ function buildRevisitParticipants(args: {
         role: 'student' as const,
         avatar: agent.avatar,
         isOnline: true,
+        statusEmoji:
+          agent.id === args.agentIds.assistantAgentId
+            ? args.studentStatusEmoji === '🤔'
+              ? '🛟'
+              : undefined
+            : args.studentStatusEmoji,
       })),
   ];
+}
+
+function toStatelessAgentConfig(
+  agent: AgentConfig,
+): NonNullable<StatelessChatRequest['config']['agentConfigs']>[number] {
+  return {
+    id: agent.id,
+    name: agent.name,
+    role: agent.role,
+    persona: agent.persona,
+    avatar: agent.avatar,
+    color: agent.color,
+    allowedActions: agent.allowedActions,
+    priority: agent.priority,
+    isGenerated: agent.isGenerated,
+    boundStageId: agent.boundStageId,
+  };
 }
 
 async function loadClassroomData(classroomId: string): Promise<LoadedClassroom | null> {
@@ -568,11 +724,13 @@ function CenteredState({
   detail,
   loading,
   onBack,
+  onRetry,
 }: {
   title: string;
   detail?: string;
   loading?: boolean;
   onBack?: () => void;
+  onRetry?: () => void;
 }) {
   const { t } = useI18n();
   return (
@@ -589,12 +747,15 @@ function CenteredState({
           <h1 className="text-lg font-semibold">{title}</h1>
           {detail ? <p className="mt-2 max-w-md text-sm text-muted-foreground">{detail}</p> : null}
         </div>
-        {onBack ? (
-          <Button onClick={onBack} variant="outline">
-            <ArrowLeft />
-            {t('common.back')}
-          </Button>
-        ) : null}
+        <div className="flex justify-center gap-2">
+          {onBack ? (
+            <Button onClick={onBack} variant="outline">
+              <ArrowLeft />
+              {t('common.back')}
+            </Button>
+          ) : null}
+          {onRetry ? <Button onClick={onRetry}>{t('common.retry')}</Button> : null}
+        </div>
       </div>
     </main>
   );
