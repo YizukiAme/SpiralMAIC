@@ -1,4 +1,5 @@
 import { CURRENT_SLIDE_CONTENT_SCHEMA_VERSION } from '@/lib/edit/slide-schema';
+import { fetchSceneContent } from '@/lib/hooks/use-scene-generator';
 import type { RevisitExamBlueprint, RevisitSkeletonPage } from '@/lib/revisit/types';
 import type { GeneratedSlideContent, SceneOutline } from '@/lib/types/generation';
 import type { Scene, Stage } from '@/lib/types/stage';
@@ -45,7 +46,6 @@ export async function generateRevisitSkeletonScenes(args: {
       stage: args.stage,
       outline,
       allOutlines: outlines,
-      modelConfig: args.modelConfig,
       timeoutMs: args.pageTimeoutMs ?? DEFAULT_REVISIT_SKELETON_PAGE_TIMEOUT_MS,
     });
     const page = args.blueprint.skeleton.pages[index];
@@ -145,17 +145,13 @@ async function requestSkeletonSlideContent(args: {
   stage: Stage;
   outline: SceneOutline;
   allOutlines: SceneOutline[];
-  modelConfig: RevisitSlideModelConfig;
   timeoutMs: number;
 }): Promise<GeneratedSlideContent> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'x-model': args.modelConfig.modelString,
-    'x-api-key': args.modelConfig.apiKey,
-  };
-  if (args.modelConfig.baseUrl) headers['x-base-url'] = args.modelConfig.baseUrl;
-  if (args.modelConfig.providerType) headers['x-provider-type'] = args.modelConfig.providerType;
-
+  // Delegate to the normal classroom generation client (fetchSceneContent):
+  // same headers, retry/backoff, and error taxonomy as forward generation.
+  // Revisit only adds a whole-page time budget and forces thinking off —
+  // sparse outline pages gain nothing from provider reasoning, which pushed
+  // per-page latency past any sane budget.
   const controller = new AbortController();
   const timeout = setTimeout(
     () =>
@@ -167,13 +163,9 @@ async function requestSkeletonSlideContent(args: {
       ),
     args.timeoutMs,
   );
-  let response: Response;
   try {
-    response = await fetch('/api/generate/scene-content', {
-      method: 'POST',
-      headers,
-      signal: controller.signal,
-      body: JSON.stringify({
+    const result = await fetchSceneContent(
+      {
         outline: args.outline,
         allOutlines: args.allOutlines,
         stageId: args.stage.id,
@@ -183,28 +175,26 @@ async function requestSkeletonSlideContent(args: {
         },
         languageDirective: args.stage.languageDirective,
         requirements: {
-          customInstructions:
+          requirement:
             'Reverse challenge skeleton: Only title and bullet-like cue text elements are allowed. No charts, images, icons, decorative shapes, dense layouts, animations, full definitions, examples, answers, probe solutions, or speaker notes. Keep the slide sparse so the human teacher must explain the details aloud.',
         },
-        // Skeleton pages are deliberately sparse; provider "thinking" adds
-        // minutes of latency for zero content gain, and a page that outlives
-        // the timeout aborts the whole deck. Force it off for this call.
         thinkingConfig: { mode: 'disabled', enabled: false },
-      }),
-    });
+      },
+      controller.signal,
+    );
+    if (!result.success || !result.content) {
+      throw new Error(result.error || 'Revisit skeleton response missing slide content');
+    }
+    return result.content as GeneratedSlideContent;
+  } catch (error) {
+    // Surface the timeout as its own named error, not a generic abort.
+    if (controller.signal.aborted && controller.signal.reason) {
+      throw controller.signal.reason;
+    }
+    throw error;
   } finally {
     clearTimeout(timeout);
   }
-
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const data = (await response.json()) as {
-    success?: boolean;
-    content?: GeneratedSlideContent;
-  };
-  if (!data.success || !data.content) {
-    throw new Error('Revisit skeleton response missing slide content');
-  }
-  return data.content;
 }
 
 function toPlainText(value: string): string {

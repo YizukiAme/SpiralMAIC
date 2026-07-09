@@ -15,6 +15,7 @@ import type {
 import type { AgentInfo } from '@/lib/generation/generation-pipeline';
 import type { Scene } from '@/lib/types/stage';
 import type { SpeechAction } from '@/lib/types/action';
+import type { ThinkingConfig } from '@/lib/types/provider';
 import { splitLongSpeechActions } from '@/lib/audio/tts-utils';
 import { isTTSProviderEnabled } from '@/lib/audio/provider-enablement';
 import { resolveAgentVoiceOptions, pickNarratorAgent } from '@/lib/audio/agent-voice';
@@ -77,6 +78,9 @@ function getApiHeaders(): HeadersInit {
 }
 
 function withThinkingConfig<T extends Record<string, unknown>>(body: T): T {
+  // A caller-supplied thinkingConfig wins (revisit skeleton generation sends
+  // an explicit disable); otherwise inherit the user's chat-model setting.
+  if ('thinkingConfig' in body && body.thinkingConfig != null) return body;
   const { thinkingConfig } = getCurrentModelConfig();
   return thinkingConfig ? ({ ...body, thinkingConfig } as T) : body;
 }
@@ -124,6 +128,8 @@ export async function fetchSceneContent(
     agents?: AgentInfo[];
     languageDirective?: string;
     requirements?: UserRequirements;
+    /** Explicit override; when set, withThinkingConfig keeps it as-is. */
+    thinkingConfig?: ThinkingConfig;
   },
   signal?: AbortSignal,
   retryOptions?: ClientRetryOptions<SceneContentResult>,
