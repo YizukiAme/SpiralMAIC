@@ -21,6 +21,7 @@ import {
 import { runRevisitAgentLoop } from '@/lib/revisit/chat-loop';
 import { buildRevisitSkeletonOutlines } from '@/lib/revisit/slides';
 import { PENDING_SCENE_ID } from '@/lib/store/stage';
+import { GeneratingProgress } from '@/components/generation/generating-progress';
 import {
   buildRevisitSceneStatuses,
   buildRevisitChatSession,
@@ -574,10 +575,38 @@ export default function RevisitChallengePage() {
     );
   }
 
-  // No early return while the skeleton deck generates: the classroom mounts
-  // immediately and the store-driven generation UI (same as forward
-  // generation) shows pages arriving; failures surface as a failed outline
-  // with the classroom-native retry affordance.
+  // Forward-generation choreography, beat for beat: the pre-classroom
+  // interstitial (GeneratingProgress, same component) runs until the FIRST
+  // skeleton page exists; only then does the classroom mount, with the
+  // remaining pages arriving through the store-driven sidebar placeholders.
+  if (!skeletonScenes[0]) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background p-6">
+        <div className="w-full max-w-md space-y-4">
+          <GeneratingProgress
+            outlineReady
+            firstPageReady={false}
+            statusMessage={t('revisit.challenge.skeletonPreparing')}
+            error={
+              skeletonLoadState === 'error'
+                ? (error ?? t('revisit.challenge.skeletonFailed'))
+                : null
+            }
+          />
+          {skeletonLoadState === 'error' ? (
+            <div className="flex justify-center gap-3">
+              <Button variant="outline" onClick={() => router.push('/')}>
+                {t('common.back')}
+              </Button>
+              <Button onClick={() => setSkeletonRetryKey((key) => key + 1)}>
+                {t('common.retry')}
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
 
   const canGoPrev = pageIndex > 0;
   const canGoNext =
