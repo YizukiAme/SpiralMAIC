@@ -42,6 +42,7 @@ function makeAgentConfig(id: string): GeneratedAgentConfig {
 }
 
 beforeEach(() => {
+  vi.useFakeTimers();
   useStageStore.setState({
     stage: makeStage(),
     scenes: [],
@@ -49,8 +50,14 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => {
-  useStageStore.getState().clearStore();
+afterEach(async () => {
+  try {
+    await vi.runOnlyPendingTimersAsync();
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    useStageStore.getState().clearStore();
+    vi.useRealTimers();
+  }
 });
 
 describe('setStageAgents', () => {
@@ -89,13 +96,8 @@ describe('setStageAgents', () => {
 
 describe('setStageAgents persistence (debounced save)', () => {
   beforeEach(() => {
-    vi.useFakeTimers();
     vi.mocked(saveStageData).mockClear();
     vi.mocked(saveGeneratedAgents).mockClear();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
   });
 
   it('includes generatedAgentConfigs in saveStageData after debounce', async () => {
