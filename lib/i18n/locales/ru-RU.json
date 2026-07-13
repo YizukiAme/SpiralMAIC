@@ -1039,7 +1039,8 @@
       "tavily": "Tavily",
       "bocha": "Bocha",
       "brave": "Brave Search",
-      "baidu": "Baidu"
+      "baidu": "Baidu",
+      "searxng": "SearXNG"
     },
     "providerTypes": {
       "openai": "Протокол OpenAI",
@@ -1570,6 +1571,7 @@
     "webSearchApiKeyPlaceholderServer": "Серверный ключ настроен, можно ввести свой",
     "webSearchApiKeyHint": "Получите API-ключ у выбранного поискового провайдера",
     "webSearchApiKeyOptional": "API-ключ необязателен. Без него будет использоваться парсинг публичной страницы.",
+    "searxngServerOnlyNotice": "SearXNG должен быть настроен на сервере. Установите переменную окружения SEARXNG_BASE_URL (или раздел web-search в server-providers.yml). URL экземпляра от клиента не принимаются.",
     "baiduSubSources": "Источники поиска Baidu",
     "baiduSubSourcesDescription": "Выберите хотя бы один источник Baidu.",
     "baiduSubSourceWeb": "Веб-поиск",

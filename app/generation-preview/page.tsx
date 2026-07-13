@@ -506,7 +506,7 @@ function GenerationPreviewContent() {
               pdfText: currentSession.pdfText || undefined,
               providerId: wsProviderId,
               apiKey: wsConfig?.apiKey || undefined,
-              baseUrl: wsConfig?.baseUrl || undefined,
+              baseUrl: wsProviderId === 'searxng' ? undefined : wsConfig?.baseUrl || undefined,
               baiduSubSources: wsProviderId === 'baidu' ? wsSettings.baiduSubSources : undefined,
             }),
           ),

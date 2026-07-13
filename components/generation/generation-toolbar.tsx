@@ -18,7 +18,11 @@ import { useSettingsStore } from '@/lib/store/settings';
 import { isLLMProviderConfigured } from '@/lib/store/settings-validation';
 import { PDF_PROVIDERS } from '@/lib/pdf/constants';
 import type { PDFProviderId } from '@/lib/pdf/types';
-import { WEB_SEARCH_PROVIDERS, getWebSearchProviderDisplayName } from '@/lib/web-search/constants';
+import {
+  WEB_SEARCH_PROVIDERS,
+  getWebSearchProviderDisplayName,
+  isWebSearchProviderConfigured,
+} from '@/lib/web-search/constants';
 import type { WebSearchProviderId } from '@/lib/web-search/types';
 import type { ProviderId } from '@/lib/ai/providers';
 import type {
@@ -92,14 +96,11 @@ export function GenerationToolbar({
   const webSearchProvider = WEB_SEARCH_PROVIDERS[webSearchProviderId];
   const webSearchConfig = webSearchProvidersConfig[webSearchProviderId];
   const selectedWebSearchAvailable = webSearchProvider
-    ? !webSearchProvider.requiresApiKey ||
-      !!webSearchConfig?.apiKey ||
-      !!webSearchConfig?.isServerConfigured
+    ? isWebSearchProviderConfigured(webSearchProvider, webSearchConfig)
     : false;
-  const webSearchAvailable = Object.values(WEB_SEARCH_PROVIDERS).some((provider) => {
-    const cfg = webSearchProvidersConfig[provider.id];
-    return !provider.requiresApiKey || !!cfg?.apiKey || !!cfg?.isServerConfigured;
-  });
+  const webSearchAvailable = Object.values(WEB_SEARCH_PROVIDERS).some((provider) =>
+    isWebSearchProviderConfigured(provider, webSearchProvidersConfig[provider.id]),
+  );
 
   // Configured LLM providers (only those with valid credentials + models + endpoint)
   const configuredProviders = providersConfig
@@ -459,8 +460,7 @@ export function GenerationToolbar({
                   <SelectContent>
                     {Object.values(WEB_SEARCH_PROVIDERS).map((provider) => {
                       const cfg = webSearchProvidersConfig[provider.id];
-                      const available =
-                        !provider.requiresApiKey || !!cfg?.apiKey || !!cfg?.isServerConfigured;
+                      const available = isWebSearchProviderConfigured(provider, cfg);
                       return (
                         <SelectItem key={provider.id} value={provider.id} disabled={!available}>
                           <div

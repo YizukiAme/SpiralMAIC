@@ -1039,7 +1039,8 @@
       "tavily": "Tavily",
       "bocha": "博查",
       "brave": "Brave Search",
-      "baidu": "百度"
+      "baidu": "百度",
+      "searxng": "SearXNG"
     },
     "providerTypes": {
       "openai": "OpenAI 协议",
@@ -1570,6 +1571,7 @@
     "webSearchApiKeyPlaceholderServer": "已配置服务端密钥，可选填覆盖",
     "webSearchApiKeyHint": "从所选搜索服务商获取 API Key，用于网络搜索",
     "webSearchApiKeyOptional": "API Key 为可选项。未填写时将通过公开页面抓取获取结果。",
+    "searxngServerOnlyNotice": "SearXNG 须由服务端配置。请设置 SEARXNG_BASE_URL 环境变量（或在 server-providers.yml 的 web-search 段中配置）。不接受客户端自行填写实例地址。",
     "baiduSubSources": "百度搜索源",
     "baiduSubSourcesDescription": "选择至少一个百度数据源参与搜索。",
     "baiduSubSourceWeb": "网页搜索",
