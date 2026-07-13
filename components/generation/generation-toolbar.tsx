@@ -37,6 +37,12 @@ import {
 import type { SettingsSection } from '@/lib/types/settings';
 import { MediaPopover } from '@/components/generation/media-popover';
 import { getAcceptStringForProviders, isMimeSupportedByProviders } from '@/lib/document/mime';
+import {
+  MAX_DOCUMENT_BUNDLE_FILES,
+  MAX_DOCUMENT_BUNDLE_TOTAL_SIZE_BYTES,
+} from '@/lib/document/bundle';
+import { dedupeCourseMaterialFiles } from '@/lib/document/course-materials';
+import type { SelectedCourseMaterial } from '@/lib/types/generation';
 import { findModelById, modelIdsMatch } from '@/lib/ai/model-aliases';
 
 // ─── Constants ───────────────────────────────────────────────
@@ -49,8 +55,9 @@ export interface GenerationToolbarProps {
   onWebSearchChange: (v: boolean) => void;
   onSettingsOpen: (section?: SettingsSection) => void;
   // PDF
-  pdfFile: File | null;
-  onPdfFileChange: (file: File | null) => void;
+  courseMaterials: SelectedCourseMaterial[];
+  onCourseMaterialsAdd: (files: File[]) => void;
+  onCourseMaterialRemove: (id: string) => void;
   onPdfError: (error: string | null) => void;
 }
 
@@ -59,8 +66,9 @@ export function GenerationToolbar({
   webSearch,
   onWebSearchChange,
   onSettingsOpen,
-  pdfFile,
-  onPdfFileChange,
+  courseMaterials,
+  onCourseMaterialsAdd,
+  onCourseMaterialRemove,
   onPdfError,
 }: GenerationToolbarProps) {
   const { t } = useI18n();
@@ -125,46 +133,79 @@ export function GenerationToolbar({
   // Course material handler. `plain-text` is always active alongside the
   // user-selected extractor so txt/md files remain uploadable without
   // configuring an external service.
-  const acceptForCurrentProvider = useMemo(
-    () => getAcceptStringForProviders([pdfProviderId, 'plain-text']),
+  const activeDocumentProviderIds = useMemo(
+    () => [pdfProviderId, 'plain-text'] as const,
     [pdfProviderId],
   );
+  const acceptForCurrentProvider = useMemo(
+    () => getAcceptStringForProviders(activeDocumentProviderIds),
+    [activeDocumentProviderIds],
+  );
 
-  // If the user switches to a provider that doesn't support the currently
-  // attached file, drop the file so we don't submit an unsupported upload
-  // that would only fail server-side.
+  // If the user switches to a provider that doesn't support already attached
+  // materials, drop only the incompatible files so the eventual extraction
+  // request matches the current provider capability.
   useEffect(() => {
-    if (!pdfFile) return;
-    const stillSupported = isMimeSupportedByProviders(
-      { mimeType: pdfFile.type, fileName: pdfFile.name },
-      [pdfProviderId, 'plain-text'],
+    const unsupportedMaterials = courseMaterials.filter(
+      (file) =>
+        !isMimeSupportedByProviders(
+          { mimeType: file.type, fileName: file.name },
+          activeDocumentProviderIds,
+        ),
     );
-    if (!stillSupported) {
-      onPdfFileChange(null);
-      onPdfError(t('upload.unsupportedCourseMaterial'));
-    }
-    // Intentionally omit onPdfFileChange/onPdfError/t from deps: they are
-    // stable enough for this check and adding them would re-run the effect
-    // on unrelated parent re-renders.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pdfProviderId, pdfFile]);
+    if (unsupportedMaterials.length === 0) return;
 
-  const handleFileSelect = (file: File) => {
-    if (
-      !isMimeSupportedByProviders({ mimeType: file.type, fileName: file.name }, [
-        pdfProviderId,
-        'plain-text',
-      ])
-    ) {
+    for (const file of unsupportedMaterials) {
+      onCourseMaterialRemove(file.id);
+    }
+    onPdfError(t('upload.unsupportedCourseMaterial'));
+    // Intentionally omit callbacks/t from deps: adding them would re-run this
+    // provider capability cleanup on unrelated parent re-renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeDocumentProviderIds, courseMaterials]);
+
+  const handleFilesSelect = (incomingFiles: File[]) => {
+    const supportedFiles = incomingFiles.filter((file) =>
+      isMimeSupportedByProviders(
+        { mimeType: file.type, fileName: file.name },
+        activeDocumentProviderIds,
+      ),
+    );
+    if (supportedFiles.length === 0) {
       onPdfError(t('upload.unsupportedCourseMaterial'));
       return;
     }
-    if (file.size > MAX_COURSE_MATERIAL_SIZE_BYTES) {
+    if (supportedFiles.length !== incomingFiles.length) {
+      onPdfError(t('upload.unsupportedCourseMaterial'));
+      return;
+    }
+    if (supportedFiles.some((file) => file.size > MAX_COURSE_MATERIAL_SIZE_BYTES)) {
       onPdfError(t('upload.fileTooLarge'));
       return;
     }
+
+    const dedupedFiles = dedupeCourseMaterialFiles(courseMaterials, supportedFiles);
+    if (dedupedFiles.length === 0) return;
+
+    if (courseMaterials.length + dedupedFiles.length > MAX_DOCUMENT_BUNDLE_FILES) {
+      onPdfError(t('upload.courseMaterialCountLimit', { n: MAX_DOCUMENT_BUNDLE_FILES }));
+      return;
+    }
+
+    const totalSize =
+      courseMaterials.reduce((sum, file) => sum + file.size, 0) +
+      dedupedFiles.reduce((sum, file) => sum + file.size, 0);
+    if (totalSize > MAX_DOCUMENT_BUNDLE_TOTAL_SIZE_BYTES) {
+      onPdfError(
+        t('upload.courseMaterialTotalSizeLimit', {
+          n: Math.floor(MAX_DOCUMENT_BUNDLE_TOTAL_SIZE_BYTES / 1024 / 1024),
+        }),
+      );
+      return;
+    }
+
     onPdfError(null);
-    onPdfFileChange(file);
+    onCourseMaterialsAdd(dedupedFiles);
   };
 
   // ─── Pill button helper ─────────────────────────────
@@ -216,19 +257,13 @@ export function GenerationToolbar({
         {/* ── Course material (extractor + upload) combined Popover ── */}
         <Popover>
           <PopoverTrigger asChild>
-            {pdfFile ? (
+            {courseMaterials.length > 0 ? (
               <button className={pillActive}>
                 <Paperclip className="size-3.5" />
-                <span className="max-w-[100px] truncate">{pdfFile.name}</span>
-                <span
-                  role="button"
-                  className="size-4 rounded-full inline-flex items-center justify-center hover:bg-violet-200 dark:hover:bg-violet-800 transition-colors"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onPdfFileChange(null);
-                  }}
-                >
-                  <X className="size-2.5" />
+                <span className="max-w-[140px] truncate">
+                  {courseMaterials.length === 1
+                    ? courseMaterials[0].name
+                    : t('toolbar.courseMaterialsSelected', { n: courseMaterials.length })}
                 </span>
               </button>
             ) : (
@@ -284,33 +319,14 @@ export function GenerationToolbar({
                 ref={fileInputRef}
                 className="hidden"
                 accept={acceptForCurrentProvider}
+                multiple
                 onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) handleFileSelect(f);
+                  const files = Array.from(e.target.files ?? []);
+                  if (files.length > 0) handleFilesSelect(files);
                   e.target.value = '';
                 }}
               />
-              {pdfFile ? (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <div className="size-8 rounded-lg bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center shrink-0">
-                      <FileText className="size-4 text-violet-600 dark:text-violet-400" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium truncate">{pdfFile.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {(pdfFile.size / 1024 / 1024).toFixed(2)} MB
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => onPdfFileChange(null)}
-                    className="w-full text-xs text-destructive hover:underline text-left"
-                  >
-                    {t('toolbar.removeCourseMaterial')}
-                  </button>
-                </div>
-              ) : (
+              <div className="space-y-3">
                 <div
                   className={cn(
                     'flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-4 transition-colors cursor-pointer',
@@ -327,17 +343,57 @@ export function GenerationToolbar({
                   onDrop={(e) => {
                     e.preventDefault();
                     setIsDragging(false);
-                    const f = e.dataTransfer.files?.[0];
-                    if (f) handleFileSelect(f);
+                    const files = Array.from(e.dataTransfer.files ?? []);
+                    if (files.length > 0) handleFilesSelect(files);
                   }}
                 >
                   <Paperclip className="size-5 text-muted-foreground/50 mb-1.5" />
                   <p className="text-xs font-medium">{t('toolbar.courseMaterialUpload')}</p>
-                  <p className="text-[10px] text-muted-foreground/60 mt-0.5">
+                  <p className="text-[10px] text-muted-foreground/60 mt-0.5 text-center">
                     {t('upload.courseMaterialSizeLimit')}
                   </p>
+                  <p className="text-[10px] text-muted-foreground/60 text-center">
+                    {t('upload.courseMaterialCountLimit', { n: MAX_DOCUMENT_BUNDLE_FILES })}
+                  </p>
                 </div>
-              )}
+
+                {courseMaterials.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-[10px] text-muted-foreground/70">
+                      {t('toolbar.courseMaterialMergeOrder')}
+                    </p>
+                    <div className="max-h-44 space-y-2 overflow-y-auto pr-1">
+                      {[...courseMaterials]
+                        .sort((a, b) => a.order - b.order)
+                        .map((file) => (
+                          <div
+                            key={file.id}
+                            className="flex items-center gap-2 rounded-lg border border-border/50 px-2 py-2"
+                          >
+                            <div className="size-8 rounded-lg bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center shrink-0">
+                              <FileText className="size-4 text-violet-600 dark:text-violet-400" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium truncate">
+                                {file.order}. {file.name}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {(file.size / 1024 / 1024).toFixed(2)} MB
+                              </p>
+                            </div>
+                            <button
+                              onClick={() => onCourseMaterialRemove(file.id)}
+                              className="size-6 rounded-full inline-flex items-center justify-center text-muted-foreground hover:bg-muted transition-colors"
+                              aria-label={t('toolbar.removeCourseMaterial')}
+                            >
+                              <X className="size-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </PopoverContent>
         </Popover>
