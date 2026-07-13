@@ -1020,6 +1020,7 @@
     "addProviderDescription": "Add custom model providers to extend available AI models",
     "providerNames": {
       "openai": "OpenAI",
+      "azure": "Azure OpenAI",
       "anthropic": "Claude",
       "google": "Gemini",
       "deepseek": "DeepSeek",
@@ -1042,6 +1043,7 @@
     },
     "providerTypes": {
       "openai": "OpenAI Protocol",
+      "azure": "Azure OpenAI",
       "anthropic": "Claude Protocol",
       "google": "Gemini Protocol"
     },
@@ -1060,6 +1062,7 @@
     "importFromClipboard": "Import from Clipboard",
     "apiSecret": "API Key",
     "apiHost": "Base URL",
+    "azureDeploymentHint": "Enter your Azure OpenAI endpoint above, then add each Azure deployment name as a model.",
     "baseUrlRegion": {
       "china": "China",
       "international": "International",
