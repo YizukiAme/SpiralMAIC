@@ -86,17 +86,30 @@ interface SharedCredentialState {
   logoutInFlight: Promise<void> | null;
 }
 
-const SHARED_STATE_REGISTRY_KEY = Symbol.for('openmaic.codex.oauth.shared-credential-state.v1');
+interface SharedCredentialStateRegistry {
+  byCoordinationKey: Map<string, SharedCredentialState>;
+  byVault: WeakMap<CodexCredentialVault, SharedCredentialState>;
+}
+
+function isSharedCredentialStateRegistry(value: unknown): value is SharedCredentialStateRegistry {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<SharedCredentialStateRegistry>;
+  return candidate.byCoordinationKey instanceof Map && candidate.byVault instanceof WeakMap;
+}
+
+const SHARED_STATE_REGISTRY_KEY = Symbol.for('openmaic.codex.oauth.shared-credential-state.v2');
 const coordinatorHost = globalThis as unknown as Record<PropertyKey, unknown>;
 const existingSharedStateRegistry = coordinatorHost[SHARED_STATE_REGISTRY_KEY];
-const sharedStateByVault =
-  existingSharedStateRegistry instanceof WeakMap
-    ? (existingSharedStateRegistry as WeakMap<CodexCredentialVault, SharedCredentialState>)
-    : new WeakMap<CodexCredentialVault, SharedCredentialState>();
+const sharedStateRegistry = isSharedCredentialStateRegistry(existingSharedStateRegistry)
+  ? existingSharedStateRegistry
+  : {
+      byCoordinationKey: new Map<string, SharedCredentialState>(),
+      byVault: new WeakMap<CodexCredentialVault, SharedCredentialState>(),
+    };
 
-if (!(existingSharedStateRegistry instanceof WeakMap)) {
+if (!isSharedCredentialStateRegistry(existingSharedStateRegistry)) {
   Object.defineProperty(coordinatorHost, SHARED_STATE_REGISTRY_KEY, {
-    value: sharedStateByVault,
+    value: sharedStateRegistry,
     enumerable: false,
     configurable: false,
     writable: false,
@@ -104,16 +117,26 @@ if (!(existingSharedStateRegistry instanceof WeakMap)) {
 }
 
 function getSharedCredentialState(vault: CodexCredentialVault): SharedCredentialState {
-  const existing = sharedStateByVault.get(vault);
+  const coordinationKey = vault.coordinationKey;
+  if (typeof coordinationKey === 'string' && coordinationKey.length > 0) {
+    const existing = sharedStateRegistry.byCoordinationKey.get(coordinationKey);
+    if (existing) return existing;
+
+    const state = createSharedCredentialState();
+    sharedStateRegistry.byCoordinationKey.set(coordinationKey, state);
+    return state;
+  }
+
+  const existing = sharedStateRegistry.byVault.get(vault);
   if (existing) return existing;
 
-  const state: SharedCredentialState = {
-    generation: 0,
-    operationInFlight: null,
-    logoutInFlight: null,
-  };
-  sharedStateByVault.set(vault, state);
+  const state = createSharedCredentialState();
+  sharedStateRegistry.byVault.set(vault, state);
   return state;
+}
+
+function createSharedCredentialState(): SharedCredentialState {
+  return { generation: 0, operationInFlight: null, logoutInFlight: null };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
