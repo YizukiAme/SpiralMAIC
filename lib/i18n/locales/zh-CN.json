@@ -334,6 +334,10 @@
         "fixHtml": {
           "label": "修复互动页的 bug",
           "examples": "“开始按钮点了没反应”、“手机上排版重叠”"
+        },
+        "elements": {
+          "label": "微调页面元素",
+          "examples": "“把标题改成蓝色并上移一点”、“把这个图缩小”"
         }
       },
       "newConversation": "新对话",
@@ -428,6 +432,14 @@
       "reading": "读取中",
       "done": "已读取",
       "failed": "未读取"
+    },
+    "editElements": {
+      "title": "编辑元素",
+      "editing": "编辑中",
+      "applied": "已应用",
+      "notApplied": "未应用",
+      "applyFailed": "编辑器无法应用元素修改，未更改任何内容。",
+      "applyPartiallyFailed": "编辑器未能应用一项或多项元素修改，其他修改可能已应用。"
     }
   },
   "classroomComplete": {

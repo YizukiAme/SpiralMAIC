@@ -279,6 +279,10 @@
         "fixHtml": {
           "examples": "\"시작 버튼을 눌러도 반응이 없음\", \"모바일에서 패널이 겹침\"",
           "label": "페이지 버그 수정"
+        },
+        "elements": {
+          "label": "요소 미세 조정",
+          "examples": "“제목을 파란색으로 바꾸고 위로”, “이 그림을 작게”"
         }
       },
       "newConversation": "새 대화",
@@ -428,6 +432,14 @@
       "fixing": "수정 중",
       "notFixed": "수정 안 됨",
       "title": "인터랙티브 페이지 수정"
+    },
+    "editElements": {
+      "title": "요소 편집",
+      "editing": "편집 중",
+      "applied": "적용됨",
+      "notApplied": "미적용",
+      "applyFailed": "편집기에서 요소 편집을 적용하지 못했습니다. 변경된 내용이 없습니다.",
+      "applyPartiallyFailed": "하나 이상의 요소 편집을 적용하지 못했습니다. 다른 편집은 적용되었을 수 있습니다."
     }
   },
   "classroomComplete": {

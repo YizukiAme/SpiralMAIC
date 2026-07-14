@@ -334,6 +334,10 @@
         "fixHtml": {
           "label": "修復互動頁的 bug",
           "examples": "「開始按鈕點了沒反應」、「手機上排版重疊」"
+        },
+        "elements": {
+          "label": "微調頁面元素",
+          "examples": "「把標題改成藍色並上移一點」、「把這個圖縮小」"
         }
       },
       "newConversation": "新對話",
@@ -428,6 +432,14 @@
       "reading": "讀取中",
       "done": "已讀取",
       "failed": "未讀取"
+    },
+    "editElements": {
+      "title": "編輯元素",
+      "editing": "編輯中",
+      "applied": "已套用",
+      "notApplied": "未套用",
+      "applyFailed": "編輯器無法套用元素修改，未變更任何內容。",
+      "applyPartiallyFailed": "編輯器未能套用一項或多項元素修改，其他修改可能已套用。"
     }
   },
   "whiteboard": {

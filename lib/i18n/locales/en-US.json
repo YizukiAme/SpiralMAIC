@@ -334,6 +334,10 @@
         "fixHtml": {
           "label": "Fix a bug on the page",
           "examples": "“The start button does nothing”, “Panels overlap on mobile”"
+        },
+        "elements": {
+          "label": "Tweak selected elements",
+          "examples": "“Make the title blue and move it up”, “Make this figure smaller”"
         }
       },
       "newConversation": "New conversation",
@@ -428,6 +432,14 @@
       "reading": "Reading",
       "done": "Read",
       "failed": "Not read"
+    },
+    "editElements": {
+      "title": "Edit elements",
+      "editing": "Editing",
+      "applied": "Applied",
+      "notApplied": "Not applied",
+      "applyFailed": "The editor could not apply the element edit. Nothing was changed.",
+      "applyPartiallyFailed": "The editor could not apply one or more element edits. Other edits may have been applied."
     }
   },
   "classroomComplete": {

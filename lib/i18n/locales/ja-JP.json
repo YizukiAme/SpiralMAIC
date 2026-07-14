@@ -328,6 +328,10 @@
         "fixHtml": {
           "examples": "「スタートボタンを押しても何も起きない」「スマホでパネルが重なる」",
           "label": "ページの不具合を修正"
+        },
+        "elements": {
+          "label": "要素を微調整",
+          "examples": "「タイトルを青くして上に」「この図を小さく」"
         }
       },
       "newConversation": "新しい会話",
@@ -428,6 +432,14 @@
       "fixing": "修正中",
       "notFixed": "未修正",
       "title": "インタラクティブページを修正"
+    },
+    "editElements": {
+      "title": "要素を編集",
+      "editing": "編集中",
+      "applied": "適用済み",
+      "notApplied": "未適用",
+      "applyFailed": "エディターで要素の編集を適用できませんでした。変更はありません。",
+      "applyPartiallyFailed": "一部の要素編集を適用できませんでした。ほかの編集は適用されている可能性があります。"
     }
   },
   "classroomComplete": {
