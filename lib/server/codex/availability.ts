@@ -2,24 +2,19 @@ import { randomBytes } from 'node:crypto';
 import { lstat, mkdir, open, rename, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 
-export const CODEX_OAUTH_AVAILABILITY_REASONS = {
-  AVAILABLE: 'AVAILABLE',
-  FEATURE_DISABLED: 'FEATURE_DISABLED',
-  SERVERLESS_UNSUPPORTED: 'SERVERLESS_UNSUPPORTED',
-  ACCESS_CODE_REQUIRED: 'ACCESS_CODE_REQUIRED',
-  DATA_DIR_UNWRITABLE: 'DATA_DIR_UNWRITABLE',
-} as const;
+import {
+  CODEX_OAUTH_AVAILABILITY_REASONS,
+  type CodexOAuthAvailability,
+  type CodexOAuthAvailabilityReason,
+  type CodexOAuthLoginMethod,
+} from '@/lib/types/codex-auth';
 
-export type CodexOAuthAvailabilityReason =
-  (typeof CODEX_OAUTH_AVAILABILITY_REASONS)[keyof typeof CODEX_OAUTH_AVAILABILITY_REASONS];
-
-export type CodexOAuthLoginMethod = 'browser' | 'device';
-
-export interface CodexOAuthAvailability {
-  available: boolean;
-  reason: CodexOAuthAvailabilityReason;
-  methods: CodexOAuthLoginMethod[];
-}
+export { CODEX_OAUTH_AVAILABILITY_REASONS } from '@/lib/types/codex-auth';
+export type {
+  CodexOAuthAvailability,
+  CodexOAuthAvailabilityReason,
+  CodexOAuthLoginMethod,
+} from '@/lib/types/codex-auth';
 
 interface CodexOAuthAvailabilityOptions {
   env?: NodeJS.ProcessEnv;
