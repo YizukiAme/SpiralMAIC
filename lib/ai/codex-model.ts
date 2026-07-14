@@ -13,6 +13,15 @@ export const CODEX_RESPONSES_ENDPOINT = `${CODEX_RESPONSES_BASE_URL}/responses`;
 export const CODEX_STREAM_ERROR_MESSAGE = 'Codex response stream could not be processed';
 type SafeCodexStatusCode = 401 | 403 | 429;
 
+function isAuthenticationRequiredCode(value: unknown): boolean {
+  return (
+    value === 'CREDENTIALS_MISSING' ||
+    value === 'SIGNED_OUT' ||
+    value === 'INVALID_GRANT' ||
+    value === 'REFRESH_REJECTED'
+  );
+}
+
 function extractSafeStatusCode(error: unknown): SafeCodexStatusCode | undefined {
   const seen = new Set<unknown>();
   let current = error;
@@ -24,6 +33,7 @@ function extractSafeStatusCode(error: unknown): SafeCodexStatusCode | undefined 
       for (const candidate of [current.statusCode, current.status, current.upstreamStatus]) {
         if (candidate === 401 || candidate === 403 || candidate === 429) return candidate;
       }
+      if (isAuthenticationRequiredCode(current.code)) return 401;
       current = current.cause;
     } catch {
       return undefined;

@@ -6,6 +6,8 @@ import {
   createCodexResponsesTransport,
 } from '@/lib/server/codex/transport';
 import {
+  CODEX_OAUTH_ERROR_CODES,
+  CodexOAuthError,
   ManagedCodexTokenProvider,
   type CodexTokenProvider,
 } from '@/lib/server/codex/token-provider';
@@ -206,6 +208,76 @@ describe('Codex Responses transport boundary', () => {
 });
 
 describe('Codex Responses transport failures', () => {
+  it.each([
+    [CODEX_OAUTH_ERROR_CODES.NETWORK_ERROR, true],
+    [CODEX_OAUTH_ERROR_CODES.UPSTREAM_ERROR, true],
+    [CODEX_OAUTH_ERROR_CODES.INVALID_RESPONSE, false],
+    [CODEX_OAUTH_ERROR_CODES.STORAGE_ERROR, false],
+  ] as const)('preserves a %s credential refresh failure after a 401', async (code, retryable) => {
+    const oauthError = new CodexOAuthError(code, retryable);
+    const tokenProvider = {
+      getValidCredentials: vi.fn(async () => ({
+        accessToken: 'old-token',
+        accountId: 'account-id',
+      })),
+      refreshIfCurrent: vi.fn(async () => {
+        throw oauthError;
+      }),
+    };
+    const upstreamFetch = vi.fn<typeof fetch>(async () =>
+      Promise.resolve(new Response('secret upstream body', { status: 401 })),
+    );
+    const transport = createCodexResponsesTransport({ tokenProvider, upstreamFetch });
+
+    await expect(transport(CODEX_RESPONSES_ENDPOINT, { method: 'POST', body: '{}' })).rejects.toBe(
+      oauthError,
+    );
+    expect(upstreamFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    CODEX_OAUTH_ERROR_CODES.CREDENTIALS_MISSING,
+    CODEX_OAUTH_ERROR_CODES.SIGNED_OUT,
+    CODEX_OAUTH_ERROR_CODES.INVALID_GRANT,
+    CODEX_OAUTH_ERROR_CODES.REFRESH_REJECTED,
+  ])('preserves a %s credential refresh failure after a 401', async (code) => {
+    const oauthError = new CodexOAuthError(code, false);
+    const tokenProvider = {
+      getValidCredentials: vi.fn(async () => ({
+        accessToken: 'old-token',
+        accountId: 'account-id',
+      })),
+      refreshIfCurrent: vi.fn(async () => {
+        throw oauthError;
+      }),
+    };
+    const upstreamFetch = vi.fn<typeof fetch>(async () =>
+      Promise.resolve(new Response('secret upstream body', { status: 401 })),
+    );
+    const transport = createCodexResponsesTransport({ tokenProvider, upstreamFetch });
+
+    await expect(transport(CODEX_RESPONSES_ENDPOINT, { method: 'POST', body: '{}' })).rejects.toBe(
+      oauthError,
+    );
+    expect(upstreamFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves credentials cleared before the first request for middleware classification', async () => {
+    const oauthError = new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.CREDENTIALS_MISSING, false);
+    const tokenProvider = {
+      getValidCredentials: vi.fn(async () => {
+        throw oauthError;
+      }),
+    } satisfies CodexTokenProvider;
+    const upstreamFetch = vi.fn<typeof fetch>();
+    const transport = createCodexResponsesTransport({ tokenProvider, upstreamFetch });
+
+    await expect(transport(CODEX_RESPONSES_ENDPOINT, { method: 'POST', body: '{}' })).rejects.toBe(
+      oauthError,
+    );
+    expect(upstreamFetch).not.toHaveBeenCalled();
+  });
+
   it.each([
     { label: 'replacement account', replacementAccountId: 'account-b' },
     { label: 'same-account new login', replacementAccountId: 'account-a' },

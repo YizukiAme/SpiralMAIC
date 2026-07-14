@@ -4,7 +4,11 @@ import packageMetadata from '../../../package.json';
 
 import { CODEX_RESPONSES_ENDPOINT } from '@/lib/ai/codex-model';
 
-import { refreshCodexCredentialsIfCurrent, type CodexTokenProvider } from './token-provider';
+import {
+  isCodexCredentialsChangedError,
+  refreshCodexCredentialsIfCurrent,
+  type CodexTokenProvider,
+} from './token-provider';
 
 export { CODEX_RESPONSES_ENDPOINT } from '@/lib/ai/codex-model';
 
@@ -202,8 +206,9 @@ export function createCodexResponsesTransport(
           credentials = await options.tokenProvider.getValidCredentials();
           originalCredentials = credentials;
         }
-      } catch {
-        throw errorForStatus(401);
+      } catch (error) {
+        if (isCodexCredentialsChangedError(error)) throw errorForStatus(401);
+        throw error;
       }
       try {
         return await upstreamFetch(CODEX_RESPONSES_ENDPOINT, {
