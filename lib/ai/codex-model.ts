@@ -30,10 +30,10 @@ function extractSafeStatusCode(error: unknown): SafeCodexStatusCode | undefined 
     if (!isRecord(current) || seen.has(current)) return undefined;
     seen.add(current);
     try {
+      if (isAuthenticationRequiredCode(current.code)) return 401;
       for (const candidate of [current.statusCode, current.status, current.upstreamStatus]) {
         if (candidate === 401 || candidate === 403 || candidate === 429) return candidate;
       }
-      if (isAuthenticationRequiredCode(current.code)) return 401;
       current = current.cause;
     } catch {
       return undefined;
