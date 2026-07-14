@@ -551,6 +551,68 @@ describe('Codex model discovery cache', () => {
     expect(vault.current?.accessToken).toBe(refreshedAccess);
   });
 
+  it('shares one auth replay across overlapping callers in the same rotation chain', async () => {
+    const credentials: CodexOAuthCredentials = {
+      version: 1,
+      accessToken: 'old-access-secret',
+      refreshToken: 'old-refresh-secret',
+      expiresAt: NOW + 3_600_000,
+      accountId: 'same-account',
+      updatedAt: NOW - 1,
+    };
+    const vault = new MemoryVault(credentials);
+    let refreshNumber = 0;
+    const tokenExchangeFetch = vi.fn(async () => {
+      refreshNumber += 1;
+      return new Response(
+        JSON.stringify({
+          access_token: unsignedJwt({
+            chatgpt_account_id: 'same-account',
+            refresh_number: refreshNumber,
+          }),
+          refresh_token: `rotated-refresh-${refreshNumber}`,
+          expires_in: 3600,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+    const tokenProvider = new ManagedCodexTokenProvider({
+      vault,
+      clock: { now: () => NOW },
+      tokenExchangeFetch,
+    });
+    const firstReplay = deferred<Response>();
+    const firstReplayStarted = deferred<void>();
+    let modelsRequestNumber = 0;
+    const upstreamFetch = vi.fn(async () => {
+      modelsRequestNumber += 1;
+      if (modelsRequestNumber === 1) {
+        return new Response('first-unauthorized-body', { status: 401 });
+      }
+      if (modelsRequestNumber === 2) {
+        firstReplayStarted.resolve();
+        return firstReplay.promise;
+      }
+      return new Response('overlap-unauthorized-body', { status: 401 });
+    });
+    const discovery = new CodexModelDiscovery({
+      tokenProvider,
+      credentialGeneration: () => getCodexCredentialGeneration(vault),
+      upstreamFetch,
+    });
+
+    const callerA = discovery.getModels();
+    await firstReplayStarted.promise;
+    const callerB = discovery.getModels();
+    await expect(callerB).resolves.toEqual(CODEX_FALLBACK_MODELS);
+    firstReplay.resolve(new Response('replay-unauthorized-body', { status: 401 }));
+    await expect(callerA).resolves.toEqual(CODEX_FALLBACK_MODELS);
+
+    expect(tokenExchangeFetch).toHaveBeenCalledTimes(1);
+    expect(upstreamFetch).toHaveBeenCalledTimes(4);
+    expect(vault.current?.accountId).toBe('same-account');
+  });
+
   it('never returns fallback or stale models after credentials disappear', async () => {
     let generation: string | null = 'account-a:1';
     const discovery = new CodexModelDiscovery({

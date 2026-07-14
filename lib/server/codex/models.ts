@@ -89,8 +89,14 @@ interface CodexModelCacheEntry {
   fetchedAt: number;
 }
 
-interface CodexModelDiscoveryRequestContext {
+interface CodexModelAuthReplayChain {
+  activeCallers: number;
   authReplaysRemaining: number;
+}
+
+interface CodexModelDiscoveryRequestContext {
+  authReplayChain?: CodexModelAuthReplayChain;
+  authReplayChainKey?: string;
 }
 
 interface CodexModelFlight {
@@ -344,6 +350,7 @@ export class CodexModelDiscovery {
   private readonly cacheTtlMs: number;
   private cache: CodexModelCacheEntry | null = null;
   private readonly inFlight = new Map<string, CodexModelFlight>();
+  private readonly authReplayChains = new Map<string, CodexModelAuthReplayChain>();
   private invalidationGeneration = 0;
 
   constructor(options: CodexModelDiscoveryOptions) {
@@ -360,7 +367,12 @@ export class CodexModelDiscovery {
   }
 
   async getModels(): Promise<ModelInfo[]> {
-    return this.getModelsForCurrentCredentials({ authReplaysRemaining: 1 }, true);
+    const requestContext: CodexModelDiscoveryRequestContext = {};
+    try {
+      return await this.getModelsForCurrentCredentials(requestContext, true);
+    } finally {
+      this.releaseAuthReplayChain(requestContext);
+    }
   }
 
   private async getModelsForCurrentCredentials(
@@ -387,9 +399,19 @@ export class CodexModelDiscovery {
     }
     if (expectedAccountId && settledCredentials.accountId !== expectedAccountId) return [];
 
+    const invalidationGeneration = this.invalidationGeneration;
     const generation = await this.credentialGeneration();
     if (!generation) {
       this.invalidate();
+      return [];
+    }
+    if (
+      !this.acquireAuthReplayChain(
+        requestContext,
+        settledCredentials.accountId,
+        invalidationGeneration,
+      )
+    ) {
       return [];
     }
 
@@ -398,12 +420,13 @@ export class CodexModelDiscovery {
       return cloneModels(this.cache.models);
     }
 
-    const invalidationGeneration = this.invalidationGeneration;
     const flightKey = `${invalidationGeneration}:${generation}`;
     const existing = this.inFlight.get(flightKey);
     if (existing) {
       const models = await existing.promise;
-      if (existing.authReplayState.used) requestContext.authReplaysRemaining = 0;
+      if (existing.authReplayState.used && requestContext.authReplayChain) {
+        requestContext.authReplayChain.authReplaysRemaining = 0;
+      }
       return cloneModels(
         await this.retryAfterSameAccountRotation(models, {
           requestContext,
@@ -417,10 +440,12 @@ export class CodexModelDiscovery {
 
     const authReplayState = { used: false };
     const operation = this.refresh(generation, now, invalidationGeneration, {
-      allowAuthReplay: requestContext.authReplaysRemaining > 0,
+      allowAuthReplay: (requestContext.authReplayChain?.authReplaysRemaining ?? 0) > 0,
       onAuthReplay: () => {
         authReplayState.used = true;
-        requestContext.authReplaysRemaining = 0;
+        if (requestContext.authReplayChain) {
+          requestContext.authReplayChain.authReplaysRemaining = 0;
+        }
       },
     });
     const flight: CodexModelFlight = { promise: operation, authReplayState };
@@ -439,6 +464,45 @@ export class CodexModelDiscovery {
     } finally {
       if (this.inFlight.get(flightKey) === flight) this.inFlight.delete(flightKey);
     }
+  }
+
+  private acquireAuthReplayChain(
+    requestContext: CodexModelDiscoveryRequestContext,
+    accountId: string,
+    invalidationGeneration: number,
+  ): boolean {
+    const accountScope = createHash('sha256').update(accountId).digest('hex');
+    const chainKey = `${invalidationGeneration}:${accountScope}`;
+    if (requestContext.authReplayChain) {
+      return (
+        requestContext.authReplayChainKey === chainKey &&
+        this.authReplayChains.get(chainKey) === requestContext.authReplayChain
+      );
+    }
+    if (this.invalidationGeneration !== invalidationGeneration) return false;
+
+    let chain = this.authReplayChains.get(chainKey);
+    if (!chain) {
+      chain = { activeCallers: 0, authReplaysRemaining: 1 };
+      this.authReplayChains.set(chainKey, chain);
+    }
+    chain.activeCallers += 1;
+    requestContext.authReplayChain = chain;
+    requestContext.authReplayChainKey = chainKey;
+    return true;
+  }
+
+  private releaseAuthReplayChain(requestContext: CodexModelDiscoveryRequestContext): void {
+    const chain = requestContext.authReplayChain;
+    const chainKey = requestContext.authReplayChainKey;
+    if (!chain || !chainKey) return;
+
+    chain.activeCallers = Math.max(0, chain.activeCallers - 1);
+    if (chain.activeCallers === 0 && this.authReplayChains.get(chainKey) === chain) {
+      this.authReplayChains.delete(chainKey);
+    }
+    delete requestContext.authReplayChain;
+    delete requestContext.authReplayChainKey;
   }
 
   private async retryAfterSameAccountRotation(
