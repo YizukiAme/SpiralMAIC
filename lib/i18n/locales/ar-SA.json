@@ -1035,6 +1035,7 @@
     "addProviderDescription": "أضف مزوّدي نماذج مخصصين لتوسيع نماذج الذكاء الاصطناعي المتاحة",
     "providerNames": {
       "openai": "OpenAI",
+      "openai-codex": "ChatGPT Codex",
       "anthropic": "Claude",
       "google": "Gemini",
       "deepseek": "DeepSeek",
@@ -1054,6 +1055,36 @@
       "bocha": "Bocha",
       "brave": "Brave Search",
       "baidu": "Baidu"
+    },
+    "codexOAuth": {
+      "experimental": "تكامل تجريبي من جهة خارجية مع Codex؛ يستخدم حصة خطة ChatGPT الخاصة بك.",
+      "unavailableTitle": "تسجيل الدخول إلى Codex غير متاح",
+      "unavailable": {
+        "FEATURE_DISABLED": "فعّل Codex OAuth على الخادم لاستخدام هذا المزوّد.",
+        "SERVERLESS_UNSUPPORTED": "يتطلب Codex OAuth خادم Node مستضافاً ذاتياً مع تخزين دائم.",
+        "ACCESS_CODE_REQUIRED": "اضبط ACCESS_CODE قبل تفعيل Codex OAuth في بيئة الإنتاج.",
+        "DATA_DIR_UNWRITABLE": "لا يستطيع الخادم الكتابة في مجلد البيانات. تحقق من صلاحيات /app/data."
+      },
+      "connectedAs": "متصل باسم {email}",
+      "connected": "متصل بـ ChatGPT",
+      "signInBrowser": "تسجيل الدخول باستخدام ChatGPT",
+      "signInDevice": "استخدام رمز الجهاز",
+      "waiting": "بانتظار التفويض…",
+      "deviceInstructions": "افتح صفحة التحقق وأدخل رمز الاستخدام لمرة واحدة.",
+      "openVerification": "فتح صفحة التحقق",
+      "copyCode": "نسخ الرمز",
+      "copied": "تم النسخ",
+      "cancel": "إلغاء تسجيل الدخول",
+      "signOut": "تسجيل الخروج",
+      "models": "النماذج المتاحة",
+      "testConnection": "اختبار الاتصال",
+      "testSuccess": "تم الاتصال بـ Codex بنجاح.",
+      "testUnauthorized": "سجّل الدخول باستخدام ChatGPT مرة أخرى.",
+      "testForbidden": "مساحة عمل ChatGPT هذه لا تملك صلاحية Codex.",
+      "testRateLimited": "تم بلوغ حصة خطة ChatGPT أو حد معدل الطلبات.",
+      "testFailed": "فشل الاتصال بـ Codex.",
+      "loginFailed": "فشل تسجيل الدخول. حاول مجدداً أو استخدم رمز الجهاز.",
+      "loginExpired": "انتهت صلاحية محاولة تسجيل الدخول. ابدأ محاولة جديدة."
     },
     "providerTypes": {
       "openai": "بروتوكول OpenAI",
@@ -1545,6 +1576,7 @@
     "selectAgents": "اختيار الوكلاء",
     "noVisionWarning": "النموذج الحالي لا يدعم الرؤية. يمكن وضع الصور في الشرائح، لكن النموذج لا يستطيع فهم محتوى الصور لتحسين الاختيار والتخطيط",
     "serverConfigured": "الخادم",
+    "connected": "متصل",
     "serverConfiguredNotice": "تتم إدارة هذا المزوّد من قبل الخادم ولا يمكن تعديله هنا. لاستخدام بيانات الاعتماد الخاصة بك، أضِف مزوّدًا منفصلاً.",
     "ttsProviderEnabledLabel": "تفعيل هذا المزوّد",
     "ttsProviderEnabledHint": "عند الإيقاف، يُخفى هذا المزوّد من اختيار الصوت ولا يُعيَّن تلقائيًا.",

@@ -4,6 +4,7 @@ import type { NextRequest } from 'next/server';
 const mocks = vi.hoisted(() => ({
   resolveModel: vi.fn(),
   callLLM: vi.fn(),
+  logError: vi.fn(),
 }));
 
 vi.mock('@/lib/server/resolve-model', () => ({
@@ -18,7 +19,7 @@ vi.mock('@/lib/logger', () => ({
   createLogger: () => ({
     info: vi.fn(),
     warn: vi.fn(),
-    error: vi.fn(),
+    error: mocks.logError,
     debug: vi.fn(),
   }),
 }));
@@ -38,6 +39,7 @@ describe('POST /api/verify-model', () => {
     vi.resetModules();
     mocks.resolveModel.mockReset();
     mocks.callLLM.mockReset();
+    mocks.logError.mockReset();
     mocks.resolveModel.mockResolvedValue({ model: { id: 'language-model' } });
     mocks.callLLM.mockResolvedValue({ text: 'OK' });
   });
@@ -87,4 +89,65 @@ describe('POST /api/verify-model', () => {
       { mode: 'disabled', enabled: false },
     );
   });
+
+  it('accepts a credential-free Codex connection request', async () => {
+    const res = await postVerifyModel({ model: 'openai-codex:gpt-5.5' });
+
+    expect(res.status).toBe(200);
+    expect(mocks.resolveModel).toHaveBeenCalledWith({
+      modelString: 'openai-codex:gpt-5.5',
+      apiKey: '',
+      baseUrl: undefined,
+      providerType: undefined,
+    });
+  });
+
+  it.each([
+    [401, 'ChatGPT sign-in is required'],
+    [403, 'This ChatGPT workspace does not have Codex access'],
+    [429, 'ChatGPT plan quota or rate limit reached'],
+  ] as const)(
+    'preserves safe Codex status %i without leaking upstream details',
+    async (status, message) => {
+      const sentinel = `private-upstream-body-${status}`;
+      mocks.callLLM.mockRejectedValueOnce(
+        Object.assign(new Error(sentinel), { statusCode: status, cause: { body: sentinel } }),
+      );
+
+      const res = await postVerifyModel({ model: 'openai-codex:gpt-5.5' });
+      const json = await res.json();
+
+      expect(res.status).toBe(status);
+      expect(json).toMatchObject({ success: false, error: message });
+      expect(JSON.stringify(json)).not.toContain(sentinel);
+      expect(JSON.stringify(mocks.logError.mock.calls)).not.toContain(sentinel);
+    },
+  );
+
+  it('sanitizes Codex resolution failures too', async () => {
+    const sentinel = 'private-resolve-failure';
+    mocks.resolveModel.mockRejectedValueOnce(
+      Object.assign(new Error(sentinel), { statusCode: 403 }),
+    );
+
+    const res = await postVerifyModel({ model: 'openai-codex:gpt-5.5' });
+    const json = await res.json();
+
+    expect(res.status).toBe(403);
+    expect(json.error).toBe('This ChatGPT workspace does not have Codex access');
+    expect(JSON.stringify(json)).not.toContain(sentinel);
+  });
+
+  it.each(['CREDENTIALS_MISSING', 'SIGNED_OUT', 'INVALID_GRANT', 'REFRESH_REJECTED'])(
+    'maps the safe Codex auth code %s to re-login',
+    async (code) => {
+      mocks.resolveModel.mockRejectedValueOnce(Object.assign(new Error('safe'), { code }));
+
+      const res = await postVerifyModel({ model: 'openai-codex:gpt-5.5' });
+      const json = await res.json();
+
+      expect(res.status).toBe(401);
+      expect(json.error).toBe('ChatGPT sign-in is required');
+    },
+  );
 });

@@ -1019,6 +1019,7 @@
     "addProviderDescription": "新增自訂模型供應商以擴充可用的AI模型",
     "providerNames": {
       "openai": "OpenAI",
+      "openai-codex": "ChatGPT Codex",
       "anthropic": "Claude",
       "google": "Gemini",
       "deepseek": "DeepSeek",
@@ -1038,6 +1039,36 @@
       "bocha": "Bocha",
       "brave": "Brave Search",
       "baidu": "Baidu"
+    },
+    "codexOAuth": {
+      "experimental": "實驗性第三方 Codex 接入；使用你的 ChatGPT 方案額度。",
+      "unavailableTitle": "Codex 登入目前不可用",
+      "unavailable": {
+        "FEATURE_DISABLED": "請在伺服器啟用 Codex OAuth 後使用此提供者。",
+        "SERVERLESS_UNSUPPORTED": "Codex OAuth 需要具持久化儲存的自託管 Node 伺服器。",
+        "ACCESS_CODE_REQUIRED": "正式環境啟用 Codex OAuth 前必須設定 ACCESS_CODE。",
+        "DATA_DIR_UNWRITABLE": "伺服器無法寫入資料目錄，請檢查 /app/data 權限。"
+      },
+      "connectedAs": "已連線為 {email}",
+      "connected": "已連線 ChatGPT",
+      "signInBrowser": "使用 ChatGPT 登入",
+      "signInDevice": "使用裝置代碼",
+      "waiting": "正在等待授權…",
+      "deviceInstructions": "開啟驗證頁面並輸入此一次性代碼。",
+      "openVerification": "開啟驗證頁面",
+      "copyCode": "複製代碼",
+      "copied": "已複製",
+      "cancel": "取消登入",
+      "signOut": "登出",
+      "models": "可用模型",
+      "testConnection": "測試連線",
+      "testSuccess": "Codex 連線成功。",
+      "testUnauthorized": "請重新使用 ChatGPT 登入。",
+      "testForbidden": "此 ChatGPT 工作區沒有 Codex 權限。",
+      "testRateLimited": "已達到 ChatGPT 方案額度或頻率限制。",
+      "testFailed": "Codex 連線失敗。",
+      "loginFailed": "登入失敗，請重試或改用裝置代碼。",
+      "loginExpired": "本次登入已過期，請重新開始。"
     },
     "providerTypes": {
       "openai": "OpenAI 協定",
@@ -1455,6 +1486,7 @@
     "selectAgents": "選擇智能體",
     "noVisionWarning": "目前模型不支援視覺能力，圖片仍可放入投影片，但模型無法理解圖片內容來優化選擇和排版",
     "serverConfigured": "服務端",
+    "connected": "已連線",
     "serverConfiguredNotice": "此供應商由服務端託管，無法在此修改。如需使用自己的憑證，請新增一個供應商。",
     "ttsProviderEnabledLabel": "啟用此提供方",
     "ttsProviderEnabledHint": "關閉後，此提供方將不會出現在語音選擇器中，也不會被自動指派。",
