@@ -181,6 +181,32 @@ describe('createPartMapper — reasoning/thinking channel', () => {
     });
   });
 
+  it('captures reasoning metadata from an empty delta before returning', () => {
+    const partial = emptyPartial();
+    const mapper = createPartMapper(partial, () => undefined);
+
+    mapper.handle({
+      type: 'reasoning-start',
+      id: 'reasoning-1:0',
+      providerMetadata: { openai: { itemId: 'reasoning-1' } },
+    });
+    mapper.handle({
+      type: 'reasoning-delta',
+      id: 'reasoning-1:0',
+      text: '',
+      providerMetadata: { openai: { reasoningEncryptedContent: 'empty-delta-ciphertext' } },
+    });
+    mapper.handle({ type: 'reasoning-end', id: 'reasoning-1:0' });
+
+    const thinking = partial.content[0] as { thinkingSignature?: string };
+    expect(decodeOpenAIReasoningSignature(thinking.thinkingSignature)).toEqual({
+      openai: {
+        itemId: 'reasoning-1',
+        reasoningEncryptedContent: 'empty-delta-ciphertext',
+      },
+    });
+  });
+
   it('binds finish metadata by reasoning item id when multiple thinking blocks exist', () => {
     const partial = emptyPartial();
     const mapper = createPartMapper(partial, () => undefined);

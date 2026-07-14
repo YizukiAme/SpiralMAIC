@@ -206,9 +206,10 @@ export function createPartMapper(
         applyReasoningMetadata(reasoningId, part);
       }
     } else if (type === 'reasoning-delta' || type === 'reasoning') {
+      const reasoningId = typeof part.id === 'string' ? part.id : undefined;
+      if (reasoningId) applyReasoningMetadata(reasoningId, part);
       const delta = (part.text ?? part.delta ?? '') as string;
       if (!delta) return;
-      const reasoningId = typeof part.id === 'string' ? part.id : undefined;
       let index = reasoningId
         ? reasoningBlocks.get(reasoningId)?.index
         : active?.kind === 'thinking'
@@ -227,7 +228,6 @@ export function createPartMapper(
       }
       thinkingActive.buf += delta;
       (partial.content[thinkingActive.index] as ThinkingContent).thinking = thinkingActive.buf;
-      if (reasoningId) applyReasoningMetadata(reasoningId, part);
       push({ type: 'thinking_delta', contentIndex: thinkingActive.index, delta, partial });
     } else if (type === 'reasoning-end') {
       const reasoningId = typeof part.id === 'string' ? part.id : active?.reasoningId;
