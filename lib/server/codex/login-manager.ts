@@ -23,6 +23,7 @@ import {
   type CodexClock,
   type TokenExchangeFetch,
 } from './token-provider';
+import { codexCredentialsEqual, withCodexCredentialVaultMutation } from './vault';
 import type { CodexCredentialVault, CodexOAuthCredentials } from './vault';
 
 const BROWSER_CALLBACK_HOST = '127.0.0.1';
@@ -79,22 +80,6 @@ interface TerminalAttempt {
 }
 
 type ActiveAttempt = BrowserAttempt | DeviceAttempt | TerminalAttempt;
-
-function credentialsEqual(
-  left: Awaited<ReturnType<CodexCredentialVault['load']>>,
-  right: Awaited<ReturnType<CodexCredentialVault['load']>>,
-): boolean {
-  if (left === null || right === null) return left === right;
-  return (
-    left.version === right.version &&
-    left.accessToken === right.accessToken &&
-    left.refreshToken === right.refreshToken &&
-    left.expiresAt === right.expiresAt &&
-    left.accountId === right.accountId &&
-    left.email === right.email &&
-    left.updatedAt === right.updatedAt
-  );
-}
 
 function closeServer(server: Server): Promise<void> {
   if (!server.listening) return Promise.resolve();
@@ -276,10 +261,10 @@ export class CodexLoginManager {
     attempt: BrowserAttempt | DeviceAttempt,
     credentials: CodexOAuthCredentials,
   ): Promise<boolean> {
-    const previous = await this.vault.load();
-    if (!this.isAttemptCommitEligible(attempt)) return false;
-
-    const write = (async (): Promise<boolean> => {
+    const write = withCodexCredentialVaultMutation(this.vault, async () => {
+      if (!this.isAttemptCommitEligible(attempt)) return false;
+      const previous = await this.vault.load();
+      if (!this.isAttemptCommitEligible(attempt)) return false;
       await this.vault.save(credentials);
       if (this.isAttemptCommitEligible(attempt)) {
         attempt.status = 'complete';
@@ -287,11 +272,11 @@ export class CodexLoginManager {
       }
 
       const current = await this.vault.load();
-      if (!credentialsEqual(current, credentials)) return false;
+      if (!codexCredentialsEqual(current, credentials)) return false;
       if (previous) await this.vault.save(previous);
       else await this.vault.clear();
       return false;
-    })();
+    });
     this.credentialWrites.add(write);
     try {
       return await write;

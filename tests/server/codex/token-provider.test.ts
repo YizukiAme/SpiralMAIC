@@ -13,6 +13,7 @@ import {
 } from '@/lib/server/codex/token-provider';
 import {
   FileCodexCredentialVault,
+  withCodexCredentialVaultMutation,
   type CodexCredentialVault,
   type CodexOAuthCredentials,
 } from '@/lib/server/codex/vault';
@@ -142,6 +143,43 @@ describe('ManagedCodexTokenProvider', () => {
       updatedAt: NOW,
     });
     expect(JSON.stringify(vault.current)).not.toContain('id-token-must-not-be-persisted');
+  });
+
+  it('does not overwrite credentials from a login that completes during refresh', async () => {
+    const initial = credentials({ expiresAt: NOW });
+    const vault = new MemoryVault(initial);
+    const response = deferred<Response>();
+    const refreshStarted = deferred<void>();
+    const provider = createProvider(
+      vault,
+      vi.fn(async () => {
+        refreshStarted.resolve();
+        return response.promise;
+      }),
+    );
+
+    const refreshing = provider.getValidCredentials({ forceRefresh: true });
+    await refreshStarted.promise;
+    const relogged = credentials({
+      accessToken: 'relogged-during-refresh-access',
+      refreshToken: 'relogged-during-refresh-token',
+      accountId: 'relogged-during-refresh-account',
+      updatedAt: NOW + 1,
+    });
+    await withCodexCredentialVaultMutation(vault, () => vault.save(relogged));
+    response.resolve(
+      jsonResponse({
+        access_token: unsignedJwt({ chatgpt_account_id: 'stale-refresh-account' }),
+        refresh_token: 'stale-rotated-refresh',
+        expires_in: 300,
+      }),
+    );
+
+    await expect(refreshing).resolves.toEqual({
+      accessToken: relogged.accessToken,
+      accountId: relogged.accountId,
+    });
+    expect(vault.current).toEqual(relogged);
   });
 
   it('keeps the old refresh token and uses the new access JWT exp when optional fields are absent', async () => {
@@ -300,7 +338,9 @@ describe('ManagedCodexTokenProvider', () => {
     ]);
 
     expect(first).toEqual(second);
-    expect(vault.load).toHaveBeenCalledTimes(1);
+    // One initial read plus one compare-and-swap read before the rotated
+    // credentials commit. Both callers still share the same refresh flight.
+    expect(vault.load).toHaveBeenCalledTimes(2);
     expect(tokenExchangeFetch).toHaveBeenCalledTimes(1);
   });
 
@@ -427,6 +467,38 @@ describe('ManagedCodexTokenProvider', () => {
     expect(vault.clearCount).toBe(1);
   });
 
+  it('does not clear a newer login when an older refresh receives invalid_grant', async () => {
+    const initial = credentials();
+    const vault = new MemoryVault(initial);
+    const response = deferred<Response>();
+    const refreshStarted = deferred<void>();
+    const provider = createProvider(
+      vault,
+      vi.fn(async () => {
+        refreshStarted.resolve();
+        return response.promise;
+      }),
+    );
+
+    const refreshing = provider.getValidCredentials({ forceRefresh: true });
+    await refreshStarted.promise;
+    const relogged = credentials({
+      accessToken: 'new-login-access',
+      refreshToken: 'new-login-refresh',
+      accountId: 'new-login-account',
+      updatedAt: NOW + 1,
+    });
+    await withCodexCredentialVaultMutation(vault, () => vault.save(relogged));
+    response.resolve(jsonResponse({ error: 'invalid_grant' }, 400));
+
+    await expect(refreshing).resolves.toEqual({
+      accessToken: relogged.accessToken,
+      accountId: relogged.accountId,
+    });
+    expect(vault.current).toEqual(relogged);
+    expect(vault.clearCount).toBe(0);
+  });
+
   it('keeps credentials on network failures and removes sensitive upstream details', async () => {
     const initial = credentials();
     const vault = new MemoryVault(initial);
@@ -521,8 +593,10 @@ describe('ManagedCodexTokenProvider', () => {
     await saveStarted.promise;
     const logoutSettled = vi.fn();
     const logout = provider.logout().then(logoutSettled);
-    await vi.waitFor(() => expect(vault.clearCount).toBe(1));
     await Promise.resolve();
+    // The shared vault transaction keeps clear behind the in-flight save;
+    // logout still invalidates the generation synchronously and stays pending.
+    expect(vault.clearCount).toBe(0);
     expect(logoutSettled).not.toHaveBeenCalled();
     releaseSave.resolve();
 
@@ -567,8 +641,8 @@ describe('ManagedCodexTokenProvider', () => {
     await saveStarted.promise;
     const logoutSettled = vi.fn();
     const logout = providerA.logout().then(logoutSettled);
-    await vi.waitFor(() => expect(vault.clearCount).toBe(1));
     await Promise.resolve();
+    expect(vault.clearCount).toBe(0);
     expect(logoutSettled).not.toHaveBeenCalled();
     releaseSave.resolve();
 

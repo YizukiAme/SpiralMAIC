@@ -1,6 +1,7 @@
 import type { CodexAuthPublicStatus } from '@/lib/types/codex-auth';
 import { getCodexOAuthAvailability } from '@/lib/server/codex/availability';
 import { getCodexAuthRuntime } from '@/lib/server/codex/runtime';
+import { withCodexCredentialVaultMutation } from '@/lib/server/codex/vault';
 import {
   codexJson,
   codexRouteError,
@@ -24,7 +25,8 @@ export async function GET(request: Request): Promise<Response> {
     } satisfies CodexAuthPublicStatus);
   }
   try {
-    const credentials = await getCodexAuthRuntime().vault.load();
+    const { vault } = getCodexAuthRuntime();
+    const credentials = await withCodexCredentialVaultMutation(vault, () => vault.load());
     const status: CodexAuthPublicStatus = {
       available: availability.available,
       reason: availability.reason,
