@@ -187,6 +187,31 @@ function signedOutError(): CodexOAuthError {
   return new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.SIGNED_OUT, false);
 }
 
+const CREDENTIALS_CHANGED_ERROR_MARKER = Symbol.for(
+  'openmaic.codex.oauth.credentials-changed-error.v1',
+);
+
+class CodexCredentialsChangedError extends CodexOAuthError {
+  constructor() {
+    super(CODEX_OAUTH_ERROR_CODES.SIGNED_OUT, false);
+    this.name = 'CodexCredentialsChangedError';
+    Object.defineProperty(this, CREDENTIALS_CHANGED_ERROR_MARKER, { value: true });
+  }
+}
+
+function credentialsChangedError(): CodexOAuthError {
+  return new CodexCredentialsChangedError();
+}
+
+/** Recognize the stale-request sentinel across development module reloads. */
+export function isCodexCredentialsChangedError(error: unknown): boolean {
+  return Boolean(
+    error &&
+    typeof error === 'object' &&
+    (error as Record<PropertyKey, unknown>)[CREDENTIALS_CHANGED_ERROR_MARKER] === true,
+  );
+}
+
 function credentialsMatch(left: ValidCredentials | null, right: ValidCredentials): boolean {
   return left?.accountId === right.accountId && left.accessToken === right.accessToken;
 }
@@ -198,7 +223,7 @@ export function refreshCodexCredentialsIfCurrent(
 ): Promise<ValidCredentials> {
   const conditional = tokenProvider as CodexTokenProvider & Partial<ConditionalCodexTokenProvider>;
   if (typeof conditional.refreshIfCurrent !== 'function') {
-    return Promise.reject(signedOutError());
+    return Promise.reject(credentialsChangedError());
   }
   return conditional.refreshIfCurrent(expected);
 }
@@ -251,10 +276,10 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
     const existing = this.sharedState.operationInFlight;
     if (existing) {
       return existing.promise.then((result) => {
-        if (!credentialsMatch(existing.state.source, expected)) throw signedOutError();
+        if (!credentialsMatch(existing.state.source, expected)) throw credentialsChangedError();
         if (existing.state.refreshed) {
           if (!existing.state.refreshCommitted || result.accountId !== expected.accountId) {
-            throw signedOutError();
+            throw credentialsChangedError();
           }
           return result;
         }
@@ -334,7 +359,9 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
 
     const source = { accessToken: credentials.accessToken, accountId: credentials.accountId };
     state.source = source;
-    if (state.expected && !credentialsMatch(source, state.expected)) throw signedOutError();
+    if (state.expected && !credentialsMatch(source, state.expected)) {
+      throw credentialsChangedError();
+    }
 
     const shouldRefresh =
       state.forceRequested || credentials.expiresAt - this.clock.now() <= REFRESH_EARLY_MS;
@@ -349,7 +376,7 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
       state.expected &&
       (!result.committed || result.credentials.accountId !== state.expected.accountId)
     ) {
-      throw signedOutError();
+      throw credentialsChangedError();
     }
     return result.credentials;
   }
@@ -439,7 +466,7 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
 
     const parsed = this.parseTokenResponse(payload, credentials);
     if (refreshGeneration !== this.sharedState.generation) throw signedOutError();
-    if (expected && parsed.accountId !== expected.accountId) throw signedOutError();
+    if (expected && parsed.accountId !== expected.accountId) throw credentialsChangedError();
 
     const nextCredentials: CodexOAuthCredentials = {
       version: 1,
