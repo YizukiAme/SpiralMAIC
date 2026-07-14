@@ -36,6 +36,14 @@ test.describe('Codex OAuth settings', () => {
     let connected = false;
     let completeNextPoll = false;
     const loginEvents: string[] = [];
+    let releaseProviderSync!: () => void;
+    let markProviderSyncStarted!: () => void;
+    const providerSyncGate = new Promise<void>((resolve) => {
+      releaseProviderSync = resolve;
+    });
+    const providerSyncStarted = new Promise<void>((resolve) => {
+      markProviderSyncStarted = resolve;
+    });
 
     await page.addInitScript(
       ({ settings }) => {
@@ -59,13 +67,17 @@ test.describe('Codex OAuth settings', () => {
         }),
       },
     );
-    await page.route('**/api/server-providers', (route) =>
-      route.fulfill({
+    await page.route('**/api/server-providers', async (route) => {
+      if (connected) {
+        markProviderSyncStarted();
+        await providerSyncGate;
+      }
+      await route.fulfill({
         status: 200,
         headers: { 'content-type': 'application/json' },
         body: serverProvidersBody(connected),
-      }),
-    );
+      });
+    });
     await page.route('**/api/codex/auth', async (route) => {
       if (route.request().method() === 'DELETE') {
         connected = false;
@@ -157,6 +169,13 @@ test.describe('Codex OAuth settings', () => {
     await page.getByRole('button', { name: 'Use device code' }).click();
     await expect(page.getByText('PLAY-WRITE', { exact: true })).toBeVisible();
     completeNextPoll = true;
+    await providerSyncStarted;
+    await expect(page.getByText('Waiting for authorization…')).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Sign in with ChatGPT', exact: true }),
+    ).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Use device code' })).toBeDisabled();
+    releaseProviderSync();
     await expect(page.getByText('Connected with ChatGPT')).toBeVisible({ timeout: 5_000 });
     await expect(page.getByRole('button', { name: /ChatGPT Codex Connected/ })).toBeVisible();
 

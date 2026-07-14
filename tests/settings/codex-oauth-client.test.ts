@@ -37,6 +37,14 @@ function pendingDevice(overrides: Partial<CodexLoginAttempt> = {}): CodexLoginAt
   };
 }
 
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 describe('CodexOAuthClient', () => {
   const changes: Array<ReturnType<CodexOAuthClient['getSnapshot']>> = [];
   const scheduled = new Map<number, () => void>();
@@ -110,6 +118,93 @@ describe('CodexOAuthClient', () => {
     expect(onLoginComplete).toHaveBeenCalledTimes(1);
     expect(client.getSnapshot().attempt?.status).toBe('complete');
     expect(scheduled.size).toBe(0);
+  });
+
+  it('locks public actions while a completed login synchronizes providers', async () => {
+    const syncGate = deferred();
+    const syncStarted = deferred();
+    let providersSynced = false;
+    const setModel = vi.fn();
+    const requests: string[] = [];
+    const popup = { closed: false, navigate: vi.fn(), close: vi.fn() };
+    const openPopup = vi.fn(() => popup);
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const method = init?.method ?? 'GET';
+      requests.push(`${method} ${String(input)}`);
+      if (String(input) === '/api/codex/auth' && method === 'GET') {
+        return jsonResponse(availableStatus());
+      }
+      if (String(input) === '/api/codex/auth/login' && method === 'PATCH') {
+        return requests.filter((request) => request === 'PATCH /api/codex/auth/login').length === 1
+          ? jsonResponse({ errorCode: 'NO_ACTIVE_ATTEMPT' }, 404)
+          : jsonResponse({ method: 'device', status: 'complete' });
+      }
+      if (String(input) === '/api/codex/auth/login' && method === 'POST') {
+        const body = JSON.parse(String(init?.body)) as { method: 'browser' | 'device' };
+        return body.method === 'browser'
+          ? jsonResponse({
+              method: 'browser',
+              status: 'pending',
+              authorizationUrl: 'https://auth.openai.com/oauth/authorize',
+              interval: 1,
+            })
+          : jsonResponse(pendingDevice({ interval: 1 }));
+      }
+      return jsonResponse({ ok: true });
+    });
+    const client = createClient(fetcher, {
+      openPopup,
+      onLoginComplete: () =>
+        syncCodexProviderAndSelect(() => ({
+          fetchServerProviders: async () => {
+            syncStarted.resolve();
+            await syncGate.promise;
+            providersSynced = true;
+          },
+          providersConfig: {
+            'openai-codex': {
+              isServerConfigured: providersSynced,
+              models: providersSynced ? [{ id: 'gpt-live' }] : [],
+            },
+          },
+          setModel,
+        })),
+    });
+
+    await client.mount();
+    await client.startDevice();
+    const poll = [...scheduled.values()][0];
+    scheduled.clear();
+    const completing = poll();
+    await syncStarted.promise;
+
+    expect(client.getSnapshot()).toMatchObject({
+      attempt: { method: 'device', status: 'complete' },
+      busy: 'syncing',
+    });
+    const requestCountDuringSync = requests.length;
+    await client.startBrowser();
+    await client.startDevice();
+    await client.cancel();
+    await client.logout();
+    await expect(client.testConnection('gpt-live')).resolves.toEqual({
+      ok: false,
+      messageKey: 'testFailed',
+    });
+
+    expect(requests).toHaveLength(requestCountDuringSync);
+    expect(openPopup).not.toHaveBeenCalled();
+    expect(popup.navigate).not.toHaveBeenCalled();
+    syncGate.resolve();
+    await completing;
+
+    expect(client.getSnapshot()).toMatchObject({
+      auth: { connected: true },
+      attempt: { method: 'device', status: 'complete' },
+      busy: null,
+      errorKey: null,
+    });
+    expect(setModel).toHaveBeenCalledWith('openai-codex', 'gpt-live');
   });
 
   it('opens the browser popup synchronously before POST', async () => {
@@ -251,6 +346,7 @@ describe('CodexOAuthClient', () => {
     const runOldPoll = [...scheduled.values()][0];
     scheduled.clear();
     const polling = runOldPoll();
+    await client.cancel();
     await client.startDevice();
     resolveOldPoll(
       jsonResponse({
