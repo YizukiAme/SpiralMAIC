@@ -11,7 +11,10 @@ import {
 } from '@/lib/server/codex/oauth';
 import { CodexLoginManager } from '@/lib/server/codex/login-manager';
 import type { CodexLoginAttempt } from '@/lib/types/codex-auth';
-import { CODEX_OAUTH_TOKEN_ENDPOINT } from '@/lib/server/codex/token-provider';
+import {
+  CODEX_OAUTH_TOKEN_ENDPOINT,
+  ManagedCodexTokenProvider,
+} from '@/lib/server/codex/token-provider';
 import type { CodexCredentialVault, CodexOAuthCredentials } from '@/lib/server/codex/vault';
 
 const NOW = 1_700_000_000_000;
@@ -64,6 +67,28 @@ class MemoryVault implements CodexCredentialVault {
 class FailingSaveVault extends MemoryVault {
   override async save(): Promise<void> {
     throw new Error('private storage detail');
+  }
+}
+
+class DeferredSaveVault extends MemoryVault {
+  readonly saveStarted = deferred<void>();
+  readonly releaseFirstSave = deferred<void>();
+  clearCount = 0;
+  private saveCount = 0;
+
+  override async save(credentials: CodexOAuthCredentials): Promise<void> {
+    this.saved.push(credentials);
+    this.saveCount += 1;
+    if (this.saveCount === 1) {
+      this.saveStarted.resolve();
+      await this.releaseFirstSave.promise;
+    }
+    this.current = credentials;
+  }
+
+  override async clear(): Promise<void> {
+    this.clearCount += 1;
+    await super.clear();
   }
 }
 
@@ -318,6 +343,51 @@ describe('CodexLoginManager browser flow', () => {
     await cancelled;
     await callback;
     expect(vault.saved).toEqual([]);
+    await expect(manager.poll()).resolves.toBeNull();
+  });
+
+  it('waits for an in-flight browser save and restores the previous credentials on cancel', async () => {
+    const previous = {
+      version: 1,
+      accessToken: 'previous-browser-access',
+      refreshToken: 'previous-browser-refresh',
+      expiresAt: NOW + 600_000,
+      accountId: 'previous-browser-account',
+      updatedAt: NOW,
+    } satisfies CodexOAuthCredentials;
+    const vault = new DeferredSaveVault();
+    vault.current = previous;
+    const randomValues = [Buffer.alloc(32, 0x83), Buffer.alloc(32, 0x84)];
+    const manager = new CodexLoginManager({
+      vault,
+      clock: { now: () => NOW },
+      randomBytes: () => randomValues.shift()!,
+      oauthFetch: async () =>
+        jsonResponse({
+          access_token: unsignedJwt({ chatgpt_account_id: 'cancelled-browser-account' }),
+          refresh_token: 'cancelled-browser-refresh',
+          expires_in: 300,
+        }),
+    });
+    managers.push(manager);
+
+    const started = await manager.begin('browser');
+    const callbackUrl = new URL(CODEX_OAUTH_BROWSER_REDIRECT_URI);
+    callbackUrl.hostname = '127.0.0.1';
+    callbackUrl.searchParams.set('code', 'cancel-during-save');
+    callbackUrl.searchParams.set(
+      'state',
+      new URL(started.authorizationUrl!).searchParams.get('state')!,
+    );
+    const callback = fetch(callbackUrl).catch(() => null);
+    await vault.saveStarted.promise;
+
+    const cancelled = manager.cancel();
+    vault.releaseFirstSave.resolve();
+    await cancelled;
+    await callback;
+
+    expect(vault.current).toEqual(previous);
     await expect(manager.poll()).resolves.toBeNull();
   });
 
@@ -761,6 +831,54 @@ describe('CodexLoginManager device flow', () => {
     expect(requestCount).toBe(1);
   });
 
+  it('does not persist a device exchange that completes after the fifteen-minute deadline', async () => {
+    let now = NOW;
+    const vault = new MemoryVault();
+    const exchangeResponse = deferred<Response>();
+    const exchangeStarted = deferred<void>();
+    const verifier = 'deadline-verifier';
+    const manager = new CodexLoginManager({
+      vault,
+      clock: { now: () => now },
+      oauthFetch: async (input) => {
+        if (input === CODEX_OAUTH_DEVICE_USERCODE_ENDPOINT) {
+          return jsonResponse({
+            device_auth_id: 'deadline-device-id',
+            user_code: 'DEADLINE',
+            interval: 1,
+          });
+        }
+        if (input === CODEX_OAUTH_DEVICE_TOKEN_ENDPOINT) {
+          return jsonResponse({
+            authorization_code: 'deadline-code',
+            code_verifier: verifier,
+            code_challenge: pkceChallenge(verifier),
+          });
+        }
+        exchangeStarted.resolve();
+        return exchangeResponse.promise;
+      },
+    });
+    managers.push(manager);
+
+    const started = await manager.begin('device');
+    now += 1_000;
+    const polling = manager.poll();
+    await exchangeStarted.promise;
+    now = started.expiresAt!;
+    exchangeResponse.resolve(
+      jsonResponse({
+        access_token: unsignedJwt({ chatgpt_account_id: 'deadline-account' }),
+        refresh_token: 'deadline-refresh',
+        expires_in: 300,
+      }),
+    );
+
+    await expect(polling).resolves.toMatchObject({ status: 'expired' });
+    expect(vault.current).toBeNull();
+    expect(vault.saved).toEqual([]);
+  });
+
   it('turns a device-start network failure into a sanitized terminal attempt', async () => {
     const manager = new CodexLoginManager({
       vault: new MemoryVault(),
@@ -932,6 +1050,103 @@ describe('CodexLoginManager device flow', () => {
     pollResponse.resolve(jsonResponse({}, 403));
     const [firstStatus, secondStatus] = await Promise.all([first, second]);
     expect(firstStatus).toEqual(secondStatus);
+  });
+
+  it('keeps a slow device poll single-flight after additional intervals elapse', async () => {
+    let now = NOW;
+    let pollRequestCount = 0;
+    const pollResponses: Array<ReturnType<typeof deferred<Response>>> = [];
+    const pollStarted = deferred<void>();
+    const manager = new CodexLoginManager({
+      vault: new MemoryVault(),
+      clock: { now: () => now },
+      oauthFetch: async (input) => {
+        if (input === CODEX_OAUTH_DEVICE_USERCODE_ENDPOINT) {
+          return jsonResponse({
+            device_auth_id: 'slow-device-id',
+            user_code: 'SLOW-POLL',
+            interval: 1,
+          });
+        }
+        pollRequestCount += 1;
+        const response = deferred<Response>();
+        pollResponses.push(response);
+        pollStarted.resolve();
+        return response.promise;
+      },
+    });
+    managers.push(manager);
+
+    await manager.begin('device');
+    now += 1_000;
+    const first = manager.poll();
+    await pollStarted.promise;
+    now += 2_000;
+    const second = manager.poll();
+    await Promise.resolve();
+    const observedRequestCount = pollRequestCount;
+    for (const response of pollResponses) response.resolve(jsonResponse({}, 403));
+    await Promise.all([first, second]);
+
+    expect(observedRequestCount).toBe(1);
+  });
+
+  it('waits for an in-flight device save before logout clears credentials', async () => {
+    let now = NOW;
+    const previous = {
+      version: 1,
+      accessToken: 'previous-device-access',
+      refreshToken: 'previous-device-refresh',
+      expiresAt: NOW + 600_000,
+      accountId: 'previous-device-account',
+      updatedAt: NOW,
+    } satisfies CodexOAuthCredentials;
+    const vault = new DeferredSaveVault();
+    vault.current = previous;
+    const verifier = 'logout-save-verifier';
+    const manager = new CodexLoginManager({
+      vault,
+      clock: { now: () => now },
+      oauthFetch: async (input) => {
+        if (input === CODEX_OAUTH_DEVICE_USERCODE_ENDPOINT) {
+          return jsonResponse({
+            device_auth_id: 'logout-save-device-id',
+            user_code: 'LOGOUT-SAVE',
+            interval: 1,
+          });
+        }
+        if (input === CODEX_OAUTH_DEVICE_TOKEN_ENDPOINT) {
+          return jsonResponse({
+            authorization_code: 'logout-save-code',
+            code_verifier: verifier,
+            code_challenge: pkceChallenge(verifier),
+          });
+        }
+        return jsonResponse({
+          access_token: unsignedJwt({ chatgpt_account_id: 'logout-save-account' }),
+          refresh_token: 'logout-save-refresh',
+          expires_in: 300,
+        });
+      },
+    });
+    managers.push(manager);
+    const tokenProvider = new ManagedCodexTokenProvider({ vault, clock: { now: () => now } });
+
+    await manager.begin('device');
+    now += 1_000;
+    const polling = manager.poll();
+    await vault.saveStarted.promise;
+    const logout = (async () => {
+      await manager.cancel();
+      await tokenProvider.logout();
+    })();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(vault.clearCount).toBe(0);
+    vault.releaseFirstSave.resolve();
+    await Promise.all([polling, logout]);
+
+    expect(vault.current).toBeNull();
   });
 
   it('rejects a device verifier whose S256 challenge does not match', async () => {
