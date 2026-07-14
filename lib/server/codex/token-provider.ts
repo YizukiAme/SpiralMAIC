@@ -340,6 +340,7 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
           if (error instanceof CodexOAuthError) throw error;
           throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.STORAGE_ERROR, false);
         }
+        if (refreshGeneration !== this.sharedState.generation) throw signedOutError();
         if (replacement) {
           return {
             accessToken: replacement.accessToken,

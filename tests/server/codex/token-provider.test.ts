@@ -499,6 +499,38 @@ describe('ManagedCodexTokenProvider', () => {
     expect(vault.clearCount).toBe(0);
   });
 
+  it('reports signed out when logout invalidates an in-flight invalid_grant transaction', async () => {
+    const initial = credentials();
+    const vault = new MemoryVault(initial);
+    const invalidGrantLoadStarted = deferred<void>();
+    const releaseInvalidGrantLoad = deferred<void>();
+    let loadCount = 0;
+    vault.load = vi.fn(async () => {
+      loadCount += 1;
+      if (loadCount === 2) {
+        invalidGrantLoadStarted.resolve();
+        await releaseInvalidGrantLoad.promise;
+      }
+      return vault.current;
+    });
+    const provider = createProvider(
+      vault,
+      vi.fn().mockResolvedValue(jsonResponse({ error: 'invalid_grant' }, 400)),
+    );
+
+    const refreshing = provider.getValidCredentials({ forceRefresh: true });
+    await invalidGrantLoadStarted.promise;
+    const logout = provider.logout();
+    releaseInvalidGrantLoad.resolve();
+
+    await expect(refreshing).rejects.toMatchObject({
+      code: CODEX_OAUTH_ERROR_CODES.SIGNED_OUT,
+      retryable: false,
+    });
+    await logout;
+    expect(vault.current).toBeNull();
+  });
+
   it('keeps credentials on network failures and removes sensitive upstream details', async () => {
     const initial = credentials();
     const vault = new MemoryVault(initial);
