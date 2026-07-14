@@ -66,6 +66,32 @@ describe('native Codex provider seam', () => {
       });
       expect(codex).not.toBe(openai);
       expect(codex?.capabilities).not.toBe(openai?.capabilities);
+
+      const openaiThinking = openai?.capabilities?.thinking;
+      const codexThinking = codex?.capabilities?.thinking;
+      expect(codexThinking).toEqual(openaiThinking);
+      expect(codexThinking).not.toBe(openaiThinking);
+      if (openaiThinking?.effortValues) {
+        expect(codexThinking?.effortValues).toEqual(openaiThinking.effortValues);
+        expect(codexThinking?.effortValues).not.toBe(openaiThinking.effortValues);
+      }
+      if (openaiThinking?.levelValues) {
+        expect(codexThinking?.levelValues).toEqual(openaiThinking.levelValues);
+        expect(codexThinking?.levelValues).not.toBe(openaiThinking.levelValues);
+      }
+      if (openaiThinking?.budgetRange) {
+        expect(codexThinking?.budgetRange).toEqual(openaiThinking.budgetRange);
+        expect(codexThinking?.budgetRange).not.toBe(openaiThinking.budgetRange);
+      }
+      if (openaiThinking?.anthropicThinking) {
+        expect(codexThinking?.anthropicThinking).toEqual(openaiThinking.anthropicThinking);
+        expect(codexThinking?.anthropicThinking).not.toBe(openaiThinking.anthropicThinking);
+        if (openaiThinking.anthropicThinking.budgetByEffort) {
+          expect(codexThinking?.anthropicThinking?.budgetByEffort).not.toBe(
+            openaiThinking.anthropicThinking.budgetByEffort,
+          );
+        }
+      }
     }
   });
 

@@ -1234,28 +1234,52 @@ export const PROVIDERS: Record<ProviderId, ProviderConfig> = {
   },
 };
 
+applyModelMetadata(PROVIDERS);
+
+function cloneModelCapabilities(
+  capabilities: ModelInfo['capabilities'],
+): ModelInfo['capabilities'] {
+  if (!capabilities) return undefined;
+  const thinking = capabilities.thinking;
+  return {
+    ...capabilities,
+    ...(thinking
+      ? {
+          thinking: {
+            ...thinking,
+            ...(thinking.effortValues ? { effortValues: [...thinking.effortValues] } : {}),
+            ...(thinking.levelValues ? { levelValues: [...thinking.levelValues] } : {}),
+            ...(thinking.budgetRange ? { budgetRange: { ...thinking.budgetRange } } : {}),
+            ...(thinking.anthropicThinking
+              ? {
+                  anthropicThinking: {
+                    ...thinking.anthropicThinking,
+                    ...(thinking.anthropicThinking.budgetByEffort
+                      ? { budgetByEffort: { ...thinking.anthropicThinking.budgetByEffort } }
+                      : {}),
+                  },
+                }
+              : {}),
+          },
+        }
+      : {}),
+  };
+}
+
 // Codex discovery exposes only IDs and display names. Seed its fallback
 // registry from the canonical OpenAI catalog so settings sync preserves the
-// same context/output limits and capabilities for shared model IDs.
+// same final context/output limits and deeply-isolated capabilities for shared
+// model IDs.
 const openAIModelsById = new Map(PROVIDERS.openai.models.map((model) => [model.id, model]));
 PROVIDERS['openai-codex'].models = PROVIDERS['openai-codex'].models.map((fallback) => {
   const catalogModel = openAIModelsById.get(fallback.id);
   if (!catalogModel) return fallback;
   return {
     ...catalogModel,
-    capabilities: catalogModel.capabilities
-      ? {
-          ...catalogModel.capabilities,
-          ...(catalogModel.capabilities.thinking
-            ? { thinking: { ...catalogModel.capabilities.thinking } }
-            : {}),
-        }
-      : undefined,
+    capabilities: cloneModelCapabilities(catalogModel.capabilities),
     source: 'probed',
   };
 });
-
-applyModelMetadata(PROVIDERS);
 
 /**
  * Get provider config (from built-in or unified config in localStorage)

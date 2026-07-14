@@ -60,6 +60,17 @@ interface CreateCodexModelsTransportOptions {
   upstreamFetch?: typeof globalThis.fetch;
 }
 
+interface CodexModelsRequestAuthOptions {
+  allowAuthReplay: boolean;
+  onAuthReplay?(): void;
+}
+
+type CodexModelsRequest = (
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  authOptions: CodexModelsRequestAuthOptions,
+) => Promise<Response>;
+
 interface CodexModelsClock {
   now(): number;
 }
@@ -76,6 +87,15 @@ interface CodexModelCacheEntry {
   models: ModelInfo[];
   etag?: string;
   fetchedAt: number;
+}
+
+interface CodexModelDiscoveryRequestContext {
+  authReplaysRemaining: number;
+}
+
+interface CodexModelFlight {
+  promise: Promise<ModelInfo[]>;
+  authReplayState: { used: boolean };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -250,13 +270,10 @@ function credentialsError(): CodexModelsError {
   return new CodexModelsError(CODEX_MODELS_ERROR_CODES.AUTH_REQUIRED);
 }
 
-/** The only authenticated network boundary for Codex model discovery. */
-export function createCodexModelsTransport(
-  options: CreateCodexModelsTransportOptions,
-): typeof globalThis.fetch {
+function createCodexModelsRequest(options: CreateCodexModelsTransportOptions): CodexModelsRequest {
   const upstreamFetch = options.upstreamFetch ?? globalThis.fetch.bind(globalThis);
 
-  return async (input, init) => {
+  return async (input, init, authOptions) => {
     if (typeof input !== 'string' || input !== CODEX_MODELS_ENDPOINT) {
       throw new CodexModelsError(CODEX_MODELS_ERROR_CODES.INVALID_ENDPOINT);
     }
@@ -288,8 +305,9 @@ export function createCodexModelsTransport(
       };
 
       let response = await request(false);
-      if (response.status === 401) {
+      if (response.status === 401 && authOptions.allowAuthReplay) {
         await cancelResponseBody(response);
+        authOptions.onAuthReplay?.();
         response = await request(true);
       }
 
@@ -303,6 +321,14 @@ export function createCodexModelsTransport(
   };
 }
 
+/** The only authenticated network boundary for Codex model discovery. */
+export function createCodexModelsTransport(
+  options: CreateCodexModelsTransportOptions,
+): typeof globalThis.fetch {
+  const request = createCodexModelsRequest(options);
+  return (input, init) => request(input, init, { allowAuthReplay: true });
+}
+
 function cloneModels(models: ModelInfo[]): ModelInfo[] {
   return models.map((model) => ({
     ...model,
@@ -311,17 +337,17 @@ function cloneModels(models: ModelInfo[]): ModelInfo[] {
 }
 
 export class CodexModelDiscovery {
-  private readonly transport: typeof globalThis.fetch;
+  private readonly requestModels: CodexModelsRequest;
   private readonly tokenProvider: CodexTokenProvider;
   private readonly credentialGeneration: () => Promise<string | null>;
   private readonly clock: CodexModelsClock;
   private readonly cacheTtlMs: number;
   private cache: CodexModelCacheEntry | null = null;
-  private readonly inFlight = new Map<string, Promise<ModelInfo[]>>();
+  private readonly inFlight = new Map<string, CodexModelFlight>();
   private invalidationGeneration = 0;
 
   constructor(options: CodexModelDiscoveryOptions) {
-    this.transport = createCodexModelsTransport(options);
+    this.requestModels = createCodexModelsRequest(options);
     this.tokenProvider = options.tokenProvider;
     this.credentialGeneration = options.credentialGeneration;
     this.clock = options.clock ?? { now: Date.now };
@@ -334,10 +360,11 @@ export class CodexModelDiscovery {
   }
 
   async getModels(): Promise<ModelInfo[]> {
-    return this.getModelsForCurrentCredentials(true);
+    return this.getModelsForCurrentCredentials({ authReplaysRemaining: 1 }, true);
   }
 
   private async getModelsForCurrentCredentials(
+    requestContext: CodexModelDiscoveryRequestContext,
     allowSameAccountRotationRetry: boolean,
     expectedAccountId?: string,
   ): Promise<ModelInfo[]> {
@@ -375,9 +402,11 @@ export class CodexModelDiscovery {
     const flightKey = `${invalidationGeneration}:${generation}`;
     const existing = this.inFlight.get(flightKey);
     if (existing) {
-      const models = await existing;
+      const models = await existing.promise;
+      if (existing.authReplayState.used) requestContext.authReplaysRemaining = 0;
       return cloneModels(
         await this.retryAfterSameAccountRotation(models, {
+          requestContext,
           allowRetry: allowSameAccountRotationRetry,
           accountId: settledCredentials.accountId,
           generation,
@@ -386,12 +415,21 @@ export class CodexModelDiscovery {
       );
     }
 
-    const operation = this.refresh(generation, now, invalidationGeneration);
-    this.inFlight.set(flightKey, operation);
+    const authReplayState = { used: false };
+    const operation = this.refresh(generation, now, invalidationGeneration, {
+      allowAuthReplay: requestContext.authReplaysRemaining > 0,
+      onAuthReplay: () => {
+        authReplayState.used = true;
+        requestContext.authReplaysRemaining = 0;
+      },
+    });
+    const flight: CodexModelFlight = { promise: operation, authReplayState };
+    this.inFlight.set(flightKey, flight);
     try {
       const models = await operation;
       return cloneModels(
         await this.retryAfterSameAccountRotation(models, {
+          requestContext,
           allowRetry: allowSameAccountRotationRetry,
           accountId: settledCredentials.accountId,
           generation,
@@ -399,13 +437,14 @@ export class CodexModelDiscovery {
         }),
       );
     } finally {
-      if (this.inFlight.get(flightKey) === operation) this.inFlight.delete(flightKey);
+      if (this.inFlight.get(flightKey) === flight) this.inFlight.delete(flightKey);
     }
   }
 
   private async retryAfterSameAccountRotation(
     models: ModelInfo[],
     options: {
+      requestContext: CodexModelDiscoveryRequestContext;
       allowRetry: boolean;
       accountId: string;
       generation: string;
@@ -440,20 +479,25 @@ export class CodexModelDiscovery {
     // request chose its cache key. Discard that response, then discover once
     // under the new generation. The account check and one-shot retry prevent
     // an old request from publishing a different login's models or looping.
-    return this.getModelsForCurrentCredentials(false, options.accountId);
+    return this.getModelsForCurrentCredentials(options.requestContext, false, options.accountId);
   }
 
   private async refresh(
     generation: string,
     now: number,
     invalidationGeneration: number,
+    authOptions: CodexModelsRequestAuthOptions,
   ): Promise<ModelInfo[]> {
     const safeStale = this.cache?.generation === generation ? this.cache : null;
     try {
-      const response = await this.transport(CODEX_MODELS_ENDPOINT, {
-        method: 'GET',
-        ...(safeStale?.etag ? { headers: { 'if-none-match': safeStale.etag } } : {}),
-      });
+      const response = await this.requestModels(
+        CODEX_MODELS_ENDPOINT,
+        {
+          method: 'GET',
+          ...(safeStale?.etag ? { headers: { 'if-none-match': safeStale.etag } } : {}),
+        },
+        authOptions,
+      );
       if (response.status === 304) {
         if (!safeStale) {
           throw new CodexModelsError(CODEX_MODELS_ERROR_CODES.INVALID_RESPONSE);

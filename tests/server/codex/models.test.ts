@@ -509,6 +509,48 @@ describe('Codex model discovery cache', () => {
     expect(upstreamFetch).toHaveBeenCalledTimes(3);
   });
 
+  it('spends at most one auth replay across a generation-rotation rediscovery', async () => {
+    const credentials: CodexOAuthCredentials = {
+      version: 1,
+      accessToken: 'old-access-secret',
+      refreshToken: 'old-refresh-secret',
+      expiresAt: NOW + 3_600_000,
+      accountId: 'same-account',
+      updatedAt: NOW - 1,
+    };
+    const vault = new MemoryVault(credentials);
+    const refreshedAccess = unsignedJwt({ chatgpt_account_id: 'same-account' });
+    const tokenExchangeFetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            access_token: refreshedAccess,
+            refresh_token: 'rotated-refresh-secret',
+            expires_in: 3600,
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    const tokenProvider = new ManagedCodexTokenProvider({
+      vault,
+      clock: { now: () => NOW },
+      tokenExchangeFetch,
+    });
+    const upstreamFetch = vi.fn(
+      async () => new Response('models-sensitive-unauthorized-body', { status: 401 }),
+    );
+    const discovery = new CodexModelDiscovery({
+      tokenProvider,
+      credentialGeneration: () => getCodexCredentialGeneration(vault),
+      upstreamFetch,
+    });
+
+    await expect(discovery.getModels()).resolves.toEqual(CODEX_FALLBACK_MODELS);
+    expect(tokenExchangeFetch).toHaveBeenCalledTimes(1);
+    expect(upstreamFetch).toHaveBeenCalledTimes(3);
+    expect(vault.current?.accessToken).toBe(refreshedAccess);
+  });
+
   it('never returns fallback or stale models after credentials disappear', async () => {
     let generation: string | null = 'account-a:1';
     const discovery = new CodexModelDiscovery({
