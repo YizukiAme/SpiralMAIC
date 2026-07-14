@@ -92,6 +92,7 @@ export function CodexProviderSettings() {
   const attempt = snapshot.attempt;
   const isPending = attempt?.status === 'pending';
   const isBusy = snapshot.busy !== null;
+  const isSyncing = snapshot.busy === 'syncing';
   const supportsBrowser = auth?.methods.includes('browser') ?? false;
   const supportsDevice = auth?.methods.includes('device') ?? false;
   const deviceAttempt = attempt?.method === 'device' && isPending ? attempt : null;
@@ -195,7 +196,7 @@ export function CodexProviderSettings() {
                 variant="outline"
                 size="sm"
                 onClick={() => void testConnection()}
-                disabled={testState.status === 'testing' || models.length === 0}
+                disabled={isBusy || testState.status === 'testing' || models.length === 0}
               >
                 {testState.status === 'testing' ? (
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
@@ -240,6 +241,15 @@ export function CodexProviderSettings() {
             <CardDescription>{t('settings.codexOAuth.experimental')}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {isSyncing && (
+              <div
+                className="flex items-center gap-2 text-sm text-muted-foreground"
+                aria-live="polite"
+              >
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                {t('settings.codexOAuth.waiting')}
+              </div>
+            )}
             {!isPending && (
               <div className="flex flex-wrap gap-2">
                 {supportsBrowser && (

@@ -21,7 +21,7 @@ export type CodexOAuthClientMessageKey =
 export interface CodexOAuthClientSnapshot {
   auth: CodexAuthPublicStatus | null;
   attempt: CodexLoginAttempt | null;
-  busy: 'loading' | 'starting' | 'waiting' | 'cancelling' | 'signing-out' | null;
+  busy: 'loading' | 'starting' | 'waiting' | 'syncing' | 'cancelling' | 'signing-out' | null;
   errorKey: CodexOAuthClientMessageKey | null;
 }
 
@@ -173,6 +173,10 @@ export class CodexOAuthClient {
     return !this.disposed && generation === this.generation;
   }
 
+  private canStartAction(): boolean {
+    return !this.disposed && this.snapshot.busy === null;
+  }
+
   async mount(): Promise<void> {
     if (this.mounted || this.disposed) return;
     this.mounted = true;
@@ -213,7 +217,7 @@ export class CodexOAuthClient {
   }
 
   async startBrowser(): Promise<void> {
-    if (this.disposed) return;
+    if (!this.canStartAction()) return;
     const popup = this.dependencies.openPopup();
     const generation = this.beginGeneration();
     this.popup = popup;
@@ -258,14 +262,18 @@ export class CodexOAuthClient {
     if (!this.isCurrent(generation)) return;
     const supportsDevice = this.snapshot.auth?.methods.includes('device') ?? true;
     if (supportsDevice) {
-      await this.startDevice();
+      await this.startDeviceInternal();
     } else {
       this.publish({ busy: null, errorKey: 'loginFailed' });
     }
   }
 
   async startDevice(): Promise<void> {
-    if (this.disposed) return;
+    if (!this.canStartAction()) return;
+    await this.startDeviceInternal();
+  }
+
+  private async startDeviceInternal(): Promise<void> {
     this.popup?.close();
     this.popup = null;
     const generation = this.beginGeneration();
@@ -303,7 +311,8 @@ export class CodexOAuthClient {
     const errorKey = mapAttemptError(attempt);
     this.publish({
       attempt,
-      busy: attempt.status === 'pending' ? 'waiting' : null,
+      busy:
+        attempt.status === 'pending' ? 'waiting' : attempt.status === 'complete' ? 'syncing' : null,
       errorKey,
     });
 
@@ -368,7 +377,13 @@ export class CodexOAuthClient {
   }
 
   async cancel(): Promise<void> {
-    if (this.disposed) return;
+    if (
+      this.disposed ||
+      this.snapshot.busy !== 'waiting' ||
+      this.snapshot.attempt?.status !== 'pending'
+    ) {
+      return;
+    }
     const generation = this.beginGeneration();
     this.publish({ busy: 'cancelling', errorKey: null });
     this.popup?.close();
@@ -384,7 +399,7 @@ export class CodexOAuthClient {
   }
 
   async logout(): Promise<void> {
-    if (this.disposed) return;
+    if (!this.canStartAction()) return;
     const generation = this.beginGeneration();
     this.publish({ busy: 'signing-out', errorKey: null });
     let response: Response;
@@ -426,6 +441,7 @@ export class CodexOAuthClient {
   async testConnection(
     modelId: string,
   ): Promise<{ ok: boolean; messageKey: CodexOAuthClientMessageKey }> {
+    if (!this.canStartAction()) return { ok: false, messageKey: 'testFailed' };
     let response: Response;
     try {
       response = await this.dependencies.fetcher(VERIFY_ENDPOINT, {
