@@ -15,7 +15,7 @@ import type { SceneOutline } from '@/lib/types/generation';
 import { createLogger } from '@/lib/logger';
 import { useCanvasStore } from '@/lib/store/canvas';
 import { migrateScene } from '@/lib/edit/slide-schema';
-import { emitStageSaved } from '@/lib/store/stage-save-signal';
+import { preparePBLScenesForDocumentPersistence } from '@/lib/pbl/v2/runtime/document-persistence';
 import { hydratePBLScenesFromRuntime } from '@/lib/pbl/v2/runtime/hydration';
 
 const log = createLogger('StageStore');
@@ -418,19 +418,14 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
     }
 
     try {
+      const persistedScenes = await preparePBLScenesForDocumentPersistence(stage.id, scenes);
       const { saveStageData } = await import('@/lib/utils/stage-storage');
       await saveStageData(stage.id, {
         stage,
-        scenes,
+        scenes: persistedScenes,
         currentSceneId,
         chats,
       });
-      const pblScenes = scenes.flatMap((scene) => {
-        const content = scene.content;
-        if (content.type !== 'pbl' || !content.projectV2) return [];
-        return [{ sceneId: scene.id, project: content.projectV2 }];
-      });
-      emitStageSaved({ stageId: stage.id, pblScenes });
 
       return true;
     } catch (error) {

@@ -18,6 +18,7 @@ import { pblSnapshotRecordPayload, type PBLRuntimeStorePayload } from './record-
 import { clone } from './clone';
 
 let defaultKv: KVStore | undefined;
+const inFlightPblRuntimeTransactions = new WeakMap<RuntimeStore, Map<string, Promise<unknown>>>();
 
 export interface HydratePBLProjectArgs {
   stageId: string;
@@ -38,6 +39,28 @@ export interface HydratePBLProjectResult {
 
 function getDefaultKv(): KVStore {
   return (defaultKv ??= new BrowserKVStore());
+}
+
+async function withPBLRuntimeTransaction<T>(
+  store: RuntimeStore,
+  key: string,
+  work: () => Promise<T>,
+): Promise<T> {
+  let storeTransactions = inFlightPblRuntimeTransactions.get(store);
+  if (!storeTransactions) {
+    storeTransactions = new Map();
+    inFlightPblRuntimeTransactions.set(store, storeTransactions);
+  }
+  const previous = storeTransactions.get(key) ?? Promise.resolve();
+  const current = previous.catch(() => {}).then(work);
+  storeTransactions.set(key, current);
+  try {
+    return await current;
+  } finally {
+    if (storeTransactions.get(key) === current) {
+      storeTransactions.delete(key);
+    }
+  }
 }
 
 function shortValue(value: unknown): string {
@@ -91,14 +114,15 @@ export async function appendPBLRuntimeSnapshotIfChanged(args: {
   project: PBLProjectV2;
   learnerState: PBLLearnerState;
   records: readonly RuntimeRecord[];
-  reason: 'backfill' | 'self_heal';
+  reason: 'backfill' | 'self_heal' | 'write_cutover';
 }): Promise<boolean> {
   const epoch = args.learnerState.runtimeResetEpoch ?? 0;
   const latestPayload = args.records.at(-1)?.payload as Partial<PBLRuntimeStorePayload> | undefined;
   if (
     latestPayload?.kind === 'pbl_snapshot' &&
     latestPayload.epoch === epoch &&
-    isEqual(latestPayload.learnerState, args.learnerState)
+    isEqual(latestPayload.learnerState, args.learnerState) &&
+    (args.reason !== 'write_cutover' || latestPayload.reason === 'write_cutover')
   ) {
     return false;
   }
@@ -136,76 +160,151 @@ function preserveDocumentTransients(
   };
 }
 
+function documentContainsLearnerState(project: PBLProjectV2): boolean {
+  const baseline = stripToDesignTemplate(project);
+  return !isEqual(extractLearnerState(project), extractLearnerState(baseline));
+}
+
+function hasWriteCutoverSnapshot(records: readonly RuntimeRecord[]): boolean {
+  return records.some((record) => {
+    const payload = record.payload as Partial<PBLRuntimeStorePayload>;
+    return payload.kind === 'pbl_snapshot' && payload.reason === 'write_cutover';
+  });
+}
+
+export async function synchronizePBLProjectRuntime(args: HydratePBLProjectArgs): Promise<void> {
+  const kv = args.kv ?? getDefaultKv();
+  const learnerKey = args.learnerKey ?? (await getLearnerKey(kv));
+  const store = args.store ?? getRuntimeStore();
+  const transactionKey = `${args.stageId}:${args.sceneId}:${learnerKey}`;
+
+  await withPBLRuntimeTransaction(store, transactionKey, async () => {
+    await drainProjectRuntimeFully({
+      stageId: args.stageId,
+      sceneId: args.sceneId,
+      project: args.project,
+      store,
+      kv,
+      learnerKey,
+    });
+
+    const records = await listPBLRecords({
+      store,
+      stageId: args.stageId,
+      sceneId: args.sceneId,
+      learnerKey,
+    });
+    const learnerState = extractLearnerState(args.project);
+    const folded = foldPBLRuntime({
+      designTemplate: stripToDesignTemplate(args.project),
+      records,
+    });
+    const runtimeIsCurrent =
+      isEqual(folded.learnerState, learnerState) && folded.diagnostics.gaps.length === 0;
+    const cutoverStarted = hasWriteCutoverSnapshot(records);
+    if (runtimeIsCurrent && cutoverStarted) return;
+
+    await appendPBLRuntimeSnapshotIfChanged({
+      store,
+      stageId: args.stageId,
+      sceneId: args.sceneId,
+      learnerKey,
+      project: args.project,
+      learnerState,
+      records,
+      reason: cutoverStarted ? 'self_heal' : 'write_cutover',
+    });
+  });
+}
+
 export async function hydratePBLProjectFromRuntime(
   args: HydratePBLProjectArgs,
 ): Promise<HydratePBLProjectResult> {
   const kv = args.kv ?? getDefaultKv();
   const learnerKey = args.learnerKey ?? (await getLearnerKey(kv));
   const store = args.store ?? getRuntimeStore();
+  const transactionKey = `${args.stageId}:${args.sceneId}:${learnerKey}`;
 
-  await drainProjectRuntimeFully({
-    stageId: args.stageId,
-    sceneId: args.sceneId,
-    project: args.project,
-    store,
-    kv,
-    learnerKey,
-  });
+  return withPBLRuntimeTransaction(store, transactionKey, async () => {
+    await drainProjectRuntimeFully({
+      stageId: args.stageId,
+      sceneId: args.sceneId,
+      project: args.project,
+      store,
+      kv,
+      learnerKey,
+    });
 
-  const records = await listPBLRecords({
-    store,
-    stageId: args.stageId,
-    sceneId: args.sceneId,
-    learnerKey,
-  });
-  const designTemplate = stripToDesignTemplate(args.project);
-  const folded = foldPBLRuntime({ designTemplate, records });
-  const documentState = extractLearnerState(args.project);
-  const stateMatchesDocument = isEqual(folded.learnerState, documentState);
-  const matchesDocument = stateMatchesDocument && folded.diagnostics.gaps.length === 0;
+    const records = await listPBLRecords({
+      store,
+      stageId: args.stageId,
+      sceneId: args.sceneId,
+      learnerKey,
+    });
+    const designTemplate = stripToDesignTemplate(args.project);
+    const folded = foldPBLRuntime({ designTemplate, records });
+    const documentState = extractLearnerState(args.project);
+    const stateMatchesDocument = isEqual(folded.learnerState, documentState);
+    const matchesDocument = stateMatchesDocument && folded.diagnostics.gaps.length === 0;
 
-  if (matchesDocument) {
+    if (matchesDocument) {
+      return {
+        project: preserveDocumentTransients(
+          applyLearnerState(designTemplate, folded.learnerState),
+          args.project,
+        ),
+        source: 'fold' as const,
+        diagnostics: folded.diagnostics,
+        diff: [],
+        selfHealed: false,
+      };
+    }
+
+    const diff = diffLearnerState(folded.learnerState, documentState);
+    const hasDocumentLearnerState = documentContainsLearnerState(args.project);
+    const cutoverStarted = hasWriteCutoverSnapshot(records);
+
+    if (hasDocumentLearnerState && !cutoverStarted && process.env.NODE_ENV !== 'production') {
+      console.warn('[PBL runtime] document state remained authoritative during hydration', {
+        stageId: args.stageId,
+        sceneId: args.sceneId,
+        diff,
+        gaps: folded.diagnostics.gaps.slice(0, 8),
+      });
+    }
+
+    if (hasDocumentLearnerState && !cutoverStarted) {
+      const selfHealed = await appendPBLRuntimeSnapshotIfChanged({
+        store,
+        stageId: args.stageId,
+        sceneId: args.sceneId,
+        learnerKey,
+        project: args.project,
+        learnerState: documentState,
+        records,
+        reason: records.length === 0 ? 'backfill' : 'self_heal',
+      });
+
+      return {
+        project: args.project,
+        source: 'document' as const,
+        diagnostics: folded.diagnostics,
+        diff,
+        selfHealed,
+      };
+    }
+
     return {
       project: preserveDocumentTransients(
         applyLearnerState(designTemplate, folded.learnerState),
         args.project,
       ),
-      source: 'fold',
+      source: 'fold' as const,
       diagnostics: folded.diagnostics,
-      diff: [],
+      diff,
       selfHealed: false,
     };
-  }
-
-  const diff = diffLearnerState(folded.learnerState, documentState);
-
-  if (process.env.NODE_ENV !== 'production') {
-    console.warn('[PBL runtime] document state remained authoritative during hydration', {
-      stageId: args.stageId,
-      sceneId: args.sceneId,
-      diff,
-      gaps: folded.diagnostics.gaps.slice(0, 8),
-    });
-  }
-
-  const selfHealed = await appendPBLRuntimeSnapshotIfChanged({
-    store,
-    stageId: args.stageId,
-    sceneId: args.sceneId,
-    learnerKey,
-    project: args.project,
-    learnerState: documentState,
-    records,
-    reason: records.length === 0 ? 'backfill' : 'self_heal',
   });
-
-  return {
-    project: args.project,
-    source: 'document',
-    diagnostics: folded.diagnostics,
-    diff,
-    selfHealed,
-  };
 }
 
 export async function hydratePBLScenesFromRuntime(
@@ -236,12 +335,18 @@ export async function hydratePBLScenesFromRuntime(
           },
         } as Scene;
       } catch (error) {
+        if (!documentContainsLearnerState(content.projectV2)) {
+          throw error;
+        }
         if (process.env.NODE_ENV !== 'production') {
-          console.warn('[PBL runtime] failed to hydrate scene from runtime; using document state', {
-            stageId,
-            sceneId: scene.id,
-            error,
-          });
+          console.warn(
+            '[PBL runtime] failed to hydrate legacy scene from runtime; using embedded document state',
+            {
+              stageId,
+              sceneId: scene.id,
+              error,
+            },
+          );
         }
         return scene;
       }

@@ -30,6 +30,7 @@ import {
   appendPBLRuntimeSnapshotIfChanged,
   hydratePBLProjectFromRuntime,
   hydratePBLScenesFromRuntime,
+  synchronizePBLProjectRuntime,
 } from '@/lib/pbl/v2/runtime/hydration';
 import { extractLearnerState, stripToDesignTemplate } from '@/lib/pbl/v2/runtime/learner-state';
 import {
@@ -164,6 +165,34 @@ class SlowFirstAppendRuntimeStore extends MemoryRuntimeStore {
 
   release(): void {
     this.releaseAppend();
+  }
+}
+
+class BlockFirstRecordListRuntimeStore extends MemoryRuntimeStore {
+  private recordListCount = 0;
+  private releaseFirstList!: () => void;
+  private readonly firstListGate = new Promise<void>((resolve) => {
+    this.releaseFirstList = resolve;
+  });
+  private markFirstListStarted!: () => void;
+  readonly firstListStarted = new Promise<void>((resolve) => {
+    this.markFirstListStarted = resolve;
+  });
+
+  override async listRecords(
+    sessionId: string,
+    opts?: { sceneId?: string },
+  ): Promise<RuntimeRecord[]> {
+    this.recordListCount += 1;
+    if (this.recordListCount === 1) {
+      this.markFirstListStarted();
+      await this.firstListGate;
+    }
+    return super.listRecords(sessionId, opts);
+  }
+
+  release(): void {
+    this.releaseFirstList();
   }
 }
 
@@ -322,6 +351,24 @@ describe('PBL runtime hydration', () => {
     warn.mockRestore();
   });
 
+  it('does not silently replace runtime-authoritative state with a design-only document', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const scenes = [makePBLScene(stripToDesignTemplate(makeProject()))];
+
+    await expect(
+      hydratePBLScenesFromRuntime(STAGE_ID, scenes, {
+        store: new ThrowingRuntimeStore(),
+        kv: new MemoryKVStore(),
+        learnerKey: LEARNER_KEY,
+      }),
+    ).rejects.toThrow('runtime unavailable');
+    expect(warn).not.toHaveBeenCalledWith(
+      expect.stringContaining('using document state'),
+      expect.anything(),
+    );
+    warn.mockRestore();
+  });
+
   it('keeps document state and appends a snapshot for a pre-runtime learner', async () => {
     const store = new MemoryRuntimeStore();
     const project = makeProject({ uiPhase: 'workspace' });
@@ -340,6 +387,109 @@ describe('PBL runtime hydration', () => {
     expect(extractLearnerState(hydrated.project)).toEqual(extractLearnerState(project));
     const records = await listRecords(store);
     expect((records.at(-1)?.payload as PBLRuntimeStorePayload).kind).toBe('pbl_snapshot');
+  });
+
+  it('synchronizes the complete learner state before document persistence', async () => {
+    const store = new MemoryRuntimeStore();
+    const kv = new MemoryKVStore();
+    const project = makeProject({ uiPhase: 'workspace', runtimeEvents: [] });
+    project.threads[0]!.messages.push({
+      id: 'legacy-msg-1',
+      roleType: 'user',
+      content: 'State that must survive the write cutover',
+      ts: '2026-05-29T00:00:01.000Z',
+      microtaskId: 'mt-1',
+    });
+
+    await synchronizePBLProjectRuntime({
+      stageId: STAGE_ID,
+      sceneId: SCENE_ID,
+      project,
+      store,
+      kv,
+      learnerKey: LEARNER_KEY,
+    });
+
+    const records = await listRecords(store);
+    const folded = foldPBLRuntime({ designTemplate: stripToDesignTemplate(project), records });
+    expect(folded.diagnostics.gaps).toEqual([]);
+    expect(folded.learnerState).toEqual(extractLearnerState(project));
+    expect(
+      records.filter(
+        (record) => (record.payload as PBLRuntimeStorePayload).kind === 'pbl_snapshot',
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('serializes the full synchronization so an overlapping stale save cannot win last', async () => {
+    const store = new BlockFirstRecordListRuntimeStore();
+    const kv = new MemoryKVStore();
+    await ensureSession(store);
+    const staleProject = makeProject({ uiPhase: 'workspace' });
+    const latestProject = makeProject({ uiPhase: 'completed', status: 'completed' });
+
+    const staleSave = synchronizePBLProjectRuntime({
+      stageId: STAGE_ID,
+      sceneId: SCENE_ID,
+      project: staleProject,
+      store,
+      kv,
+      learnerKey: LEARNER_KEY,
+    });
+    await store.firstListStarted;
+    const latestSave = synchronizePBLProjectRuntime({
+      stageId: STAGE_ID,
+      sceneId: SCENE_ID,
+      project: latestProject,
+      store,
+      kv,
+      learnerKey: LEARNER_KEY,
+    });
+    await Promise.resolve();
+    store.release();
+    await Promise.all([staleSave, latestSave]);
+
+    const records = await listRecords(store);
+    const folded = foldPBLRuntime({
+      designTemplate: stripToDesignTemplate(latestProject),
+      records,
+    });
+    expect(folded.learnerState).toEqual(extractLearnerState(latestProject));
+  });
+
+  it('keeps RuntimeStore authoritative when the first stripped document write is interrupted', async () => {
+    const store = new MemoryRuntimeStore();
+    const kv = new MemoryKVStore();
+    const staleDocument = makeProject({ uiPhase: 'workspace' });
+    const latestProject = makeProject({ uiPhase: 'completed', status: 'completed' });
+
+    await synchronizePBLProjectRuntime({
+      stageId: STAGE_ID,
+      sceneId: SCENE_ID,
+      project: latestProject,
+      store,
+      kv,
+      learnerKey: LEARNER_KEY,
+    });
+
+    const hydrated = await hydratePBLProjectFromRuntime({
+      stageId: STAGE_ID,
+      sceneId: SCENE_ID,
+      project: staleDocument,
+      store,
+      kv,
+      learnerKey: LEARNER_KEY,
+    });
+
+    expect(hydrated.source).toBe('fold');
+    expect(extractLearnerState(hydrated.project)).toEqual(extractLearnerState(latestProject));
+    expect(
+      (await listRecords(store)).some(
+        (record) =>
+          (record.payload as Partial<PBLRuntimeStorePayload>).kind === 'pbl_snapshot' &&
+          (record.payload as { reason?: string }).reason === 'write_cutover',
+      ),
+    ).toBe(true);
   });
 
   it('hydrates a fresh learner from the folded baseline without writing a snapshot', async () => {
@@ -394,6 +544,38 @@ describe('PBL runtime hydration', () => {
 
     expect(hydrated.source).toBe('fold');
     expect(extractLearnerState(hydrated.project)).toEqual(extractLearnerState(project));
+    expect(
+      (await listRecords(store)).filter(
+        (record) => (record.payload as PBLRuntimeStorePayload).kind === 'pbl_snapshot',
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('uses runtime history when the persisted document contains only the design template', async () => {
+    const store = new MemoryRuntimeStore();
+    const kv = new MemoryKVStore();
+    const runtimeProject = transitionProjectUiPhase(makeProject(), 'workspace');
+    await drainProjectRuntime({
+      stageId: STAGE_ID,
+      sceneId: SCENE_ID,
+      project: runtimeProject,
+      store,
+      kv,
+      learnerKey: LEARNER_KEY,
+    });
+    const designDocument = stripToDesignTemplate(runtimeProject);
+
+    const hydrated = await hydratePBLProjectFromRuntime({
+      stageId: STAGE_ID,
+      sceneId: SCENE_ID,
+      project: designDocument,
+      store,
+      kv,
+      learnerKey: LEARNER_KEY,
+    });
+
+    expect(hydrated.source).toBe('fold');
+    expect(extractLearnerState(hydrated.project)).toEqual(extractLearnerState(runtimeProject));
     expect(
       (await listRecords(store)).filter(
         (record) => (record.payload as PBLRuntimeStorePayload).kind === 'pbl_snapshot',

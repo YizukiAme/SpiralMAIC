@@ -9,11 +9,10 @@
  * intentionally at-least-once: downstream folds must deduplicate by event id
  * instead of assuming RuntimeStore record ids are unique.
  *
- * The project outboxes are bounded rings (500 events). If more than 500
- * runtime or engagement events are appended between drains, the evicted gap is
- * unrecoverable from this outbox. That latent-loss window is acceptable during
- * dual-write because `projectV2` remains the source of truth; the read flip
- * will backfill runtime state from a `projectV2` snapshot.
+ * The project outboxes are bounded rings (500 events). Before a document save
+ * strips learner state from `projectV2`, the persistence boundary verifies the
+ * fold and appends a full snapshot when the visible outboxes do not reconstruct
+ * the current learner state.
  *
  * Server code must not import this module without injecting its own
  * `RuntimeStore` and `KVStore`: the defaults lazily touch IndexedDB and
@@ -383,8 +382,8 @@ async function drainProjectRuntimeSerialized(
 
 /**
  * Drain all currently visible events behind a bounded completion barrier.
- * Hydration must either observe the completed drain or abort to its document
- * fallback; it must never write a snapshot while an earlier append is pending.
+ * Hydration and document persistence must either observe the completed drain
+ * or abort; neither may fold or write a snapshot while an append is pending.
  */
 export async function drainProjectRuntimeFully(args: DrainProjectRuntimeArgs): Promise<void> {
   const work = drainProjectRuntimeSerialized(args, true);

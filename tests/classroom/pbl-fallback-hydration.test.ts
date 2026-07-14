@@ -15,6 +15,9 @@ vi.mock('@/lib/utils/stage-storage', () => ({
   saveStageData: (...args: unknown[]) => saveStageDataMock(...args),
   loadStageData: vi.fn().mockResolvedValue(null),
 }));
+vi.mock('@/lib/pbl/v2/runtime/document-persistence', () => ({
+  preparePBLScenesForDocumentPersistence: async (_stageId: string, scenes: Scene[]) => scenes,
+}));
 vi.mock('@/lib/utils/database', () => ({
   db: { stageOutlines: { put: vi.fn(), get: vi.fn() } },
 }));

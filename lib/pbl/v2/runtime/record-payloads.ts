@@ -67,7 +67,7 @@ export interface PBLSnapshotRecordPayload {
     lastRuntimeEventId?: string;
     lastEngagementEventId?: string;
   };
-  reason: 'backfill' | 'self_heal';
+  reason: 'backfill' | 'self_heal' | 'write_cutover';
 }
 
 export type PBLRuntimeStorePayload =

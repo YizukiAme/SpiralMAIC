@@ -108,12 +108,15 @@ export function extractLearnerState(project: PBLProjectV2): PBLLearnerState {
 
 export function stripToDesignTemplate(project: PBLProjectV2): PBLProjectV2 {
   const template = clone(project);
+  const authoredProficiency =
+    template.proficiencyAssessment?.transitions[0]?.from ?? template.proficiency;
   template.uiPhase = 'hero';
   template.status = 'active';
   template.submissions = [];
   template.evaluations = [];
   template.engagementEvents = [];
   template.proficiencyAssessment = undefined;
+  template.proficiency = authoredProficiency;
   template.runtimeEvents = undefined;
   template.runtimeResetEpoch = undefined;
   template.pendingHandover = undefined;
