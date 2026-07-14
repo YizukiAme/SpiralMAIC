@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { CodexLoginManager } from '@/lib/server/codex/login-manager';
+import { CodexModelDiscovery } from '@/lib/server/codex/models';
 import { ManagedCodexTokenProvider } from '@/lib/server/codex/token-provider';
 import { FileCodexCredentialVault } from '@/lib/server/codex/vault';
 
@@ -12,6 +13,7 @@ describe('Codex auth runtime', () => {
     expect(first.vault).toBeInstanceOf(FileCodexCredentialVault);
     expect(first.tokenProvider).toBeInstanceOf(ManagedCodexTokenProvider);
     expect(first.loginManager).toBeInstanceOf(CodexLoginManager);
+    expect(first.modelDiscovery).toBeInstanceOf(CodexModelDiscovery);
     expect(runtimeModule.getCodexAuthRuntime()).toBe(first);
 
     vi.resetModules();

@@ -40,6 +40,13 @@ function expectNoStore(response: Response): void {
   expect(response.headers.get('cache-control')).toBe('no-store');
 }
 
+function modelDiscoveryStub() {
+  return {
+    getModels: vi.fn(async () => []),
+    invalidate: vi.fn(),
+  } as unknown as CodexAuthRuntime['modelDiscovery'];
+}
+
 beforeEach(() => {
   delete process.env.ACCESS_CODE;
   mocks.availability.mockReset();
@@ -82,6 +89,7 @@ describe('/api/codex/auth/login', () => {
         oauthFetch,
         clock: { now: () => now },
       }),
+      modelDiscovery: modelDiscoveryStub(),
     };
     const route = await import('@/app/api/codex/auth/login/route');
 
@@ -130,6 +138,7 @@ describe('/api/codex/auth/login', () => {
       vault,
       tokenProvider: new ManagedCodexTokenProvider({ vault }),
       loginManager: new CodexLoginManager({ vault }),
+      modelDiscovery: modelDiscoveryStub(),
     };
     const route = await import('@/app/api/codex/auth/login/route');
 
@@ -177,6 +186,7 @@ describe('/api/codex/auth/login', () => {
       vault,
       tokenProvider: new ManagedCodexTokenProvider({ vault }),
       loginManager: new CodexLoginManager({ vault }),
+      modelDiscovery: modelDiscoveryStub(),
     };
     process.env.ACCESS_CODE = 'login-route-secret';
     const route = await import('@/app/api/codex/auth/login/route');
@@ -230,5 +240,29 @@ describe('/api/codex/auth/login', () => {
       });
     }
     expect(mocks.getRuntime).not.toHaveBeenCalled();
+  });
+
+  it('invalidates model discovery when polling observes a completed login', async () => {
+    const vault = new MemoryVault();
+    const modelDiscovery = modelDiscoveryStub();
+    const loginManager = new CodexLoginManager({ vault });
+    vi.spyOn(loginManager, 'poll').mockResolvedValue({
+      method: 'device',
+      status: 'complete',
+    });
+    mocks.runtime = {
+      vault,
+      tokenProvider: new ManagedCodexTokenProvider({ vault }),
+      loginManager,
+      modelDiscovery,
+    };
+    const route = await import('@/app/api/codex/auth/login/route');
+
+    const response = await route.PATCH(
+      new Request('http://localhost/api/codex/auth/login', { method: 'PATCH' }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(modelDiscovery.invalidate).toHaveBeenCalledTimes(1);
   });
 });

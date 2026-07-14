@@ -377,6 +377,7 @@ const getDefaultProvidersConfig = (): ProvidersConfig => {
       defaultBaseUrl: provider.defaultBaseUrl,
       icon: provider.icon,
       requiresApiKey: provider.requiresApiKey,
+      credentialMode: provider.credentialMode,
       isBuiltIn: true,
     };
   });
@@ -664,6 +665,21 @@ function ensureBuiltInProviders(state: Partial<SettingsState>): void {
       const provider = PROVIDERS[providerId];
       const existing = state.providersConfig![providerId];
 
+      if (provider.credentialMode === 'oauth') {
+        // OAuth connection state and dynamic models are server truth. Never
+        // revive a persisted managed flag, fake browser credentials, or a
+        // previous account's discovered model IDs during rehydrate.
+        state.providersConfig![providerId] = {
+          ...defaultConfig[providerId],
+          apiKey: '',
+          baseUrl: '',
+          models: [...provider.models],
+          isServerConfigured: false,
+          serverModels: undefined,
+        };
+        return;
+      }
+
       const builtInModelIds = new Set(provider.models.map((m) => m.id));
       const customModels = (existing.models || []).filter((m) => !builtInModelIds.has(m.id));
       const mergedModels = [...provider.models, ...customModels];
@@ -676,10 +692,25 @@ function ensureBuiltInProviders(state: Partial<SettingsState>): void {
         defaultBaseUrl: existing.defaultBaseUrl || provider.defaultBaseUrl,
         icon: provider.icon || existing.icon,
         requiresApiKey: existing.requiresApiKey ?? provider.requiresApiKey,
+        credentialMode: provider.credentialMode ?? existing.credentialMode,
         isBuiltIn: existing.isBuiltIn ?? true,
       };
     }
   });
+}
+
+function distrustPersistedOAuthSelection(state: Partial<SettingsState>): void {
+  if (!state.providersConfig || !state.providerId) return;
+  const selected = state.providersConfig[state.providerId];
+  if (selected?.credentialMode !== 'oauth' || selected.isServerConfigured) return;
+
+  const resolved = resolveLLMSelection(
+    state.providersConfig,
+    state.providerId,
+    state.modelId ?? '',
+  );
+  state.providerId = resolved.providerId;
+  state.modelId = resolved.modelId;
 }
 
 /**
@@ -1394,8 +1425,22 @@ export const useSettingsStore = create<SettingsState>()(
               for (const pid of Object.keys(newProvidersConfig)) {
                 const key = pid as ProviderId;
                 if (newProvidersConfig[key]) {
+                  const registryProvider = PROVIDERS[key];
+                  const isOAuth = registryProvider?.credentialMode === 'oauth';
                   newProvidersConfig[key] = {
                     ...newProvidersConfig[key],
+                    ...(isOAuth
+                      ? {
+                          apiKey: '',
+                          baseUrl: '',
+                          models: [...registryProvider.models],
+                          name: registryProvider.name,
+                          type: registryProvider.type,
+                          icon: registryProvider.icon,
+                          requiresApiKey: registryProvider.requiresApiKey,
+                          credentialMode: registryProvider.credentialMode,
+                        }
+                      : {}),
                     isServerConfigured: false,
                     serverModels: undefined,
                   };
@@ -1409,6 +1454,11 @@ export const useSettingsStore = create<SettingsState>()(
                   // When server specifies allowed models, filter the models list
                   // while preserving custom IDs from env/YAML in server order.
                   const currentModelMap = new Map(currentModels.map((m) => [m.id, m]));
+                  if (key === 'openai-codex') {
+                    for (const model of PROVIDERS.openai.models) {
+                      if (!currentModelMap.has(model.id)) currentModelMap.set(model.id, model);
+                    }
+                  }
                   const filteredModels = info.models?.length
                     ? info.models.map((id) => currentModelMap.get(id) ?? { id, name: id })
                     : currentModels;
@@ -1569,7 +1619,16 @@ export const useSettingsStore = create<SettingsState>()(
                   .map(([id]) => id as T),
               ];
 
-              const llmFallback = buildFallback<ProviderId>(newProvidersConfig);
+              const llmFallback = [
+                ...Object.entries(newProvidersConfig)
+                  .filter(([, config]) => config.isServerConfigured)
+                  .filter(([, config]) => isLLMProviderConfigured(config))
+                  .map(([id]) => id as ProviderId),
+                ...Object.entries(newProvidersConfig)
+                  .filter(([, config]) => !config.isServerConfigured)
+                  .filter(([, config]) => isLLMProviderConfigured(config))
+                  .map(([id]) => id as ProviderId),
+              ];
               const ttsFallback = buildFallback<TTSProviderId>(newTTSConfig);
               const asrFallback = buildFallback<ASRProviderId>(newASRConfig);
               const pdfFallback = buildFallback<PDFProviderId>(newPDFConfig);
@@ -2043,6 +2102,7 @@ export const useSettingsStore = create<SettingsState>()(
         ensureValidProviderSelections(state);
         ensureBuiltInAudioProviders(state);
         ensureBuiltInWebSearchProviders(state);
+        distrustPersistedOAuthSelection(state);
         state.thinkingConfigs = pruneThinkingConfigs(state.thinkingConfigs, state.providersConfig);
 
         return state;
@@ -2060,6 +2120,7 @@ export const useSettingsStore = create<SettingsState>()(
         ensureValidProviderSelections(merged as Partial<SettingsState>);
         stripLegacyServerBaseUrl(merged as Partial<SettingsState>);
         const typedMerged = merged as Partial<SettingsState>;
+        distrustPersistedOAuthSelection(typedMerged);
         typedMerged.thinkingConfigs = pruneThinkingConfigs(
           typedMerged.thinkingConfigs,
           typedMerged.providersConfig,

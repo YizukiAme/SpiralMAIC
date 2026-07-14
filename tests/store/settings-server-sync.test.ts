@@ -29,6 +29,19 @@ vi.mock('@/lib/ai/providers', () => ({
         { id: 'gpt-4-turbo', name: 'GPT-4 Turbo' },
       ],
     },
+    'openai-codex': {
+      id: 'openai-codex',
+      name: 'ChatGPT Codex',
+      type: 'openai',
+      requiresApiKey: false,
+      credentialMode: 'oauth',
+      icon: '/logos/openai.svg',
+      models: [
+        { id: 'gpt-5.5', name: 'GPT-5.5' },
+        { id: 'gpt-5.4', name: 'GPT-5.4' },
+        { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini' },
+      ],
+    },
     anthropic: {
       id: 'anthropic',
       name: 'Anthropic',
@@ -52,6 +65,14 @@ vi.mock('@/lib/ai/providers', () => ({
         { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
         { id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
       ],
+    },
+    ollama: {
+      id: 'ollama',
+      name: 'Ollama',
+      type: 'openai',
+      defaultBaseUrl: 'http://localhost:11434/v1',
+      requiresApiKey: false,
+      models: [{ id: 'llama3.3', name: 'Llama 3.3' }],
     },
   },
 }));
@@ -319,6 +340,49 @@ describe('settings rehydrate — built-in provider models', () => {
     // ...while the managed flag itself is preserved.
     expect(openai.isServerConfigured).toBe(true);
   });
+
+  it('distrusts persisted Codex server state, credentials, and dynamic models', async () => {
+    storage.set(
+      'settings-storage',
+      JSON.stringify({
+        state: {
+          providerId: 'openai-codex',
+          modelId: 'stale-secret-model',
+          providersConfig: {
+            'openai-codex': {
+              apiKey: 'fake-client-key',
+              baseUrl: 'https://fake.example/v1',
+              models: [{ id: 'stale-secret-model', name: 'Stale' }],
+              name: 'Spoofed Codex',
+              type: 'anthropic',
+              requiresApiKey: true,
+              credentialMode: 'api-key',
+              isBuiltIn: true,
+              isServerConfigured: true,
+              serverModels: ['stale-secret-model'],
+            },
+          },
+        },
+        version: 4,
+      }),
+    );
+
+    const store = await getStore();
+    const codex = store.getState().providersConfig['openai-codex'];
+    expect(codex).toMatchObject({
+      apiKey: '',
+      baseUrl: '',
+      name: 'ChatGPT Codex',
+      type: 'openai',
+      requiresApiKey: false,
+      credentialMode: 'oauth',
+      isServerConfigured: false,
+    });
+    expect(codex.serverModels).toBeUndefined();
+    expect(codex.models.map((model) => model.id)).toEqual(['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini']);
+    expect(store.getState().providerId).not.toBe('openai-codex');
+    expect(store.getState().modelId).not.toBe('stale-secret-model');
+  });
 });
 
 describe('fetchServerProviders — provider availability sync', () => {
@@ -366,6 +430,38 @@ describe('fetchServerProviders — provider availability sync', () => {
     expect(models.map((m) => m.id)).toEqual(['gpt-5.5', 'gpt-4o']);
     expect(models[0].name).toBe('gpt-5.5');
     expect(models[1].name).toBe('GPT-4o');
+  });
+
+  it('replaces Codex discovery models on every sync without accumulating stale IDs', async () => {
+    const store = await getStore();
+    mockServerResponse({ providers: { 'openai-codex': { models: ['gpt-old', 'gpt-4o'] } } });
+    await store.getState().fetchServerProviders();
+
+    let codex = store.getState().providersConfig['openai-codex'];
+    expect(codex.models.map((model) => model.id)).toEqual(['gpt-old', 'gpt-4o']);
+    expect(codex.models[1].name).toBe('GPT-4o');
+    expect(codex.credentialMode).toBe('oauth');
+
+    mockServerResponse({ providers: { 'openai-codex': { models: ['gpt-new'] } } });
+    await store.getState().fetchServerProviders();
+
+    codex = store.getState().providersConfig['openai-codex'];
+    expect(codex.models.map((model) => model.id)).toEqual(['gpt-new']);
+    expect(codex.isServerConfigured).toBe(true);
+  });
+
+  it('resets Codex to static fallback models when native OAuth disappears', async () => {
+    const store = await getStore();
+    mockServerResponse({ providers: { 'openai-codex': { models: ['gpt-live'] } } });
+    await store.getState().fetchServerProviders();
+    expect(store.getState().providersConfig['openai-codex'].models[0].id).toBe('gpt-live');
+
+    mockServerResponse({});
+    await store.getState().fetchServerProviders();
+    const codex = store.getState().providersConfig['openai-codex'];
+    expect(codex.isServerConfigured).toBe(false);
+    expect(codex.serverModels).toBeUndefined();
+    expect(codex.models.map((model) => model.id)).toEqual(['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini']);
   });
 
   it('keeps all models when server provides no model restriction', async () => {
@@ -1094,6 +1190,24 @@ describe('fetchServerProviders — LLM cross-provider fallback', () => {
 
     expect(store.getState().providerId).toBe('anthropic');
     expect(store.getState().modelId).toBe('claude-sonnet-4-6');
+  });
+
+  it('falls back from disconnected Codex to an explicitly configured keyless provider', async () => {
+    const store = await getStore();
+    store.getState().setProviderConfig('ollama', {
+      apiKey: '',
+      baseUrl: 'http://my-ollama:11434/v1',
+      requiresApiKey: false,
+    });
+    mockServerResponse({ providers: { 'openai-codex': { models: ['gpt-live'] } } });
+    await store.getState().fetchServerProviders();
+    store.getState().setModel('openai-codex', 'gpt-live');
+
+    mockServerResponse({});
+    await store.getState().fetchServerProviders();
+
+    expect(store.getState().providerId).toBe('ollama');
+    expect(store.getState().modelId).toBe('llama3.3');
   });
 });
 

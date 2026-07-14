@@ -53,7 +53,12 @@ const log = createLogger('AIProviders');
 export type { ProviderId, ProviderConfig, ModelInfo, ModelConfig };
 
 /** Provider IDs whose logos are monochrome-dark and need `dark:invert` in dark mode */
-export const MONO_LOGO_PROVIDERS: ReadonlySet<string> = new Set(['openai', 'openrouter', 'ollama']);
+export const MONO_LOGO_PROVIDERS: ReadonlySet<string> = new Set([
+  'openai',
+  'openai-codex',
+  'openrouter',
+  'ollama',
+]);
 
 /**
  * Provider registry
@@ -157,7 +162,11 @@ export const PROVIDERS: Record<ProviderId, ProviderConfig> = {
     requiresApiKey: false,
     credentialMode: 'oauth',
     icon: '/logos/openai.svg',
-    models: [],
+    models: [
+      { id: 'gpt-5.5', name: 'GPT-5.5', source: 'probed' },
+      { id: 'gpt-5.4', name: 'GPT-5.4', source: 'probed' },
+      { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini', source: 'probed' },
+    ],
   },
 
   anthropic: {
