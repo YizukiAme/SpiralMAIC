@@ -16,6 +16,9 @@ import {
 } from '@/lib/server/provider-config';
 import { validateUrlForSSRF } from '@/lib/server/ssrf-guard';
 import { getStageRoute, type LlmStage } from '@/lib/server/model-routes';
+import { getCodexOAuthAvailability } from '@/lib/server/codex/availability';
+import { getCodexAuthRuntime } from '@/lib/server/codex/runtime';
+import { createCodexResponsesTransport } from '@/lib/server/codex/transport';
 
 export interface ResolvedModel extends ModelWithInfo {
   /** Original model string (e.g. "openai/gpt-4o-mini") */
@@ -68,6 +71,34 @@ export async function resolveModel(params: {
     );
   }
   const { providerId, modelId } = parseModelString(modelString);
+
+  if (providerId === 'openai-codex') {
+    const availability = await getCodexOAuthAvailability();
+    if (!availability.available) {
+      throw new Error(`Codex OAuth provider is unavailable (${availability.reason})`);
+    }
+
+    const { tokenProvider } = getCodexAuthRuntime();
+    await tokenProvider.getValidCredentials();
+    const transport = createCodexResponsesTransport({ tokenProvider });
+    const { model, modelInfo } = getModel({
+      providerId,
+      modelId,
+      apiKey: '',
+      customFetch: transport,
+    });
+
+    return {
+      model,
+      modelInfo,
+      modelString,
+      providerId,
+      modelId,
+      apiKey: '',
+      baseUrl: undefined,
+      thinkingConfig: stageModel ? stageRoute?.thinking : params.thinkingConfig,
+    };
+  }
 
   // When a stage route overrides the client's model, the client-sent connection
   // params (apiKey/baseUrl/providerType) belong to the client's *other* model
