@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 
 import type { ModelInfo } from '@/lib/types/provider';
 
-import type { CodexTokenProvider } from './token-provider';
+import { refreshCodexCredentialsIfCurrent, type CodexTokenProvider } from './token-provider';
 import { withCodexCredentialVaultMutation, type CodexCredentialVault } from './vault';
 
 /**
@@ -62,6 +62,7 @@ interface CreateCodexModelsTransportOptions {
 
 interface CodexModelsRequestAuthOptions {
   allowAuthReplay: boolean;
+  canAuthReplay?(): Promise<boolean>;
   onAuthReplay?(): void;
 }
 
@@ -288,15 +289,27 @@ function createCodexModelsRequest(options: CreateCodexModelsTransportOptions): C
     }
 
     return withModelsRequestTimeout(init?.signal, async (signal) => {
-      const request = async (forceRefresh: boolean): Promise<Response> => {
+      let originalCredentials: { accessToken: string; accountId: string } | null = null;
+      const request = async (
+        forceRefresh: boolean,
+        expected?: { accessToken: string; accountId: string },
+      ): Promise<Response> => {
         let credentials: { accessToken: string; accountId: string };
         try {
-          credentials = forceRefresh
-            ? await options.tokenProvider.getValidCredentials({ forceRefresh: true })
-            : await options.tokenProvider.getValidCredentials();
+          if (forceRefresh) {
+            const scopedExpected = expected ?? originalCredentials;
+            if (!scopedExpected) throw credentialsError();
+            credentials = await refreshCodexCredentialsIfCurrent(
+              options.tokenProvider,
+              scopedExpected,
+            );
+          } else {
+            credentials = await options.tokenProvider.getValidCredentials();
+          }
         } catch {
           throw credentialsError();
         }
+        if (!forceRefresh) originalCredentials = credentials;
 
         try {
           return await upstreamFetch(CODEX_MODELS_ENDPOINT, {
@@ -313,8 +326,12 @@ function createCodexModelsRequest(options: CreateCodexModelsTransportOptions): C
       let response = await request(false);
       if (response.status === 401 && authOptions.allowAuthReplay) {
         await cancelResponseBody(response);
+        const canReplay = await authOptions.canAuthReplay?.().catch(() => false);
+        if (signal.aborted || canReplay === false) {
+          throw new CodexModelsError(CODEX_MODELS_ERROR_CODES.AUTH_REQUIRED, response.status);
+        }
         authOptions.onAuthReplay?.();
-        response = await request(true);
+        response = await request(true, originalCredentials ?? undefined);
       }
 
       if (response.status === 304 || response.ok) return response;
@@ -441,6 +458,13 @@ export class CodexModelDiscovery {
     const authReplayState = { used: false };
     const operation = this.refresh(generation, now, invalidationGeneration, {
       allowAuthReplay: (requestContext.authReplayChain?.authReplaysRemaining ?? 0) > 0,
+      canAuthReplay: () =>
+        this.canAuthReplay(
+          requestContext,
+          settledCredentials.accountId,
+          generation,
+          invalidationGeneration,
+        ),
       onAuthReplay: () => {
         authReplayState.used = true;
         if (requestContext.authReplayChain) {
@@ -471,8 +495,7 @@ export class CodexModelDiscovery {
     accountId: string,
     invalidationGeneration: number,
   ): boolean {
-    const accountScope = createHash('sha256').update(accountId).digest('hex');
-    const chainKey = `${invalidationGeneration}:${accountScope}`;
+    const chainKey = this.getAuthReplayChainKey(accountId, invalidationGeneration);
     if (requestContext.authReplayChain) {
       return (
         requestContext.authReplayChainKey === chainKey &&
@@ -490,6 +513,43 @@ export class CodexModelDiscovery {
     requestContext.authReplayChain = chain;
     requestContext.authReplayChainKey = chainKey;
     return true;
+  }
+
+  private async canAuthReplay(
+    requestContext: CodexModelDiscoveryRequestContext,
+    accountId: string,
+    generation: string,
+    invalidationGeneration: number,
+  ): Promise<boolean> {
+    if (!this.isAuthReplayChainCurrent(requestContext, accountId, invalidationGeneration)) {
+      return false;
+    }
+    const currentGeneration = await this.credentialGeneration().catch(() => null);
+    return (
+      currentGeneration === generation &&
+      this.isAuthReplayChainCurrent(requestContext, accountId, invalidationGeneration)
+    );
+  }
+
+  private isAuthReplayChainCurrent(
+    requestContext: CodexModelDiscoveryRequestContext,
+    accountId: string,
+    invalidationGeneration: number,
+  ): boolean {
+    const chain = requestContext.authReplayChain;
+    const chainKey = this.getAuthReplayChainKey(accountId, invalidationGeneration);
+    return Boolean(
+      chain &&
+      chain.authReplaysRemaining > 0 &&
+      this.invalidationGeneration === invalidationGeneration &&
+      requestContext.authReplayChainKey === chainKey &&
+      this.authReplayChains.get(chainKey) === chain,
+    );
+  }
+
+  private getAuthReplayChainKey(accountId: string, invalidationGeneration: number): string {
+    const accountScope = createHash('sha256').update(accountId).digest('hex');
+    return `${invalidationGeneration}:${accountScope}`;
   }
 
   private releaseAuthReplayChain(requestContext: CodexModelDiscoveryRequestContext): void {
