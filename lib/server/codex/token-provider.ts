@@ -74,6 +74,18 @@ type ValidCredentials = { accessToken: string; accountId: string };
 interface CredentialOperationState {
   forceRequested: boolean;
   refreshed: boolean;
+  refreshCommitted: boolean;
+  source: ValidCredentials | null;
+  expected: ValidCredentials | null;
+}
+
+interface RefreshResult {
+  credentials: ValidCredentials;
+  committed: boolean;
+}
+
+interface ConditionalCodexTokenProvider {
+  refreshIfCurrent(expected: ValidCredentials): Promise<ValidCredentials>;
 }
 
 interface ActiveCredentialOperation {
@@ -175,6 +187,22 @@ function signedOutError(): CodexOAuthError {
   return new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.SIGNED_OUT, false);
 }
 
+function credentialsMatch(left: ValidCredentials | null, right: ValidCredentials): boolean {
+  return left?.accountId === right.accountId && left.accessToken === right.accessToken;
+}
+
+/** Fail closed unless the provider supports an atomic account/token-scoped refresh. */
+export function refreshCodexCredentialsIfCurrent(
+  tokenProvider: CodexTokenProvider,
+  expected: ValidCredentials,
+): Promise<ValidCredentials> {
+  const conditional = tokenProvider as CodexTokenProvider & Partial<ConditionalCodexTokenProvider>;
+  if (typeof conditional.refreshIfCurrent !== 'function') {
+    return Promise.reject(signedOutError());
+  }
+  return conditional.refreshIfCurrent(expected);
+}
+
 export class ManagedCodexTokenProvider implements CodexTokenProvider {
   private readonly vault: CodexCredentialVault;
   private readonly tokenExchangeFetch: TokenExchangeFetch;
@@ -204,10 +232,50 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
       });
     }
 
+    return this.startCredentialOperation(options?.forceRefresh === true, null);
+  }
+
+  /**
+   * Refresh only if the vault still contains the exact credentials used by
+   * the request that received a 401. This is intentionally not part of the
+   * public CodexTokenProvider contract; transports reach it through the
+   * fail-closed structural helper above.
+   */
+  refreshIfCurrent(expected: ValidCredentials): Promise<ValidCredentials> {
+    if (this.sharedState.logoutInFlight) {
+      return this.sharedState.logoutInFlight.then(() => {
+        throw signedOutError();
+      });
+    }
+
+    const existing = this.sharedState.operationInFlight;
+    if (existing) {
+      return existing.promise.then((result) => {
+        if (!credentialsMatch(existing.state.source, expected)) throw signedOutError();
+        if (existing.state.refreshed) {
+          if (!existing.state.refreshCommitted || result.accountId !== expected.accountId) {
+            throw signedOutError();
+          }
+          return result;
+        }
+        return this.refreshIfCurrent(expected);
+      });
+    }
+
+    return this.startCredentialOperation(true, expected);
+  }
+
+  private startCredentialOperation(
+    forceRequested: boolean,
+    expected: ValidCredentials | null,
+  ): Promise<ValidCredentials> {
     const requestGeneration = this.sharedState.generation;
     const state: CredentialOperationState = {
-      forceRequested: options?.forceRefresh === true,
+      forceRequested,
       refreshed: false,
+      refreshCommitted: false,
+      source: null,
+      expected,
     };
     const operation: ActiveCredentialOperation = {
       state,
@@ -264,14 +332,26 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
       throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.CREDENTIALS_MISSING, false);
     }
 
+    const source = { accessToken: credentials.accessToken, accountId: credentials.accountId };
+    state.source = source;
+    if (state.expected && !credentialsMatch(source, state.expected)) throw signedOutError();
+
     const shouldRefresh =
       state.forceRequested || credentials.expiresAt - this.clock.now() <= REFRESH_EARLY_MS;
     if (!shouldRefresh) {
-      return { accessToken: credentials.accessToken, accountId: credentials.accountId };
+      return source;
     }
 
     state.refreshed = true;
-    return this.refreshCredentials(credentials, requestGeneration);
+    const result = await this.refreshCredentials(credentials, requestGeneration, state.expected);
+    state.refreshCommitted = result.committed;
+    if (
+      state.expected &&
+      (!result.committed || result.credentials.accountId !== state.expected.accountId)
+    ) {
+      throw signedOutError();
+    }
+    return result.credentials;
   }
 
   private async finishLogout(staleOperation: Promise<ValidCredentials> | null): Promise<void> {
@@ -290,7 +370,8 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
   private async refreshCredentials(
     credentials: CodexOAuthCredentials,
     refreshGeneration: number,
-  ): Promise<{ accessToken: string; accountId: string }> {
+    expected: ValidCredentials | null,
+  ): Promise<RefreshResult> {
     const body = new URLSearchParams({
       grant_type: 'refresh_token',
       client_id: CODEX_OAUTH_CLIENT_ID,
@@ -343,8 +424,11 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
         if (refreshGeneration !== this.sharedState.generation) throw signedOutError();
         if (replacement) {
           return {
-            accessToken: replacement.accessToken,
-            accountId: replacement.accountId,
+            credentials: {
+              accessToken: replacement.accessToken,
+              accountId: replacement.accountId,
+            },
+            committed: false,
           };
         }
         throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.INVALID_GRANT, false);
@@ -355,6 +439,7 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
 
     const parsed = this.parseTokenResponse(payload, credentials);
     if (refreshGeneration !== this.sharedState.generation) throw signedOutError();
+    if (expected && parsed.accountId !== expected.accountId) throw signedOutError();
 
     const nextCredentials: CodexOAuthCredentials = {
       version: 1,
@@ -366,20 +451,20 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
       updatedAt: this.clock.now(),
     };
 
-    let committedCredentials: CodexOAuthCredentials;
+    let commitResult: { credentials: CodexOAuthCredentials; committed: boolean };
     try {
-      committedCredentials = await withCodexCredentialVaultMutation(this.vault, async () => {
+      commitResult = await withCodexCredentialVaultMutation(this.vault, async () => {
         if (refreshGeneration !== this.sharedState.generation) throw signedOutError();
         const current = await this.vault.load();
         if (!codexCredentialsEqual(current, credentials)) {
           if (!current) {
             throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.CREDENTIALS_MISSING, false);
           }
-          return current;
+          return { credentials: current, committed: false };
         }
         await this.vault.save(nextCredentials);
         if (refreshGeneration !== this.sharedState.generation) throw signedOutError();
-        return nextCredentials;
+        return { credentials: nextCredentials, committed: true };
       });
     } catch (error) {
       if (error instanceof CodexOAuthError) throw error;
@@ -389,8 +474,11 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
     if (refreshGeneration !== this.sharedState.generation) throw signedOutError();
 
     return {
-      accessToken: committedCredentials.accessToken,
-      accountId: committedCredentials.accountId,
+      credentials: {
+        accessToken: commitResult.credentials.accessToken,
+        accountId: commitResult.credentials.accountId,
+      },
+      committed: commitResult.committed,
     };
   }
 

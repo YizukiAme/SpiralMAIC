@@ -5,7 +5,43 @@ import {
   CodexResponsesTransportError,
   createCodexResponsesTransport,
 } from '@/lib/server/codex/transport';
-import type { CodexTokenProvider } from '@/lib/server/codex/token-provider';
+import {
+  ManagedCodexTokenProvider,
+  type CodexTokenProvider,
+} from '@/lib/server/codex/token-provider';
+import type { CodexCredentialVault, CodexOAuthCredentials } from '@/lib/server/codex/vault';
+
+const NOW = 1_700_000_000_000;
+
+class MemoryVault implements CodexCredentialVault {
+  constructor(public current: CodexOAuthCredentials | null) {}
+
+  async load(): Promise<CodexOAuthCredentials | null> {
+    return this.current;
+  }
+
+  async save(credentials: CodexOAuthCredentials): Promise<void> {
+    this.current = credentials;
+  }
+
+  async clear(): Promise<void> {
+    this.current = null;
+  }
+}
+
+function unsignedJwt(payload: Record<string, unknown>): string {
+  const header = Buffer.from(JSON.stringify({ alg: 'none' })).toString('base64url');
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  return `${header}.${body}.responses-transport-test`;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
 
 function createTokenProvider() {
   return {
@@ -13,7 +49,15 @@ function createTokenProvider() {
       accessToken: 'access-token',
       accountId: 'account-id',
     })),
-  } satisfies CodexTokenProvider;
+    refreshIfCurrent: vi.fn(
+      async (expected: { accessToken: string; accountId: string }) => expected,
+    ),
+  } satisfies CodexTokenProvider & {
+    refreshIfCurrent(expected: {
+      accessToken: string;
+      accountId: string;
+    }): Promise<{ accessToken: string; accountId: string }>;
+  };
 }
 
 function successfulResponse(): Response {
@@ -162,17 +206,76 @@ describe('Codex Responses transport boundary', () => {
 });
 
 describe('Codex Responses transport failures', () => {
+  it.each([
+    { label: 'replacement account', replacementAccountId: 'account-b' },
+    { label: 'same-account new login', replacementAccountId: 'account-a' },
+  ])('never lets a stale response force-refresh credentials from a $label', async (scenario) => {
+    const accountA: CodexOAuthCredentials = {
+      version: 1,
+      accessToken: 'account-a-access',
+      refreshToken: 'account-a-refresh',
+      expiresAt: NOW + 3_600_000,
+      accountId: 'account-a',
+      updatedAt: NOW - 1,
+    };
+    const vault = new MemoryVault(accountA);
+    const tokenExchangeFetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            access_token: unsignedJwt({ chatgpt_account_id: scenario.replacementAccountId }),
+            refresh_token: 'replacement-rotated-by-stale-response',
+            expires_in: 3600,
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    const tokenProvider = new ManagedCodexTokenProvider({
+      vault,
+      clock: { now: () => NOW },
+      tokenExchangeFetch,
+    });
+    const staleResponse = deferred<Response>();
+    const upstreamFetch = vi
+      .fn<typeof fetch>()
+      .mockImplementationOnce(() => staleResponse.promise)
+      .mockResolvedValueOnce(successfulResponse());
+    const transport = createCodexResponsesTransport({ tokenProvider, upstreamFetch });
+
+    const request = transport(CODEX_RESPONSES_ENDPOINT, { method: 'POST', body: '{}' });
+    await vi.waitFor(() => expect(upstreamFetch).toHaveBeenCalledTimes(1));
+    const accountB: CodexOAuthCredentials = {
+      version: 1,
+      accessToken: 'account-b-access',
+      refreshToken: 'account-b-refresh',
+      expiresAt: NOW + 3_600_000,
+      accountId: scenario.replacementAccountId,
+      updatedAt: NOW + 1,
+    };
+    await vault.save(accountB);
+    staleResponse.resolve(new Response('stale-account-body', { status: 401 }));
+
+    await expect(request).rejects.toMatchObject({ code: 'AUTH_REQUIRED' });
+    expect(tokenExchangeFetch).not.toHaveBeenCalled();
+    expect(upstreamFetch).toHaveBeenCalledTimes(1);
+    expect(vault.current).toEqual(accountB);
+  });
+
   it('refreshes and replays exactly once after a 401', async () => {
     const getValidCredentials = vi
       .fn<CodexTokenProvider['getValidCredentials']>()
-      .mockResolvedValueOnce({ accessToken: 'old-token', accountId: 'account-id' })
-      .mockResolvedValueOnce({ accessToken: 'new-token', accountId: 'account-id' });
+      .mockResolvedValueOnce({ accessToken: 'old-token', accountId: 'account-id' });
+    const refreshIfCurrent = vi.fn(async () => ({
+      accessToken: 'new-token',
+      accountId: 'account-id',
+    }));
     const upstreamFetch = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(new Response('secret upstream body', { status: 401 }))
       .mockResolvedValueOnce(successfulResponse());
+    const tokenProvider = { getValidCredentials, refreshIfCurrent };
     const transport = createCodexResponsesTransport({
-      tokenProvider: { getValidCredentials },
+      tokenProvider,
       upstreamFetch,
     });
 
@@ -180,8 +283,13 @@ describe('Codex Responses transport failures', () => {
       transport(CODEX_RESPONSES_ENDPOINT, { method: 'POST', body: '{}' }),
     ).resolves.toMatchObject({ status: 200 });
 
-    expect(getValidCredentials).toHaveBeenNthCalledWith(1);
-    expect(getValidCredentials).toHaveBeenNthCalledWith(2, { forceRefresh: true });
+    expect(getValidCredentials).toHaveBeenCalledTimes(1);
+    expect(getValidCredentials).toHaveBeenCalledWith();
+    expect(refreshIfCurrent).toHaveBeenCalledOnce();
+    expect(refreshIfCurrent).toHaveBeenCalledWith({
+      accessToken: 'old-token',
+      accountId: 'account-id',
+    });
     expect(upstreamFetch).toHaveBeenCalledTimes(2);
     expect(new Headers(upstreamFetch.mock.calls[0]?.[1]?.headers).get('authorization')).toBe(
       'Bearer old-token',
@@ -214,7 +322,8 @@ describe('Codex Responses transport failures', () => {
     expect(String(error)).not.toContain('upstream-secret-token');
     expect(String(error)).not.toContain('account-id');
     expect(upstreamFetch).toHaveBeenCalledTimes(status === 401 ? 2 : 1);
-    expect(tokenProvider.getValidCredentials).toHaveBeenCalledTimes(status === 401 ? 2 : 1);
+    expect(tokenProvider.getValidCredentials).toHaveBeenCalledTimes(1);
+    expect(tokenProvider.refreshIfCurrent).toHaveBeenCalledTimes(status === 401 ? 1 : 0);
   });
 
   it('maps network failures without logging credentials', async () => {

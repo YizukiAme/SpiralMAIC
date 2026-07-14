@@ -40,7 +40,15 @@ function createTokenProvider() {
       accessToken: 'access-secret',
       accountId: 'account-secret',
     })),
-  } satisfies CodexTokenProvider;
+    refreshIfCurrent: vi.fn(
+      async (expected: { accessToken: string; accountId: string }) => expected,
+    ),
+  } satisfies CodexTokenProvider & {
+    refreshIfCurrent(expected: {
+      accessToken: string;
+      accountId: string;
+    }): Promise<{ accessToken: string; accountId: string }>;
+  };
 }
 
 function modelResponse(
@@ -245,12 +253,20 @@ describe('Codex models transport boundary', () => {
 
   it('force-refreshes credentials and replays exactly once after a 401', async () => {
     const tokenProvider = {
-      getValidCredentials: vi.fn(async (options?: { forceRefresh?: boolean }) =>
-        options?.forceRefresh
-          ? { accessToken: 'fresh-access', accountId: 'fresh-account' }
-          : { accessToken: 'old-access', accountId: 'old-account' },
-      ),
-    } satisfies CodexTokenProvider;
+      getValidCredentials: vi.fn(async () => ({
+        accessToken: 'old-access',
+        accountId: 'account-id',
+      })),
+      refreshIfCurrent: vi.fn(async () => ({
+        accessToken: 'fresh-access',
+        accountId: 'account-id',
+      })),
+    } satisfies CodexTokenProvider & {
+      refreshIfCurrent(expected: {
+        accessToken: string;
+        accountId: string;
+      }): Promise<{ accessToken: string; accountId: string }>;
+    };
     const upstreamFetch = vi
       .fn()
       .mockResolvedValueOnce(new Response('first-sensitive-body', { status: 401 }))
@@ -259,8 +275,13 @@ describe('Codex models transport boundary', () => {
 
     await expect(transport(CODEX_MODELS_ENDPOINT)).resolves.toBeInstanceOf(Response);
 
-    expect(tokenProvider.getValidCredentials).toHaveBeenNthCalledWith(1);
-    expect(tokenProvider.getValidCredentials).toHaveBeenNthCalledWith(2, { forceRefresh: true });
+    expect(tokenProvider.getValidCredentials).toHaveBeenCalledTimes(1);
+    expect(tokenProvider.getValidCredentials).toHaveBeenCalledWith();
+    expect(tokenProvider.refreshIfCurrent).toHaveBeenCalledOnce();
+    expect(tokenProvider.refreshIfCurrent).toHaveBeenCalledWith({
+      accessToken: 'old-access',
+      accountId: 'account-id',
+    });
     expect(upstreamFetch).toHaveBeenCalledTimes(2);
     expect(new Headers(upstreamFetch.mock.calls[0][1]?.headers).get('authorization')).toBe(
       'Bearer old-access',
@@ -272,11 +293,20 @@ describe('Codex models transport boundary', () => {
 
   it('does not retry a second 401 or expose response and refresh failures', async () => {
     const tokenProvider = {
-      getValidCredentials: vi
-        .fn()
-        .mockResolvedValueOnce({ accessToken: 'old-access', accountId: 'old-account' })
-        .mockResolvedValueOnce({ accessToken: 'fresh-access', accountId: 'fresh-account' }),
-    } satisfies CodexTokenProvider;
+      getValidCredentials: vi.fn(async () => ({
+        accessToken: 'old-access',
+        accountId: 'account-id',
+      })),
+      refreshIfCurrent: vi.fn(async () => ({
+        accessToken: 'fresh-access',
+        accountId: 'account-id',
+      })),
+    } satisfies CodexTokenProvider & {
+      refreshIfCurrent(expected: {
+        accessToken: string;
+        accountId: string;
+      }): Promise<{ accessToken: string; accountId: string }>;
+    };
     const upstreamFetch = vi
       .fn()
       .mockResolvedValueOnce(new Response('first-sensitive-body', { status: 401 }))
@@ -288,16 +318,21 @@ describe('Codex models transport boundary', () => {
     expect(error).toMatchObject({ code: 'AUTH_REQUIRED', upstreamStatus: 401 });
     expect(String(error)).not.toContain('sensitive-body');
     expect(JSON.stringify(error)).not.toContain('sensitive-body');
-    expect(tokenProvider.getValidCredentials).toHaveBeenCalledTimes(2);
+    expect(tokenProvider.getValidCredentials).toHaveBeenCalledTimes(1);
+    expect(tokenProvider.refreshIfCurrent).toHaveBeenCalledTimes(1);
     expect(upstreamFetch).toHaveBeenCalledTimes(2);
 
+    const refreshFailureTokenProvider = {
+      getValidCredentials: vi.fn(async () => ({
+        accessToken: 'old-access',
+        accountId: 'account-id',
+      })),
+      refreshIfCurrent: vi.fn(async () => {
+        throw new Error('refresh-secret-cause');
+      }),
+    };
     const refreshFailure = createCodexModelsTransport({
-      tokenProvider: {
-        getValidCredentials: vi
-          .fn()
-          .mockResolvedValueOnce({ accessToken: 'old-access', accountId: 'old-account' })
-          .mockRejectedValueOnce(new Error('refresh-secret-cause')),
-      },
+      tokenProvider: refreshFailureTokenProvider,
       upstreamFetch: vi.fn(async () => new Response('body-secret', { status: 401 })),
     });
     const refreshError = await refreshFailure(CODEX_MODELS_ENDPOINT).catch((caught) => caught);
@@ -611,6 +646,69 @@ describe('Codex model discovery cache', () => {
     expect(tokenExchangeFetch).toHaveBeenCalledTimes(1);
     expect(upstreamFetch).toHaveBeenCalledTimes(4);
     expect(vault.current?.accountId).toBe('same-account');
+  });
+
+  it('never lets an invalidated account flight force-refresh the replacement account', async () => {
+    const accountA: CodexOAuthCredentials = {
+      version: 1,
+      accessToken: 'account-a-access',
+      refreshToken: 'account-a-refresh',
+      expiresAt: NOW + 3_600_000,
+      accountId: 'account-a',
+      updatedAt: NOW - 1,
+    };
+    const vault = new MemoryVault(accountA);
+    const tokenExchangeFetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            access_token: unsignedJwt({ chatgpt_account_id: 'account-b' }),
+            refresh_token: 'account-b-rotated-by-stale-flight',
+            expires_in: 3600,
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    const tokenProvider = new ManagedCodexTokenProvider({
+      vault,
+      clock: { now: () => NOW },
+      tokenExchangeFetch,
+    });
+    const staleAccountResponse = deferred<Response>();
+    const upstreamFetch = vi
+      .fn()
+      .mockImplementationOnce(() => staleAccountResponse.promise)
+      .mockImplementation(async () =>
+        modelResponse([{ slug: 'gpt-account-b', visibility: 'list' }]),
+      );
+    const discovery = new CodexModelDiscovery({
+      tokenProvider,
+      credentialGeneration: () => getCodexCredentialGeneration(vault),
+      upstreamFetch,
+    });
+
+    const accountARequest = discovery.getModels();
+    await vi.waitFor(() => expect(upstreamFetch).toHaveBeenCalledTimes(1));
+    const accountB: CodexOAuthCredentials = {
+      version: 1,
+      accessToken: 'account-b-access',
+      refreshToken: 'account-b-refresh',
+      expiresAt: NOW + 3_600_000,
+      accountId: 'account-b',
+      updatedAt: NOW + 1,
+    };
+    await vault.save(accountB);
+    const accountBGeneration = await getCodexCredentialGeneration(vault);
+    discovery.invalidate();
+    staleAccountResponse.resolve(new Response('stale-account-unauthorized', { status: 401 }));
+
+    await expect(accountARequest).resolves.toEqual([]);
+    expect(tokenExchangeFetch).not.toHaveBeenCalled();
+    expect(vault.current).toEqual(accountB);
+    expect(await getCodexCredentialGeneration(vault)).toBe(accountBGeneration);
+
+    await expect(discovery.getModels()).resolves.toMatchObject([{ id: 'gpt-account-b' }]);
+    expect(upstreamFetch).toHaveBeenCalledTimes(2);
   });
 
   it('never returns fallback or stale models after credentials disappear', async () => {

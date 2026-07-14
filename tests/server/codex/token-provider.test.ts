@@ -274,6 +274,86 @@ describe('ManagedCodexTokenProvider', () => {
     expect(body.get('refresh_token')).toBe('current-refresh');
   });
 
+  it('refuses a conditional refresh unless the exact request credentials remain current', async () => {
+    const newerLogin = credentials({
+      accessToken: 'account-a-new-access',
+      refreshToken: 'account-a-new-refresh',
+      accountId: 'account-a',
+    });
+    const vault = new MemoryVault(newerLogin);
+    const tokenExchangeFetch = vi.fn();
+    const provider = createProvider(vault, tokenExchangeFetch);
+
+    await expect(
+      provider.refreshIfCurrent({ accountId: 'account-a', accessToken: 'account-a-access' }),
+    ).rejects.toMatchObject({
+      code: CODEX_OAUTH_ERROR_CODES.SIGNED_OUT,
+      retryable: false,
+    });
+    expect(tokenExchangeFetch).not.toHaveBeenCalled();
+    expect(vault.current).toEqual(newerLogin);
+  });
+
+  it('does not persist a conditional refresh response for another account', async () => {
+    const accountA = credentials({
+      accessToken: 'account-a-access',
+      refreshToken: 'account-a-refresh',
+      accountId: 'account-a',
+    });
+    const vault = new MemoryVault(accountA);
+    const tokenExchangeFetch = vi.fn().mockResolvedValue(
+      jsonResponse({
+        access_token: unsignedJwt({ chatgpt_account_id: 'account-b' }),
+        refresh_token: 'account-b-refresh',
+        expires_in: 900,
+      }),
+    );
+    const provider = createProvider(vault, tokenExchangeFetch);
+
+    await expect(
+      provider.refreshIfCurrent({
+        accountId: accountA.accountId,
+        accessToken: accountA.accessToken,
+      }),
+    ).rejects.toMatchObject({
+      code: CODEX_OAUTH_ERROR_CODES.SIGNED_OUT,
+      retryable: false,
+    });
+    expect(tokenExchangeFetch).toHaveBeenCalledTimes(1);
+    expect(vault.saved).toEqual([]);
+    expect(vault.current).toEqual(accountA);
+  });
+
+  it('does not force an existing operation until its account identity is known', async () => {
+    const accountB = credentials({
+      accessToken: 'account-b-access',
+      refreshToken: 'account-b-refresh',
+      accountId: 'account-b',
+    });
+    const pendingLoad = deferred<CodexOAuthCredentials | null>();
+    const vault = new MemoryVault(accountB);
+    vault.load = vi.fn(() => pendingLoad.promise);
+    const tokenExchangeFetch = vi.fn();
+    const provider = createProvider(vault, tokenExchangeFetch);
+
+    const accountBOperation = provider.getValidCredentials();
+    await vi.waitFor(() => expect(vault.load).toHaveBeenCalledTimes(1));
+    const staleAccountAForce = provider.refreshIfCurrent({
+      accountId: 'account-a',
+      accessToken: 'account-a-access',
+    });
+    pendingLoad.resolve(accountB);
+
+    await expect(accountBOperation).resolves.toEqual({
+      accessToken: accountB.accessToken,
+      accountId: accountB.accountId,
+    });
+    await expect(staleAccountAForce).rejects.toMatchObject({
+      code: CODEX_OAUTH_ERROR_CODES.SIGNED_OUT,
+    });
+    expect(tokenExchangeFetch).not.toHaveBeenCalled();
+  });
+
   it('coalesces concurrent refreshes into one in-process request', async () => {
     const vault = new MemoryVault(credentials({ expiresAt: NOW }));
     const response = deferred<Response>();

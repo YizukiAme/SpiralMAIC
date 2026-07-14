@@ -4,7 +4,7 @@ import packageMetadata from '../../../package.json';
 
 import { CODEX_RESPONSES_ENDPOINT } from '@/lib/ai/codex-model';
 
-import type { CodexTokenProvider } from './token-provider';
+import { refreshCodexCredentialsIfCurrent, type CodexTokenProvider } from './token-provider';
 
 export { CODEX_RESPONSES_ENDPOINT } from '@/lib/ai/codex-model';
 
@@ -184,10 +184,27 @@ export function createCodexResponsesTransport(
     }
 
     const body = normalizeBody(init?.body);
-    const request = async (forceRefresh: boolean): Promise<Response> => {
-      const credentials = forceRefresh
-        ? await options.tokenProvider.getValidCredentials({ forceRefresh: true })
-        : await options.tokenProvider.getValidCredentials();
+    let originalCredentials: { accessToken: string; accountId: string } | null = null;
+    const request = async (
+      forceRefresh: boolean,
+      expected?: { accessToken: string; accountId: string },
+    ): Promise<Response> => {
+      let credentials: { accessToken: string; accountId: string };
+      try {
+        if (forceRefresh) {
+          const scopedExpected = expected ?? originalCredentials;
+          if (!scopedExpected) throw errorForStatus(401);
+          credentials = await refreshCodexCredentialsIfCurrent(
+            options.tokenProvider,
+            scopedExpected,
+          );
+        } else {
+          credentials = await options.tokenProvider.getValidCredentials();
+          originalCredentials = credentials;
+        }
+      } catch {
+        throw errorForStatus(401);
+      }
       try {
         return await upstreamFetch(CODEX_RESPONSES_ENDPOINT, {
           ...init,
@@ -203,7 +220,7 @@ export function createCodexResponsesTransport(
     let response = await request(false);
     if (response.status === 401) {
       await cancelResponseBody(response);
-      response = await request(true);
+      response = await request(true, originalCredentials ?? undefined);
     }
 
     if (!response.ok) {
