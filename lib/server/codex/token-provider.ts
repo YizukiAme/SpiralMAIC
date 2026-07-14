@@ -80,6 +80,42 @@ interface ActiveCredentialOperation {
   promise: Promise<ValidCredentials>;
 }
 
+interface SharedCredentialState {
+  generation: number;
+  operationInFlight: ActiveCredentialOperation | null;
+  logoutInFlight: Promise<void> | null;
+}
+
+const SHARED_STATE_REGISTRY_KEY = Symbol.for('openmaic.codex.oauth.shared-credential-state.v1');
+const coordinatorHost = globalThis as unknown as Record<PropertyKey, unknown>;
+const existingSharedStateRegistry = coordinatorHost[SHARED_STATE_REGISTRY_KEY];
+const sharedStateByVault =
+  existingSharedStateRegistry instanceof WeakMap
+    ? (existingSharedStateRegistry as WeakMap<CodexCredentialVault, SharedCredentialState>)
+    : new WeakMap<CodexCredentialVault, SharedCredentialState>();
+
+if (!(existingSharedStateRegistry instanceof WeakMap)) {
+  Object.defineProperty(coordinatorHost, SHARED_STATE_REGISTRY_KEY, {
+    value: sharedStateByVault,
+    enumerable: false,
+    configurable: false,
+    writable: false,
+  });
+}
+
+function getSharedCredentialState(vault: CodexCredentialVault): SharedCredentialState {
+  const existing = sharedStateByVault.get(vault);
+  if (existing) return existing;
+
+  const state: SharedCredentialState = {
+    generation: 0,
+    operationInFlight: null,
+    logoutInFlight: null,
+  };
+  sharedStateByVault.set(vault, state);
+  return state;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -119,24 +155,23 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
   private readonly vault: CodexCredentialVault;
   private readonly tokenExchangeFetch: TokenExchangeFetch;
   private readonly clock: CodexClock;
-  private generation = 0;
-  private operationInFlight: ActiveCredentialOperation | null = null;
-  private logoutInFlight: Promise<void> | null = null;
+  private readonly sharedState: SharedCredentialState;
 
   constructor(options: ManagedCodexTokenProviderOptions) {
     this.vault = options.vault;
     this.tokenExchangeFetch = options.tokenExchangeFetch ?? globalThis.fetch.bind(globalThis);
     this.clock = options.clock ?? { now: Date.now };
+    this.sharedState = getSharedCredentialState(options.vault);
   }
 
   getValidCredentials(options?: { forceRefresh?: boolean }): Promise<ValidCredentials> {
-    if (this.logoutInFlight) {
-      return this.logoutInFlight.then(() => {
+    if (this.sharedState.logoutInFlight) {
+      return this.sharedState.logoutInFlight.then(() => {
         throw signedOutError();
       });
     }
 
-    const existing = this.operationInFlight;
+    const existing = this.sharedState.operationInFlight;
     if (existing) {
       if (options?.forceRefresh === true) existing.state.forceRequested = true;
       return existing.promise.then((result) => {
@@ -145,7 +180,7 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
       });
     }
 
-    const requestGeneration = this.generation;
+    const requestGeneration = this.sharedState.generation;
     const state: CredentialOperationState = {
       forceRequested: options?.forceRefresh === true,
       refreshed: false,
@@ -154,31 +189,35 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
       state,
       promise: this.resolveCredentials(state, requestGeneration),
     };
-    this.operationInFlight = operation;
+    this.sharedState.operationInFlight = operation;
     void operation.promise.then(
       () => {
-        if (this.operationInFlight === operation) this.operationInFlight = null;
+        if (this.sharedState.operationInFlight === operation) {
+          this.sharedState.operationInFlight = null;
+        }
       },
       () => {
-        if (this.operationInFlight === operation) this.operationInFlight = null;
+        if (this.sharedState.operationInFlight === operation) {
+          this.sharedState.operationInFlight = null;
+        }
       },
     );
     return operation.promise;
   }
 
   logout(): Promise<void> {
-    if (this.logoutInFlight) return this.logoutInFlight;
+    if (this.sharedState.logoutInFlight) return this.sharedState.logoutInFlight;
 
-    this.generation += 1;
-    const staleOperation = this.operationInFlight?.promise ?? null;
+    this.sharedState.generation += 1;
+    const staleOperation = this.sharedState.operationInFlight?.promise ?? null;
     const logout = this.finishLogout(staleOperation);
-    this.logoutInFlight = logout;
+    this.sharedState.logoutInFlight = logout;
     void logout.then(
       () => {
-        if (this.logoutInFlight === logout) this.logoutInFlight = null;
+        if (this.sharedState.logoutInFlight === logout) this.sharedState.logoutInFlight = null;
       },
       () => {
-        if (this.logoutInFlight === logout) this.logoutInFlight = null;
+        if (this.sharedState.logoutInFlight === logout) this.sharedState.logoutInFlight = null;
       },
     );
     return logout;
@@ -196,7 +235,7 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
       throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.STORAGE_ERROR, false);
     }
 
-    if (requestGeneration !== this.generation) throw signedOutError();
+    if (requestGeneration !== this.sharedState.generation) throw signedOutError();
     if (!credentials) {
       throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.CREDENTIALS_MISSING, false);
     }
@@ -240,11 +279,11 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
         body,
       });
     } catch {
-      if (refreshGeneration !== this.generation) throw signedOutError();
+      if (refreshGeneration !== this.sharedState.generation) throw signedOutError();
       throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.NETWORK_ERROR, true);
     }
 
-    if (refreshGeneration !== this.generation) throw signedOutError();
+    if (refreshGeneration !== this.sharedState.generation) throw signedOutError();
 
     let payload: unknown = null;
     try {
@@ -253,7 +292,7 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
       // Invalid bodies are classified below without retaining or exposing them.
     }
 
-    if (refreshGeneration !== this.generation) throw signedOutError();
+    if (refreshGeneration !== this.sharedState.generation) throw signedOutError();
 
     if (!response.ok) {
       if (response.status >= 500) {
@@ -274,7 +313,7 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
     }
 
     const parsed = this.parseTokenResponse(payload, credentials);
-    if (refreshGeneration !== this.generation) throw signedOutError();
+    if (refreshGeneration !== this.sharedState.generation) throw signedOutError();
 
     const nextCredentials: CodexOAuthCredentials = {
       version: 1,
@@ -292,7 +331,7 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
       throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.STORAGE_ERROR, false);
     }
 
-    if (refreshGeneration !== this.generation) throw signedOutError();
+    if (refreshGeneration !== this.sharedState.generation) throw signedOutError();
 
     return { accessToken: nextCredentials.accessToken, accountId: nextCredentials.accountId };
   }

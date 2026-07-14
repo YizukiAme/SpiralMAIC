@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -136,6 +136,24 @@ describe('getCodexOAuthAvailability', () => {
       reason: CODEX_OAUTH_AVAILABILITY_REASONS.DATA_DIR_UNWRITABLE,
       methods: [],
     });
+  });
+
+  it('rejects a symlinked auth directory without touching its external target', async () => {
+    const dataDir = await makeTemporaryPath();
+    const externalDir = await makeTemporaryPath();
+    const sentinelPath = join(externalDir, 'sentinel.txt');
+    await writeFile(sentinelPath, 'unchanged');
+    await symlink(externalDir, join(dataDir, 'auth'));
+
+    const result = await getCodexOAuthAvailability({ env: createEnv(), dataDir });
+
+    expect(result).toEqual({
+      available: false,
+      reason: CODEX_OAUTH_AVAILABILITY_REASONS.DATA_DIR_UNWRITABLE,
+      methods: [],
+    });
+    expect(await readFile(sentinelPath, 'utf8')).toBe('unchanged');
+    expect(await readdir(externalDir)).toEqual(['sentinel.txt']);
   });
 
   it('requires enough directory permissions to create a private probe file', async () => {

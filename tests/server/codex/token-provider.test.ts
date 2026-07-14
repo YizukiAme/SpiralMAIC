@@ -271,6 +271,86 @@ describe('ManagedCodexTokenProvider', () => {
     expect(tokenExchangeFetch).toHaveBeenCalledTimes(1);
   });
 
+  it('shares one refresh flight across provider instances using the same vault', async () => {
+    const initial = credentials({ expiresAt: NOW });
+    const vault = new MemoryVault(initial);
+    vault.load = vi.fn(vault.load.bind(vault));
+    const tokenExchangeFetch = vi.fn(() =>
+      Promise.resolve(
+        jsonResponse({
+          access_token: unsignedJwt({ chatgpt_account_id: 'refreshed-account' }),
+          expires_in: 300,
+        }),
+      ),
+    );
+    const providerA = createProvider(vault, tokenExchangeFetch);
+    const providerB = createProvider(vault, tokenExchangeFetch);
+
+    const [first, second] = await Promise.all([
+      providerA.getValidCredentials(),
+      providerB.getValidCredentials({ forceRefresh: true }),
+    ]);
+
+    expect(first).toEqual(second);
+    expect(vault.load).toHaveBeenCalledTimes(1);
+    expect(tokenExchangeFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not share coordination between different vault instances', async () => {
+    const vaultA = new MemoryVault(credentials({ expiresAt: NOW }));
+    const vaultB = new MemoryVault(credentials({ expiresAt: NOW }));
+    const fetchA = vi.fn().mockResolvedValue(
+      jsonResponse({
+        access_token: unsignedJwt({ chatgpt_account_id: 'account-a' }),
+        expires_in: 300,
+      }),
+    );
+    const fetchB = vi.fn().mockResolvedValue(
+      jsonResponse({
+        access_token: unsignedJwt({ chatgpt_account_id: 'account-b' }),
+        expires_in: 300,
+      }),
+    );
+
+    await Promise.all([
+      createProvider(vaultA, fetchA).getValidCredentials(),
+      createProvider(vaultB, fetchB).getValidCredentials(),
+    ]);
+
+    expect(fetchA).toHaveBeenCalledTimes(1);
+    expect(fetchB).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves the vault coordinator across a development module reload', async () => {
+    const vault = new MemoryVault(credentials({ expiresAt: NOW }));
+    const response = deferred<Response>();
+    const tokenExchangeFetch = vi.fn(() => response.promise);
+    const providerA = createProvider(vault, tokenExchangeFetch);
+
+    const first = providerA.getValidCredentials();
+    await vi.waitFor(() => expect(tokenExchangeFetch).toHaveBeenCalledTimes(1));
+    vi.resetModules();
+    const { ManagedCodexTokenProvider: ReloadedTokenProvider } =
+      await import('@/lib/server/codex/token-provider');
+    const providerB = new ReloadedTokenProvider({
+      vault,
+      tokenExchangeFetch,
+      clock: { now: () => NOW },
+    });
+    const second = providerB.getValidCredentials({ forceRefresh: true });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(tokenExchangeFetch).toHaveBeenCalledTimes(1);
+    response.resolve(
+      jsonResponse({
+        access_token: unsignedJwt({ chatgpt_account_id: 'refreshed-account' }),
+        expires_in: 300,
+      }),
+    );
+    await expect(Promise.all([first, second])).resolves.toHaveLength(2);
+  });
+
   it('clears credentials on invalid_grant and exposes only a safe error classification', async () => {
     const vault = new MemoryVault(credentials());
     const tokenExchangeFetch = vi.fn().mockResolvedValue(
@@ -410,6 +490,43 @@ describe('ManagedCodexTokenProvider', () => {
     await vault.save(reloggedCredentials);
     await Promise.resolve();
     expect(vault.current).toEqual(reloggedCredentials);
+  });
+
+  it('shares logout generation with another provider that is finishing a late save', async () => {
+    const initial = credentials({ expiresAt: NOW });
+    const saveStarted = deferred<void>();
+    const releaseSave = deferred<void>();
+    const vault = new MemoryVault(initial);
+    vault.save = vi.fn(async (next: CodexOAuthCredentials) => {
+      saveStarted.resolve();
+      await releaseSave.promise;
+      vault.saved.push(next);
+      vault.current = next;
+    });
+    const tokenExchangeFetch = vi.fn().mockResolvedValue(
+      jsonResponse({
+        access_token: unsignedJwt({ chatgpt_account_id: 'refreshed-account' }),
+        expires_in: 300,
+      }),
+    );
+    const providerA = createProvider(vault, tokenExchangeFetch);
+    const providerB = createProvider(vault, tokenExchangeFetch);
+
+    const refresh = providerB.getValidCredentials();
+    await saveStarted.promise;
+    const logoutSettled = vi.fn();
+    const logout = providerA.logout().then(logoutSettled);
+    await vi.waitFor(() => expect(vault.clearCount).toBe(1));
+    await Promise.resolve();
+    expect(logoutSettled).not.toHaveBeenCalled();
+    releaseSave.resolve();
+
+    await expect(refresh).rejects.toMatchObject({
+      code: CODEX_OAUTH_ERROR_CODES.SIGNED_OUT,
+      retryable: false,
+    });
+    await logout;
+    expect(vault.current).toBeNull();
   });
 
   it('classifies missing credentials without attempting a token exchange', async () => {

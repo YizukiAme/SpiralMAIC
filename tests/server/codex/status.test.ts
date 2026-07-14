@@ -47,4 +47,31 @@ describe('toCodexOAuthPublicStatus', () => {
       authenticated: false,
     });
   });
+
+  it('uses a runtime allowlist when inputs carry unexpected sensitive fields', () => {
+    const widenedAvailability = {
+      ...availability,
+      accessToken: 'availability-access-secret',
+      accountId: 'availability-account-secret',
+      rawError: 'upstream-body-secret',
+    } as CodexOAuthAvailability;
+    const widenedCredentials = {
+      ...credentials,
+      idToken: 'id-token-secret',
+      rawError: 'credential-error-secret',
+    } as CodexOAuthCredentials;
+
+    const status = toCodexOAuthPublicStatus(widenedAvailability, widenedCredentials);
+
+    expect(status).toEqual({
+      available: true,
+      reason: CODEX_OAUTH_AVAILABILITY_REASONS.AVAILABLE,
+      methods: ['device'],
+      authenticated: true,
+      email: 'user@example.com',
+    });
+    expect(JSON.stringify(status)).not.toMatch(
+      /availability-access-secret|availability-account-secret|upstream-body-secret|id-token-secret|credential-error-secret/,
+    );
+  });
 });
