@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   CODEX_CREDENTIAL_FILE_NAME,
   FileCodexCredentialVault,
+  withCodexCredentialVaultMutation,
   type CodexOAuthCredentials,
 } from '@/lib/server/codex/vault';
 
@@ -100,6 +101,36 @@ describe('FileCodexCredentialVault', () => {
     ).toMatchObject({
       accessToken: 'rotated-access',
     });
+  });
+
+  it('serializes transactions across separate FileVault objects for the same path', async () => {
+    const baseDir = await makeBaseDir();
+    const firstVault = new FileCodexCredentialVault({ baseDir });
+    const secondVault = new FileCodexCredentialVault({ baseDir });
+    let releaseFirst!: () => void;
+    const firstMayFinish = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let firstEntered!: () => void;
+    const firstDidEnter = new Promise<void>((resolve) => {
+      firstEntered = resolve;
+    });
+    let secondHasEntered = false;
+
+    const first = withCodexCredentialVaultMutation(firstVault, async () => {
+      firstEntered();
+      await firstMayFinish;
+    });
+    await firstDidEnter;
+    const second = withCodexCredentialVaultMutation(secondVault, async () => {
+      secondHasEntered = true;
+    });
+    await Promise.resolve();
+
+    expect(secondHasEntered).toBe(false);
+    releaseFirst();
+    await Promise.all([first, second]);
+    expect(secondHasEntered).toBe(true);
   });
 
   it('repairs overly broad existing permissions before returning credentials', async () => {

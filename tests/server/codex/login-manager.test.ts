@@ -391,6 +391,72 @@ describe('CodexLoginManager browser flow', () => {
     await expect(manager.poll()).resolves.toBeNull();
   });
 
+  it('does not roll a concurrent token refresh back to the pre-login snapshot', async () => {
+    const previous = {
+      version: 1,
+      accessToken: unsignedJwt({ chatgpt_account_id: 'shared-account' }),
+      refreshToken: 'shared-previous-refresh',
+      expiresAt: NOW + 600_000,
+      accountId: 'shared-account',
+      updatedAt: NOW,
+    } satisfies CodexOAuthCredentials;
+    const vault = new DeferredSaveVault();
+    vault.current = previous;
+    const randomValues = [Buffer.alloc(32, 0x85), Buffer.alloc(32, 0x86)];
+    const loginManager = new CodexLoginManager({
+      vault,
+      clock: { now: () => NOW },
+      randomBytes: () => randomValues.shift()!,
+      oauthFetch: async () =>
+        jsonResponse({
+          access_token: unsignedJwt({ chatgpt_account_id: 'cancelled-login-account' }),
+          refresh_token: 'cancelled-login-refresh',
+          expires_in: 300,
+        }),
+    });
+    managers.push(loginManager);
+    const refreshStarted = deferred<void>();
+    const rotatedAccess = unsignedJwt({ chatgpt_account_id: 'shared-account' });
+    const tokenProvider = new ManagedCodexTokenProvider({
+      vault,
+      clock: { now: () => NOW },
+      tokenExchangeFetch: async () => {
+        refreshStarted.resolve();
+        return jsonResponse({
+          access_token: rotatedAccess,
+          refresh_token: 'shared-rotated-refresh',
+          expires_in: 900,
+        });
+      },
+    });
+
+    const started = await loginManager.begin('browser');
+    const callbackUrl = new URL(CODEX_OAUTH_BROWSER_REDIRECT_URI);
+    callbackUrl.hostname = '127.0.0.1';
+    callbackUrl.searchParams.set('code', 'cancelled-shared-write');
+    callbackUrl.searchParams.set(
+      'state',
+      new URL(started.authorizationUrl!).searchParams.get('state')!,
+    );
+    const callback = fetch(callbackUrl).catch(() => null);
+    await vault.saveStarted.promise;
+
+    const cancelled = loginManager.cancel();
+    const refresh = tokenProvider.getValidCredentials({ forceRefresh: true });
+    await Promise.race([
+      refreshStarted.promise,
+      new Promise<void>((resolve) => setTimeout(resolve, 20)),
+    ]);
+    vault.releaseFirstSave.resolve();
+    await Promise.all([cancelled, refresh, callback]);
+
+    expect(vault.current).toMatchObject({
+      accessToken: rotatedAccess,
+      refreshToken: 'shared-rotated-refresh',
+      accountId: 'shared-account',
+    });
+  });
+
   it('replaces an in-flight browser attempt before its exchange resolves', async () => {
     const vault = new MemoryVault();
     const firstExchange = deferred<Response>();

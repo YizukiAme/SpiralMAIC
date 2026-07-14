@@ -1,4 +1,5 @@
 import { extractCodexJwtIdentity, parseJwtPayload } from './jwt';
+import { codexCredentialsEqual, withCodexCredentialVaultMutation } from './vault';
 import type { CodexCredentialVault, CodexOAuthCredentials } from './vault';
 
 export const CODEX_OAUTH_TOKEN_ENDPOINT = 'https://auth.openai.com/oauth/token';
@@ -253,7 +254,7 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
     let credentials: CodexOAuthCredentials | null;
 
     try {
-      credentials = await this.vault.load();
+      credentials = await withCodexCredentialVaultMutation(this.vault, () => this.vault.load());
     } catch {
       throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.STORAGE_ERROR, false);
     }
@@ -274,11 +275,13 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
   }
 
   private async finishLogout(staleOperation: Promise<ValidCredentials> | null): Promise<void> {
-    await this.vault.clear().catch(() => undefined);
+    await withCodexCredentialVaultMutation(this.vault, () => this.vault.clear()).catch(
+      () => undefined,
+    );
     await staleOperation?.catch(() => undefined);
 
     try {
-      await this.vault.clear();
+      await withCodexCredentialVaultMutation(this.vault, () => this.vault.clear());
     } catch {
       throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.STORAGE_ERROR, false);
     }
@@ -324,10 +327,24 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
 
       const errorCode = isRecord(payload) ? nonEmptyString(payload.error) : undefined;
       if (errorCode === 'invalid_grant') {
+        let replacement: CodexOAuthCredentials | null;
         try {
-          await this.vault.clear();
-        } catch {
+          replacement = await withCodexCredentialVaultMutation(this.vault, async () => {
+            if (refreshGeneration !== this.sharedState.generation) throw signedOutError();
+            const current = await this.vault.load();
+            if (!codexCredentialsEqual(current, credentials)) return current;
+            await this.vault.clear();
+            return null;
+          });
+        } catch (error) {
+          if (error instanceof CodexOAuthError) throw error;
           throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.STORAGE_ERROR, false);
+        }
+        if (replacement) {
+          return {
+            accessToken: replacement.accessToken,
+            accountId: replacement.accountId,
+          };
         }
         throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.INVALID_GRANT, false);
       }
@@ -348,15 +365,32 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
       updatedAt: this.clock.now(),
     };
 
+    let committedCredentials: CodexOAuthCredentials;
     try {
-      await this.vault.save(nextCredentials);
-    } catch {
+      committedCredentials = await withCodexCredentialVaultMutation(this.vault, async () => {
+        if (refreshGeneration !== this.sharedState.generation) throw signedOutError();
+        const current = await this.vault.load();
+        if (!codexCredentialsEqual(current, credentials)) {
+          if (!current) {
+            throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.CREDENTIALS_MISSING, false);
+          }
+          return current;
+        }
+        await this.vault.save(nextCredentials);
+        if (refreshGeneration !== this.sharedState.generation) throw signedOutError();
+        return nextCredentials;
+      });
+    } catch (error) {
+      if (error instanceof CodexOAuthError) throw error;
       throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.STORAGE_ERROR, false);
     }
 
     if (refreshGeneration !== this.sharedState.generation) throw signedOutError();
 
-    return { accessToken: nextCredentials.accessToken, accountId: nextCredentials.accountId };
+    return {
+      accessToken: committedCredentials.accessToken,
+      accountId: committedCredentials.accountId,
+    };
   }
 
   private parseTokenResponse(payload: unknown, credentials: CodexOAuthCredentials): TokenResponse {

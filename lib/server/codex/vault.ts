@@ -24,6 +24,100 @@ export interface CodexCredentialVault {
   clear(): Promise<void>;
 }
 
+export function codexCredentialsEqual(
+  left: CodexOAuthCredentials | null,
+  right: CodexOAuthCredentials | null,
+): boolean {
+  if (left === null || right === null) return left === right;
+  return (
+    left.version === right.version &&
+    left.accessToken === right.accessToken &&
+    left.refreshToken === right.refreshToken &&
+    left.expiresAt === right.expiresAt &&
+    left.accountId === right.accountId &&
+    left.email === right.email &&
+    left.updatedAt === right.updatedAt
+  );
+}
+
+interface CodexVaultMutationQueue {
+  tail: Promise<void>;
+}
+
+interface CodexVaultMutationRegistry {
+  byCoordinationKey: Map<string, CodexVaultMutationQueue>;
+  byVault: WeakMap<CodexCredentialVault, CodexVaultMutationQueue>;
+}
+
+const MUTATION_REGISTRY_KEY = Symbol.for('openmaic.codex.oauth.vault-mutations.v1');
+const mutationRegistryHost = globalThis as unknown as Record<PropertyKey, unknown>;
+
+function isMutationRegistry(value: unknown): value is CodexVaultMutationRegistry {
+  if (!value || typeof value !== 'object') return false;
+  const registry = value as Partial<CodexVaultMutationRegistry>;
+  return registry.byCoordinationKey instanceof Map && registry.byVault instanceof WeakMap;
+}
+
+const existingMutationRegistry = mutationRegistryHost[MUTATION_REGISTRY_KEY];
+const mutationRegistry: CodexVaultMutationRegistry = isMutationRegistry(existingMutationRegistry)
+  ? existingMutationRegistry
+  : {
+      byCoordinationKey: new Map<string, CodexVaultMutationQueue>(),
+      byVault: new WeakMap<CodexCredentialVault, CodexVaultMutationQueue>(),
+    };
+
+if (!isMutationRegistry(existingMutationRegistry)) {
+  Object.defineProperty(mutationRegistryHost, MUTATION_REGISTRY_KEY, {
+    value: mutationRegistry,
+    enumerable: false,
+    configurable: false,
+    writable: false,
+  });
+}
+
+function getMutationQueue(vault: CodexCredentialVault): CodexVaultMutationQueue {
+  const coordinationKey = vault.coordinationKey;
+  if (typeof coordinationKey === 'string' && coordinationKey.length > 0) {
+    const existing = mutationRegistry.byCoordinationKey.get(coordinationKey);
+    if (existing) return existing;
+    const queue = { tail: Promise.resolve() };
+    mutationRegistry.byCoordinationKey.set(coordinationKey, queue);
+    return queue;
+  }
+
+  const existing = mutationRegistry.byVault.get(vault);
+  if (existing) return existing;
+  const queue = { tail: Promise.resolve() };
+  mutationRegistry.byVault.set(vault, queue);
+  return queue;
+}
+
+/**
+ * Serialize a complete credential read/modify/write transaction by logical
+ * vault identity. The registry survives dev HMR and also coordinates separate
+ * FileVault instances that point at the same credential path.
+ *
+ * Transactions must not call this helper recursively for the same vault.
+ */
+export async function withCodexCredentialVaultMutation<T>(
+  vault: CodexCredentialVault,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const queue = getMutationQueue(vault);
+  const previous = queue.tail;
+  let release!: () => void;
+  queue.tail = new Promise<void>((resolveQueue) => {
+    release = resolveQueue;
+  });
+
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+  }
+}
+
 interface FileCodexCredentialVaultOptions {
   /** Data directory. Defaults to `<cwd>/data`; the vault adds `auth/`. */
   baseDir?: string;
