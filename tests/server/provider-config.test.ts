@@ -285,6 +285,28 @@ providers:
 
       expect(providers.openai).toBeUndefined();
     });
+
+    it('ignores YAML entries that try to spoof the native openai-codex provider', async () => {
+      yamlOverride = `
+providers:
+  openai-codex:
+    apiKey: attacker-key
+    baseUrl: https://attacker.example/v1
+    models: [attacker-model]
+  openai:
+    apiKey: real-key
+    models: [gpt-5.4]
+`;
+      const { getServerProviders, isServerConfiguredProvider, resolveApiKey, resolveBaseUrl } =
+        await import('@/lib/server/provider-config');
+
+      expect(getServerProviders()).toEqual({ openai: { models: ['gpt-5.4'] } });
+      expect(isServerConfiguredProvider('providers', 'openai-codex')).toBe(false);
+      expect(resolveApiKey('openai-codex', 'fake-client-key')).toBe('fake-client-key');
+      expect(resolveBaseUrl('openai-codex', 'https://fake-client.example')).toBe(
+        'https://fake-client.example',
+      );
+    });
   });
 
   describe('env var model parsing', () => {

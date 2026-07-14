@@ -53,6 +53,7 @@ export async function DELETE(request: Request): Promise<Response> {
   try {
     await authRuntime.loginManager.cancel();
     await authRuntime.tokenProvider.logout();
+    authRuntime.modelDiscovery.invalidate();
     return codexJson({ connected: false });
   } catch {
     return codexRouteError('INTERNAL_ERROR', 500);

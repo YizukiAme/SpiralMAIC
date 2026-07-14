@@ -403,7 +403,8 @@ export function getCatalogThinkingCapability(
   providerId: string,
   modelId: string,
 ): ThinkingCapability | undefined {
-  const exact = THINKING_CAPABILITIES[getModelMetadataKey(providerId, modelId)];
+  const metadataProviderId = providerId === 'openai-codex' ? 'openai' : providerId;
+  const exact = THINKING_CAPABILITIES[getModelMetadataKey(metadataProviderId, modelId)];
   if (exact) return exact;
 
   if (providerId === 'lemonade') {

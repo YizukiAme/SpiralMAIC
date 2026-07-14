@@ -54,7 +54,9 @@ export async function PATCH(request: Request): Promise<Response> {
     return codexRouteError('UNAVAILABLE', 503, availability.reason);
   }
   try {
-    const attempt = await getCodexAuthRuntime().loginManager.poll();
+    const runtime = getCodexAuthRuntime();
+    const attempt = await runtime.loginManager.poll();
+    if (attempt?.status === 'complete') runtime.modelDiscovery.invalidate();
     return attempt ? codexJson(attempt) : codexRouteError('NO_ACTIVE_ATTEMPT', 404);
   } catch {
     return codexRouteError('INTERNAL_ERROR', 500);

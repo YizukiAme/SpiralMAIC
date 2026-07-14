@@ -60,4 +60,11 @@ describe('model metadata thinking capabilities', () => {
     expect(getCatalogThinkingCapability('siliconflow', 'deepseek-ai/DeepSeek-V3.2')).toBeDefined();
     expect(getCatalogThinkingCapability('lemonade', 'Gemma-4-26B-A4B-it-GGUF')).toBeDefined();
   });
+
+  it('reuses matching OpenAI metadata for native Codex model IDs', () => {
+    expect(getCatalogThinkingCapability('openai-codex', 'gpt-5.4')).toEqual(
+      getCatalogThinkingCapability('openai', 'gpt-5.4'),
+    );
+    expect(getCatalogThinkingCapability('openai-codex', 'unknown-codex-model')).toBeUndefined();
+  });
 });

@@ -1,4 +1,5 @@
 import { CodexLoginManager } from './login-manager';
+import { CodexModelDiscovery, getCodexCredentialGeneration } from './models';
 import {
   ManagedCodexTokenProvider,
   type CodexClock,
@@ -10,21 +11,25 @@ export interface CodexAuthRuntime {
   vault: CodexCredentialVault;
   tokenProvider: ManagedCodexTokenProvider;
   loginManager: CodexLoginManager;
+  modelDiscovery: CodexModelDiscovery;
 }
 
 interface CreateCodexAuthRuntimeOptions {
   vault?: CodexCredentialVault;
   oauthFetch?: TokenExchangeFetch;
+  modelsFetch?: typeof globalThis.fetch;
   clock?: CodexClock;
 }
 
-const RUNTIME_KEY = Symbol.for('openmaic.codex.oauth.auth-runtime.v1');
+const RUNTIME_KEY = Symbol.for('openmaic.codex.oauth.auth-runtime.v2');
 const runtimeHost = globalThis as unknown as Record<PropertyKey, unknown>;
 
 function isCodexAuthRuntime(value: unknown): value is CodexAuthRuntime {
   if (!value || typeof value !== 'object') return false;
   const runtime = value as Partial<CodexAuthRuntime>;
-  return Boolean(runtime.vault && runtime.tokenProvider && runtime.loginManager);
+  return Boolean(
+    runtime.vault && runtime.tokenProvider && runtime.loginManager && runtime.modelDiscovery,
+  );
 }
 
 export function createCodexAuthRuntime(
@@ -41,7 +46,13 @@ export function createCodexAuthRuntime(
     ...(options.oauthFetch ? { oauthFetch: options.oauthFetch } : {}),
     ...(options.clock ? { clock: options.clock } : {}),
   });
-  return { vault, tokenProvider, loginManager };
+  const modelDiscovery = new CodexModelDiscovery({
+    tokenProvider,
+    credentialGeneration: () => getCodexCredentialGeneration(vault),
+    ...(options.modelsFetch ? { upstreamFetch: options.modelsFetch } : {}),
+    ...(options.clock ? { clock: options.clock } : {}),
+  });
+  return { vault, tokenProvider, loginManager, modelDiscovery };
 }
 
 export function getCodexAuthRuntime(): CodexAuthRuntime {

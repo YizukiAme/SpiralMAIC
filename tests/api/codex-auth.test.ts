@@ -55,6 +55,10 @@ function runtimeFor(vault: MemoryVault): CodexAuthRuntime {
     vault,
     tokenProvider: new ManagedCodexTokenProvider({ vault }),
     loginManager: new CodexLoginManager({ vault }),
+    modelDiscovery: {
+      getModels: vi.fn(async () => []),
+      invalidate: vi.fn(),
+    } as never,
   };
 }
 
@@ -130,6 +134,7 @@ describe('/api/codex/auth', () => {
     expectNoStore(response);
     await expect(response.json()).resolves.toEqual({ connected: false });
     await expect(runtime.vault.load()).resolves.toBeNull();
+    expect(runtime.modelDiscovery.invalidate).toHaveBeenCalledTimes(1);
   });
 
   it('does not touch runtime and blocks logout when availability is false', async () => {
