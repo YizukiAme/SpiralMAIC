@@ -9,7 +9,22 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // its args) so no real provider client is constructed. provider-config stubs
 // echo the client-supplied key/baseUrl so a test can assert they are dropped
 // when a stage route overrides the client model.
-const mocks = vi.hoisted(() => ({ getModelCalls: [] as Array<Record<string, unknown>> }));
+const mocks = vi.hoisted(() => {
+  const codexTokenProvider = {
+    getValidCredentials: vi.fn(async () => ({ accessToken: 'token', accountId: 'account' })),
+  };
+  return {
+    getModelCalls: [] as Array<Record<string, unknown>>,
+    getCodexOAuthAvailability: vi.fn(async () => ({
+      available: true,
+      reason: 'available',
+      methods: ['device'],
+    })),
+    codexTokenProvider,
+    codexTransport: vi.fn(),
+    createCodexResponsesTransport: vi.fn(() => vi.fn()),
+  };
+});
 
 vi.mock('@/lib/ai/providers', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/ai/providers')>();
@@ -33,10 +48,35 @@ vi.mock('@/lib/server/ssrf-guard', () => ({
   validateUrlForSSRF: async () => null,
 }));
 
+vi.mock('@/lib/server/codex/availability', () => ({
+  getCodexOAuthAvailability: mocks.getCodexOAuthAvailability,
+}));
+
+vi.mock('@/lib/server/codex/runtime', () => ({
+  getCodexAuthRuntime: () => ({ tokenProvider: mocks.codexTokenProvider }),
+}));
+
+vi.mock('@/lib/server/codex/transport', () => ({
+  createCodexResponsesTransport: mocks.createCodexResponsesTransport,
+}));
+
 describe('resolveModel — per-stage resolution order', () => {
   beforeEach(() => {
     vi.resetModules();
     mocks.getModelCalls.length = 0;
+    mocks.getCodexOAuthAvailability.mockClear();
+    mocks.getCodexOAuthAvailability.mockResolvedValue({
+      available: true,
+      reason: 'available',
+      methods: ['device'],
+    });
+    mocks.codexTokenProvider.getValidCredentials.mockClear();
+    mocks.codexTokenProvider.getValidCredentials.mockResolvedValue({
+      accessToken: 'token',
+      accountId: 'account',
+    });
+    mocks.createCodexResponsesTransport.mockClear();
+    mocks.createCodexResponsesTransport.mockReturnValue(mocks.codexTransport);
     delete process.env.MODEL_ROUTES;
     delete process.env.DEFAULT_MODEL;
   });
@@ -124,6 +164,64 @@ describe('resolveModel — per-stage resolution order', () => {
     expect(call.providerType).toBe('openai');
     expect(call.baseUrl).toBe('https://client.example/v1');
     expect(call.apiKey).toBe('client-key');
+  });
+
+  it('resolves Codex only through the server OAuth transport and ignores every client override', async () => {
+    const { resolveModel } = await import('@/lib/server/resolve-model');
+
+    const resolved = await resolveModel({
+      modelString: 'openai-codex:gpt-5.4',
+      apiKey: 'client-key',
+      baseUrl: 'https://attacker.example/v1',
+      providerType: 'anthropic',
+    });
+
+    expect(mocks.getCodexOAuthAvailability).toHaveBeenCalledTimes(1);
+    expect(mocks.codexTokenProvider.getValidCredentials).toHaveBeenCalledWith();
+    expect(mocks.createCodexResponsesTransport).toHaveBeenCalledWith({
+      tokenProvider: mocks.codexTokenProvider,
+    });
+    expect(mocks.getModelCalls.at(-1)).toEqual({
+      providerId: 'openai-codex',
+      modelId: 'gpt-5.4',
+      apiKey: '',
+      customFetch: mocks.codexTransport,
+    });
+    expect(resolved).toMatchObject({
+      providerId: 'openai-codex',
+      modelId: 'gpt-5.4',
+      apiKey: '',
+    });
+    expect(resolved.baseUrl).toBeUndefined();
+  });
+
+  it('rejects an unavailable Codex provider before reading credentials or constructing a model', async () => {
+    mocks.getCodexOAuthAvailability.mockResolvedValueOnce({
+      available: false,
+      reason: 'feature-disabled',
+      methods: [],
+    });
+    const { resolveModel } = await import('@/lib/server/resolve-model');
+
+    await expect(resolveModel({ modelString: 'openai-codex:gpt-5.4' })).rejects.toThrow(
+      /Codex OAuth provider is unavailable \(feature-disabled\)/,
+    );
+    expect(mocks.codexTokenProvider.getValidCredentials).not.toHaveBeenCalled();
+    expect(mocks.createCodexResponsesTransport).not.toHaveBeenCalled();
+    expect(mocks.getModelCalls).toHaveLength(0);
+  });
+
+  it('rejects disconnected Codex credentials before constructing a model', async () => {
+    mocks.codexTokenProvider.getValidCredentials.mockRejectedValueOnce(
+      new Error('Codex credentials are unavailable'),
+    );
+    const { resolveModel } = await import('@/lib/server/resolve-model');
+
+    await expect(resolveModel({ modelString: 'openai-codex:gpt-5.4' })).rejects.toThrow(
+      'Codex credentials are unavailable',
+    );
+    expect(mocks.createCodexResponsesTransport).not.toHaveBeenCalled();
+    expect(mocks.getModelCalls).toHaveLength(0);
   });
 
   it('uses a scene-content:<type> route over the base route and x-model', async () => {

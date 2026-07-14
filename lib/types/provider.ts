@@ -7,6 +7,7 @@
  */
 export type BuiltInProviderId =
   | 'openai'
+  | 'openai-codex'
   | 'anthropic'
   | 'google'
   | 'deepseek'
@@ -33,6 +34,7 @@ export type ProviderId = BuiltInProviderId | `custom-${string}`;
  * Provider API types
  */
 export type ProviderType = 'openai' | 'anthropic' | 'google';
+export type CredentialMode = 'api-key' | 'oauth' | 'none';
 
 export type ThinkingControlType =
   | 'none'
@@ -169,6 +171,8 @@ export interface ProviderConfig {
    */
   alternateBaseUrls?: { label: string; url: string }[];
   requiresApiKey: boolean;
+  /** How credentials are supplied. OAuth providers never accept a browser API key. */
+  credentialMode?: CredentialMode;
   icon?: string;
   models: ModelInfo[];
 }
@@ -183,4 +187,6 @@ export interface ModelConfig {
   baseUrl?: string;
   proxy?: string; // Optional: HTTP proxy URL for this provider
   providerType?: ProviderType; // Optional: for custom providers on server-side
+  /** Server-injected fetch boundary for providers whose credentials never reach the client. */
+  customFetch?: typeof globalThis.fetch;
 }

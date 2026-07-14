@@ -4,6 +4,10 @@
 import { describe, it, expect } from 'vitest';
 import { toModelMessages, createPartMapper } from '@/lib/agent/runtime/stream-fn';
 import type { ToolCallProviderMetadata } from '@/lib/agent/runtime/provider-metadata';
+import {
+  decodeOpenAIReasoningSignature,
+  encodeOpenAIReasoningSignature,
+} from '@/lib/agent/runtime/provider-metadata';
 import type {
   AssistantMessage,
   AssistantMessageEvent,
@@ -150,9 +154,156 @@ describe('createPartMapper — reasoning/thinking channel', () => {
     expect(events).toHaveLength(0);
     expect(partial.content).toHaveLength(0);
   });
+
+  it('attaches merged OpenAI reasoning metadata from start and end to the thinking block', () => {
+    const partial = emptyPartial();
+    const events: AssistantMessageEvent[] = [];
+    const mapper = createPartMapper(partial, (event) => events.push(event));
+
+    mapper.handle({
+      type: 'reasoning-start',
+      id: 'reasoning-1:0',
+      providerMetadata: { openai: { itemId: 'reasoning-1' } },
+    });
+    mapper.handle({ type: 'reasoning-delta', id: 'reasoning-1:0', text: 'private summary' });
+    mapper.handle({
+      type: 'reasoning-end',
+      id: 'reasoning-1:0',
+      providerMetadata: { openai: { reasoningEncryptedContent: 'ciphertext-1' } },
+    });
+
+    const thinking = partial.content[0] as { thinkingSignature?: string };
+    expect(decodeOpenAIReasoningSignature(thinking.thinkingSignature)).toEqual({
+      openai: {
+        itemId: 'reasoning-1',
+        reasoningEncryptedContent: 'ciphertext-1',
+      },
+    });
+  });
+
+  it('binds finish metadata by reasoning item id when multiple thinking blocks exist', () => {
+    const partial = emptyPartial();
+    const mapper = createPartMapper(partial, () => undefined);
+
+    mapper.handle({
+      type: 'reasoning-start',
+      id: 'reasoning-1:0',
+      providerMetadata: { openai: { itemId: 'reasoning-1' } },
+    });
+    mapper.handle({ type: 'reasoning-delta', id: 'reasoning-1:0', text: 'first' });
+    mapper.handle({
+      type: 'reasoning-end',
+      id: 'reasoning-1:0',
+      providerMetadata: { openai: { reasoningEncryptedContent: 'ciphertext-1' } },
+    });
+    mapper.handle({
+      type: 'reasoning-start',
+      id: 'reasoning-2:0',
+      providerMetadata: { openai: { itemId: 'reasoning-2' } },
+    });
+    mapper.handle({ type: 'reasoning-delta', id: 'reasoning-2:0', text: 'second' });
+    mapper.handle({ type: 'reasoning-end', id: 'reasoning-2:0' });
+    mapper.handle({
+      type: 'finish',
+      providerMetadata: {
+        openai: { itemId: 'reasoning-2', reasoningEncryptedContent: 'ciphertext-2' },
+      },
+    });
+
+    const thinking = partial.content.filter(
+      (content): content is { type: 'thinking'; thinking: string; thinkingSignature?: string } =>
+        content.type === 'thinking',
+    );
+    expect(decodeOpenAIReasoningSignature(thinking[0]?.thinkingSignature)).toEqual({
+      openai: { itemId: 'reasoning-1', reasoningEncryptedContent: 'ciphertext-1' },
+    });
+    expect(decodeOpenAIReasoningSignature(thinking[1]?.thinkingSignature)).toEqual({
+      openai: { itemId: 'reasoning-2', reasoningEncryptedContent: 'ciphertext-2' },
+    });
+  });
+
+  it('binds id-less finish metadata when there is exactly one reasoning block', () => {
+    const partial = emptyPartial();
+    const mapper = createPartMapper(partial, () => undefined);
+
+    mapper.handle({
+      type: 'reasoning-start',
+      id: 'reasoning-1:0',
+      providerMetadata: { openai: { itemId: 'reasoning-1' } },
+    });
+    mapper.handle({ type: 'reasoning-delta', id: 'reasoning-1:0', text: 'only block' });
+    mapper.handle({ type: 'reasoning-end', id: 'reasoning-1:0' });
+    mapper.handle({
+      type: 'finish',
+      providerMetadata: { openai: { reasoningEncryptedContent: 'ciphertext-1' } },
+    });
+
+    const thinking = partial.content[0] as { thinkingSignature?: string };
+    expect(decodeOpenAIReasoningSignature(thinking.thinkingSignature)).toEqual({
+      openai: { itemId: 'reasoning-1', reasoningEncryptedContent: 'ciphertext-1' },
+    });
+  });
 });
 
 describe('toModelMessages', () => {
+  it('restores a recognized encrypted-reasoning signature as provider options', () => {
+    const signature = encodeOpenAIReasoningSignature({
+      openai: { itemId: 'reasoning-1', reasoningEncryptedContent: 'ciphertext-1' },
+    });
+    const messages: PiMessage[] = [
+      {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: 'summary text', thinkingSignature: signature },
+          { type: 'text', text: 'answer' },
+        ],
+        api: 'unknown' as never,
+        provider: 'unknown' as never,
+        model: 'test',
+        usage: emptyPartial().usage,
+        stopReason: 'stop',
+        timestamp: 0,
+      },
+    ];
+
+    const result = toModelMessages(messages);
+    const parts = (result[0] as { content: Array<Record<string, unknown>> }).content;
+    expect(parts).toEqual([
+      {
+        type: 'reasoning',
+        text: 'summary text',
+        providerOptions: {
+          openai: { itemId: 'reasoning-1', reasoningEncryptedContent: 'ciphertext-1' },
+        },
+      },
+      { type: 'text', text: 'answer' },
+    ]);
+  });
+
+  it.each(['unrelated-provider-signature', 'openmaic:openai-reasoning:v1:{bad-json'])(
+    'keeps reasoning text but ignores an unrecognized signature: %s',
+    (thinkingSignature) => {
+      const thinking = { type: 'thinking' as const, thinking: 'summary text', thinkingSignature };
+      const messages: PiMessage[] = [
+        {
+          role: 'assistant',
+          content: [thinking],
+          api: 'unknown' as never,
+          provider: 'unknown' as never,
+          model: 'test',
+          usage: emptyPartial().usage,
+          stopReason: 'stop',
+          timestamp: 0,
+        },
+      ];
+
+      const result = toModelMessages(messages);
+      const parts = (result[0] as { content: Array<Record<string, unknown>> }).content;
+      expect(parts).toEqual([{ type: 'reasoning', text: 'summary text' }]);
+      expect(thinking.thinkingSignature).toBe(thinkingSignature);
+    },
+  );
+
   it('converts assistant toolCall with providerMetadata to tool-call part with providerOptions', () => {
     const toolCallWithMeta: ToolCall & { providerMetadata?: ToolCallProviderMetadata } = {
       type: 'toolCall',
