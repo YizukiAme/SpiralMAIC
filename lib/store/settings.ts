@@ -125,6 +125,10 @@ export interface SettingsState {
       enabled: boolean;
       requiresApiKey?: boolean;
       isServerConfigured?: boolean;
+      /** Aliyun AccessKey ID (AliDocMind). */
+      accessKeyId?: string;
+      /** Aliyun AccessKey Secret (AliDocMind). */
+      accessKeySecret?: string;
     }
   >;
   baiduSubSources: BaiduSubSources;
@@ -300,7 +304,13 @@ export interface SettingsState {
   setPDFProvider: (providerId: PDFProviderId) => void;
   setPDFProviderConfig: (
     providerId: PDFProviderId,
-    config: Partial<{ apiKey: string; baseUrl: string; enabled: boolean }>,
+    config: Partial<{
+      apiKey: string;
+      baseUrl: string;
+      enabled: boolean;
+      accessKeyId: string;
+      accessKeySecret: string;
+    }>,
   ) => void;
 
   // Image Generation actions
@@ -487,7 +497,17 @@ const getDefaultPDFConfig = () => ({
     unpdf: { apiKey: '', baseUrl: '', enabled: true },
     mineru: { apiKey: '', baseUrl: '', enabled: false },
     'mineru-cloud': { apiKey: '', baseUrl: '', enabled: false },
-  } as Record<PDFProviderId, { apiKey: string; baseUrl: string; enabled: boolean }>,
+    alidocmind: { apiKey: '', baseUrl: '', enabled: false, accessKeyId: '', accessKeySecret: '' },
+  } as Record<
+    PDFProviderId,
+    {
+      apiKey: string;
+      baseUrl: string;
+      enabled: boolean;
+      accessKeyId?: string;
+      accessKeySecret?: string;
+    }
+  >,
 });
 
 // Initialize default Image config
@@ -717,6 +737,23 @@ function ensureBuiltInImageProviders(state: Partial<SettingsState>): void {
     const providerId = pid as ImageProviderId;
     if (!state.imageProvidersConfig![providerId]) {
       state.imageProvidersConfig![providerId] = defaultConfig[providerId];
+    }
+  });
+}
+
+/**
+ * Backfill built-in PDF/document providers into persisted state. Without this,
+ * a provider added after a user's persisted state was written (e.g. AliDocMind)
+ * never appears in `pdfProvidersConfig`, so it can't be selected and never
+ * picks up its server-configured flag on rehydrate.
+ */
+function ensureBuiltInPDFProviders(state: Partial<SettingsState>): void {
+  if (!state.pdfProvidersConfig) return;
+  const defaultConfig = getDefaultPDFConfig().pdfProvidersConfig;
+  Object.keys(PDF_PROVIDERS).forEach((pid) => {
+    const providerId = pid as PDFProviderId;
+    if (!state.pdfProvidersConfig![providerId]) {
+      state.pdfProvidersConfig![providerId] = defaultConfig[providerId];
     }
   });
 }
@@ -1860,6 +1897,7 @@ export const useSettingsStore = create<SettingsState>()(
         // Ensure image/video configs have all built-in providers
         ensureBuiltInImageProviders(state);
         ensureBuiltInVideoProviders(state);
+        ensureBuiltInPDFProviders(state);
 
         // Migrate from old ttsModel to new ttsProviderId
         if (state.ttsModel && !state.ttsProviderId) {
@@ -2063,6 +2101,7 @@ export const useSettingsStore = create<SettingsState>()(
         ensureBuiltInAudioProviders(merged as Partial<SettingsState>);
         ensureBuiltInImageProviders(merged as Partial<SettingsState>);
         ensureBuiltInVideoProviders(merged as Partial<SettingsState>);
+        ensureBuiltInPDFProviders(merged as Partial<SettingsState>);
         ensureBuiltInWebSearchProviders(merged as Partial<SettingsState>);
         ensureValidProviderSelections(merged as Partial<SettingsState>);
         stripLegacyServerBaseUrl(merged as Partial<SettingsState>);
