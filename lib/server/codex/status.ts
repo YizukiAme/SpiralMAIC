@@ -12,7 +12,9 @@ export function toCodexOAuthPublicStatus(
   credentials: CodexOAuthCredentials | null,
 ): CodexOAuthPublicStatus {
   return {
-    ...availability,
+    available: availability.available,
+    reason: availability.reason,
+    methods: [...availability.methods],
     authenticated: credentials !== null,
     ...(credentials?.email ? { email: credentials.email } : {}),
   };

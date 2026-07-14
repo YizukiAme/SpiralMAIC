@@ -1,4 +1,14 @@
-import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -105,7 +115,7 @@ describe('FileCodexCredentialVault', () => {
     expect((await stat(vault.credentialPath)).mode & 0o777).toBe(0o600);
   });
 
-  it('surfaces filesystem read failures instead of treating them as signed-out state', async () => {
+  it('treats non-regular credential entries as signed-out state', async () => {
     const baseDir = await makeBaseDir();
     const vault = new FileCodexCredentialVault({ baseDir });
     await vault.save(credentials());
@@ -113,10 +123,59 @@ describe('FileCodexCredentialVault', () => {
     await mkdir(vault.credentialPath);
 
     try {
-      await expect(vault.load()).rejects.toMatchObject({ code: 'EISDIR' });
+      await expect(vault.load()).resolves.toBeNull();
     } finally {
       await chmod(vault.credentialPath, 0o700);
     }
+  });
+
+  it('does not chmod or read through a credential-file symlink', async () => {
+    const baseDir = await makeBaseDir();
+    const externalDir = await makeBaseDir();
+    const sentinelPath = join(externalDir, 'auth.json');
+    const sentinelContent = JSON.stringify(credentials());
+    await writeFile(sentinelPath, sentinelContent, { mode: 0o644 });
+    const sentinelMode = (await stat(sentinelPath)).mode & 0o777;
+    const vault = new FileCodexCredentialVault({ baseDir });
+    await mkdir(vault.authDir, { mode: 0o700 });
+    await symlink(sentinelPath, vault.credentialPath);
+
+    await expect(vault.load()).resolves.toBeNull();
+
+    expect(await readFile(sentinelPath, 'utf8')).toBe(sentinelContent);
+    expect((await stat(sentinelPath)).mode & 0o777).toBe(sentinelMode);
+  });
+
+  it('does not read or save through a symlinked auth directory', async () => {
+    const baseDir = await makeBaseDir();
+    const externalDir = await makeBaseDir();
+    const sentinelPath = join(externalDir, CODEX_CREDENTIAL_FILE_NAME);
+    const sentinelContent = JSON.stringify(credentials());
+    await writeFile(sentinelPath, sentinelContent, { mode: 0o644 });
+    const sentinelMode = (await stat(sentinelPath)).mode & 0o777;
+    const vault = new FileCodexCredentialVault({ baseDir });
+    await symlink(externalDir, vault.authDir);
+
+    await expect(vault.load()).resolves.toBeNull();
+    await expect(vault.save(credentials({ accessToken: 'replacement' }))).rejects.toThrow();
+
+    expect(await readFile(sentinelPath, 'utf8')).toBe(sentinelContent);
+    expect((await stat(sentinelPath)).mode & 0o777).toBe(sentinelMode);
+    expect(await readdir(externalDir)).toEqual([CODEX_CREDENTIAL_FILE_NAME]);
+  });
+
+  it('cleans its temporary file when rename fails without changing the target', async () => {
+    const baseDir = await makeBaseDir();
+    const vault = new FileCodexCredentialVault({ baseDir });
+    await mkdir(vault.authDir, { recursive: true, mode: 0o700 });
+    await mkdir(vault.credentialPath);
+    const sentinelPath = join(vault.credentialPath, 'sentinel.txt');
+    await writeFile(sentinelPath, 'unchanged');
+
+    await expect(vault.save(credentials())).rejects.toThrow();
+
+    expect(await readdir(vault.authDir)).toEqual([CODEX_CREDENTIAL_FILE_NAME]);
+    expect(await readFile(sentinelPath, 'utf8')).toBe('unchanged');
   });
 
   it('clears credentials idempotently', async () => {

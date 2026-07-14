@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import { chmod, mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { chmod, lstat, mkdir, open, rename, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 
 export const CODEX_CREDENTIAL_FILE_NAME = 'openai-codex.json';
@@ -88,29 +89,44 @@ export class FileCodexCredentialVault implements CodexCredentialVault {
   }
 
   async load(): Promise<CodexOAuthCredentials | null> {
+    let authStat: Awaited<ReturnType<typeof lstat>>;
     try {
+      authStat = await lstat(this.authDir);
+      if (authStat.isSymbolicLink() || !authStat.isDirectory()) return null;
       await chmod(this.authDir, 0o700);
-      await chmod(this.credentialPath, 0o600);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
-      throw error;
+    } catch {
+      return null;
     }
 
-    let raw: string;
+    let credentialStat: Awaited<ReturnType<typeof lstat>>;
     try {
-      raw = await readFile(this.credentialPath, 'utf8');
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
-      throw error;
+      credentialStat = await lstat(this.credentialPath);
+      if (credentialStat.isSymbolicLink() || !credentialStat.isFile()) return null;
+    } catch {
+      return null;
     }
 
+    let handle: Awaited<ReturnType<typeof open>> | undefined;
     try {
+      handle = await open(this.credentialPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+      const openedStat = await handle.stat();
+      if (
+        !openedStat.isFile() ||
+        openedStat.dev !== credentialStat.dev ||
+        openedStat.ino !== credentialStat.ino
+      ) {
+        return null;
+      }
+      await handle.chmod(0o600);
+      const raw = await handle.readFile('utf8');
       const parsed: unknown = JSON.parse(raw);
       return isCodexOAuthCredentials(parsed) ? parsed : null;
     } catch {
-      // Corrupt and schema-invalid files behave like signed-out state. Never
-      // log raw credential contents or parse errors.
+      // Missing, unreadable, corrupt, schema-invalid, and non-regular entries
+      // all behave like signed-out state. Never log credential data or errors.
       return null;
+    } finally {
+      await handle?.close().catch(() => undefined);
     }
   }
 
@@ -120,6 +136,10 @@ export class FileCodexCredentialVault implements CodexCredentialVault {
     }
 
     await mkdir(this.authDir, { recursive: true, mode: 0o700 });
+    const authStat = await lstat(this.authDir);
+    if (authStat.isSymbolicLink() || !authStat.isDirectory()) {
+      throw new Error('Unsafe Codex credential directory');
+    }
     await chmod(this.authDir, 0o700);
 
     const temporaryPath = join(
@@ -132,14 +152,13 @@ export class FileCodexCredentialVault implements CodexCredentialVault {
     try {
       handle = await open(temporaryPath, 'wx', 0o600);
       await handle.writeFile(`${JSON.stringify(credentials)}\n`, 'utf8');
+      await handle.chmod(0o600);
       await handle.sync();
       await handle.close();
       handle = undefined;
 
-      await chmod(temporaryPath, 0o600);
       await rename(temporaryPath, this.credentialPath);
       renamed = true;
-      await chmod(this.credentialPath, 0o600);
       await fsyncDirectoryBestEffort(this.authDir);
     } finally {
       await handle?.close().catch(() => undefined);
@@ -151,6 +170,8 @@ export class FileCodexCredentialVault implements CodexCredentialVault {
 
   async clear(): Promise<void> {
     try {
+      const authStat = await lstat(this.authDir);
+      if (authStat.isSymbolicLink() || !authStat.isDirectory()) return;
       await unlink(this.credentialPath);
       await fsyncDirectoryBestEffort(this.authDir);
     } catch (error) {

@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { mkdir, open, rename, unlink } from 'node:fs/promises';
+import { lstat, mkdir, open, rename, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 
 export const CODEX_OAUTH_AVAILABILITY_REASONS = {
@@ -51,6 +51,8 @@ async function canWriteAuthDirectory(dataDir: string): Promise<boolean> {
 
   try {
     await mkdir(authDir, { recursive: true, mode: 0o700 });
+    const authStat = await lstat(authDir);
+    if (authStat.isSymbolicLink() || !authStat.isDirectory()) return false;
     handle = await open(temporaryPath, 'wx', 0o600);
     await handle.writeFile('probe', 'utf8');
     await handle.sync();
