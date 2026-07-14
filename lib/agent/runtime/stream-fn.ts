@@ -207,9 +207,11 @@ export function createPartMapper(
       }
     } else if (type === 'reasoning-delta' || type === 'reasoning') {
       const reasoningId = typeof part.id === 'string' ? part.id : undefined;
-      if (reasoningId) applyReasoningMetadata(reasoningId, part);
       const delta = (part.text ?? part.delta ?? '') as string;
-      if (!delta) return;
+      if (!delta) {
+        if (reasoningId) applyReasoningMetadata(reasoningId, part);
+        return;
+      }
       let index = reasoningId
         ? reasoningBlocks.get(reasoningId)?.index
         : active?.kind === 'thinking'
@@ -222,6 +224,7 @@ export function createPartMapper(
         const thinking = partial.content[index] as ThinkingContent;
         active = { kind: 'thinking', index, buf: thinking.thinking, reasoningId };
       }
+      if (reasoningId) applyReasoningMetadata(reasoningId, part);
       const thinkingActive = active;
       if (!thinkingActive || thinkingActive.kind !== 'thinking') {
         throw new Error('Reasoning stream did not initialize a thinking block');
