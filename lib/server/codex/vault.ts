@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
 import { chmod, lstat, mkdir, open, rename, unlink } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 export const CODEX_CREDENTIAL_FILE_NAME = 'openai-codex.json';
 
@@ -18,6 +18,7 @@ export interface CodexOAuthCredentials {
 }
 
 export interface CodexCredentialVault {
+  readonly coordinationKey?: string;
   load(): Promise<CodexOAuthCredentials | null>;
   save(credentials: CodexOAuthCredentials): Promise<void>;
   clear(): Promise<void>;
@@ -81,11 +82,13 @@ async function fsyncDirectoryBestEffort(directory: string): Promise<void> {
 export class FileCodexCredentialVault implements CodexCredentialVault {
   readonly authDir: string;
   readonly credentialPath: string;
+  readonly coordinationKey: string;
 
   constructor(options: FileCodexCredentialVaultOptions = {}) {
     const baseDir = options.baseDir ?? join(process.cwd(), 'data');
     this.authDir = join(baseDir, 'auth');
     this.credentialPath = join(this.authDir, CODEX_CREDENTIAL_FILE_NAME);
+    this.coordinationKey = `file:${resolve(this.credentialPath)}`;
   }
 
   async load(): Promise<CodexOAuthCredentials | null> {

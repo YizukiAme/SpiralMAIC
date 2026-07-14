@@ -1,3 +1,7 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -7,7 +11,11 @@ import {
   ManagedCodexTokenProvider,
   type CodexTokenProvider,
 } from '@/lib/server/codex/token-provider';
-import type { CodexCredentialVault, CodexOAuthCredentials } from '@/lib/server/codex/vault';
+import {
+  FileCodexCredentialVault,
+  type CodexCredentialVault,
+  type CodexOAuthCredentials,
+} from '@/lib/server/codex/vault';
 
 const NOW = 1_700_000_000_000;
 
@@ -296,6 +304,34 @@ describe('ManagedCodexTokenProvider', () => {
     expect(tokenExchangeFetch).toHaveBeenCalledTimes(1);
   });
 
+  it('shares one refresh flight across separate file vaults using the same credential path', async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), 'spiralmaic-codex-provider-'));
+
+    try {
+      const vaultA = new FileCodexCredentialVault({ baseDir });
+      const vaultB = new FileCodexCredentialVault({ baseDir });
+      await vaultA.save(credentials({ expiresAt: NOW }));
+      const tokenExchangeFetch = vi.fn(() =>
+        Promise.resolve(
+          jsonResponse({
+            access_token: unsignedJwt({ chatgpt_account_id: 'refreshed-account' }),
+            expires_in: 300,
+          }),
+        ),
+      );
+
+      const [first, second] = await Promise.all([
+        createProvider(vaultA, tokenExchangeFetch).getValidCredentials({ forceRefresh: true }),
+        createProvider(vaultB, tokenExchangeFetch).getValidCredentials({ forceRefresh: true }),
+      ]);
+
+      expect(first).toEqual(second);
+      expect(tokenExchangeFetch).toHaveBeenCalledTimes(1);
+    } finally {
+      await rm(baseDir, { recursive: true, force: true });
+    }
+  });
+
   it('does not share coordination between different vault instances', async () => {
     const vaultA = new MemoryVault(credentials({ expiresAt: NOW }));
     const vaultB = new MemoryVault(credentials({ expiresAt: NOW }));
@@ -321,34 +357,49 @@ describe('ManagedCodexTokenProvider', () => {
     expect(fetchB).toHaveBeenCalledTimes(1);
   });
 
-  it('preserves the vault coordinator across a development module reload', async () => {
-    const vault = new MemoryVault(credentials({ expiresAt: NOW }));
-    const response = deferred<Response>();
-    const tokenExchangeFetch = vi.fn(() => response.promise);
-    const providerA = createProvider(vault, tokenExchangeFetch);
-
-    const first = providerA.getValidCredentials();
-    await vi.waitFor(() => expect(tokenExchangeFetch).toHaveBeenCalledTimes(1));
-    vi.resetModules();
-    const { ManagedCodexTokenProvider: ReloadedTokenProvider } =
-      await import('@/lib/server/codex/token-provider');
-    const providerB = new ReloadedTokenProvider({
-      vault,
-      tokenExchangeFetch,
-      clock: { now: () => NOW },
-    });
-    const second = providerB.getValidCredentials({ forceRefresh: true });
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(tokenExchangeFetch).toHaveBeenCalledTimes(1);
-    response.resolve(
-      jsonResponse({
+  it('preserves same-path file-vault coordination across a development module reload', async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), 'spiralmaic-codex-provider-'));
+    const releaseResponse = deferred<void>();
+    const tokenExchangeFetch = vi.fn(async () => {
+      await releaseResponse.promise;
+      return jsonResponse({
         access_token: unsignedJwt({ chatgpt_account_id: 'refreshed-account' }),
         expires_in: 300,
-      }),
-    );
-    await expect(Promise.all([first, second])).resolves.toHaveLength(2);
+      });
+    });
+    const pending: Promise<unknown>[] = [];
+
+    try {
+      const vaultA = new FileCodexCredentialVault({ baseDir });
+      await vaultA.save(credentials({ expiresAt: NOW }));
+      const providerA = createProvider(vaultA, tokenExchangeFetch);
+
+      const first = providerA.getValidCredentials();
+      pending.push(first);
+      await vi.waitFor(() => expect(tokenExchangeFetch).toHaveBeenCalledTimes(1));
+      vi.resetModules();
+      const [{ ManagedCodexTokenProvider: ReloadedTokenProvider }, vaultModule] = await Promise.all(
+        [import('@/lib/server/codex/token-provider'), import('@/lib/server/codex/vault')],
+      );
+      const vaultB = new vaultModule.FileCodexCredentialVault({ baseDir });
+      const providerB = new ReloadedTokenProvider({
+        vault: vaultB,
+        tokenExchangeFetch,
+        clock: { now: () => NOW },
+      });
+      const second = providerB.getValidCredentials({ forceRefresh: true });
+      pending.push(second);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      releaseResponse.resolve();
+      await expect(Promise.all([first, second])).resolves.toHaveLength(2);
+      expect(tokenExchangeFetch).toHaveBeenCalledTimes(1);
+    } finally {
+      releaseResponse.resolve();
+      await Promise.allSettled(pending);
+      await rm(baseDir, { recursive: true, force: true });
+    }
   });
 
   it('clears credentials on invalid_grant and exposes only a safe error classification', async () => {
@@ -527,6 +578,58 @@ describe('ManagedCodexTokenProvider', () => {
     });
     await logout;
     expect(vault.current).toBeNull();
+  });
+
+  it('waits for a late save from a separate file vault using the same credential path', async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), 'spiralmaic-codex-provider-'));
+    const saveStarted = deferred<void>();
+    const releaseSave = deferred<void>();
+    const pending: Promise<unknown>[] = [];
+
+    try {
+      const vaultA = new FileCodexCredentialVault({ baseDir });
+      const vaultB = new FileCodexCredentialVault({ baseDir });
+      await vaultA.save(credentials({ expiresAt: NOW }));
+      const realSave = vaultB.save.bind(vaultB);
+      vi.spyOn(vaultB, 'save').mockImplementation(async (next) => {
+        saveStarted.resolve();
+        await releaseSave.promise;
+        await realSave(next);
+      });
+      const tokenExchangeFetch = vi.fn().mockResolvedValue(
+        jsonResponse({
+          access_token: unsignedJwt({ chatgpt_account_id: 'refreshed-account' }),
+          expires_in: 300,
+        }),
+      );
+      const providerA = createProvider(vaultA, tokenExchangeFetch);
+      const providerB = createProvider(vaultB, tokenExchangeFetch);
+
+      const refresh = providerB.getValidCredentials();
+      pending.push(refresh);
+      await saveStarted.promise;
+      const logout = providerA.logout();
+      pending.push(logout);
+
+      await expect(
+        Promise.race([
+          logout.then(() => 'settled'),
+          new Promise<'pending'>((resolve) => setTimeout(() => resolve('pending'), 50)),
+        ]),
+      ).resolves.toBe('pending');
+      releaseSave.resolve();
+
+      await expect(refresh).rejects.toMatchObject({
+        code: CODEX_OAUTH_ERROR_CODES.SIGNED_OUT,
+        retryable: false,
+      });
+      await logout;
+      await expect(vaultA.load()).resolves.toBeNull();
+    } finally {
+      releaseSave.resolve();
+      await Promise.allSettled(pending);
+      await rm(baseDir, { recursive: true, force: true });
+    }
   });
 
   it('classifies missing credentials without attempting a token exchange', async () => {
