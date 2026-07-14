@@ -1035,6 +1035,7 @@
     "addProviderDescription": "Add custom model providers to extend available AI models",
     "providerNames": {
       "openai": "OpenAI",
+      "openai-codex": "ChatGPT Codex",
       "anthropic": "Claude",
       "google": "Gemini",
       "deepseek": "DeepSeek",
@@ -1054,6 +1055,36 @@
       "bocha": "Bocha",
       "brave": "Brave Search",
       "baidu": "Baidu"
+    },
+    "codexOAuth": {
+      "experimental": "Experimental third-party Codex integration; uses your ChatGPT plan quota.",
+      "unavailableTitle": "Codex sign-in is unavailable",
+      "unavailable": {
+        "FEATURE_DISABLED": "Enable Codex OAuth on the server to use this provider.",
+        "SERVERLESS_UNSUPPORTED": "Codex OAuth requires a self-hosted Node server with persistent storage.",
+        "ACCESS_CODE_REQUIRED": "Set ACCESS_CODE before enabling Codex OAuth in production.",
+        "DATA_DIR_UNWRITABLE": "The server cannot write to its data directory. Check /app/data permissions."
+      },
+      "connectedAs": "Connected as {email}",
+      "connected": "Connected with ChatGPT",
+      "signInBrowser": "Sign in with ChatGPT",
+      "signInDevice": "Use device code",
+      "waiting": "Waiting for authorization…",
+      "deviceInstructions": "Open the verification page and enter this one-time code.",
+      "openVerification": "Open verification page",
+      "copyCode": "Copy code",
+      "copied": "Copied",
+      "cancel": "Cancel sign-in",
+      "signOut": "Sign out",
+      "models": "Available models",
+      "testConnection": "Test connection",
+      "testSuccess": "Codex connection succeeded.",
+      "testUnauthorized": "Sign in with ChatGPT again.",
+      "testForbidden": "This ChatGPT workspace does not have Codex access.",
+      "testRateLimited": "Your ChatGPT plan quota or rate limit has been reached.",
+      "testFailed": "Codex connection failed.",
+      "loginFailed": "Sign-in failed. Try again or use the device-code flow.",
+      "loginExpired": "This sign-in attempt expired. Start a new one."
     },
     "providerTypes": {
       "openai": "OpenAI Protocol",
@@ -1545,6 +1576,7 @@
     "selectAgents": "Select Agents",
     "noVisionWarning": "Current model does not support vision. Images can still be placed in slides, but the model cannot understand image content to optimize selection and layout",
     "serverConfigured": "Server",
+    "connected": "Connected",
     "serverConfiguredNotice": "This provider is managed by the server and can't be edited here. To use your own credentials, add a separate provider.",
     "ttsProviderEnabledLabel": "Enable this provider",
     "ttsProviderEnabledHint": "When off, this provider is hidden from the voice picker and never auto-assigned.",

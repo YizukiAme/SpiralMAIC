@@ -1035,6 +1035,7 @@
     "addProviderDescription": "Adicione provedores de modelo personalizados para ampliar os modelos de IA disponíveis",
     "providerNames": {
       "openai": "OpenAI",
+      "openai-codex": "ChatGPT Codex",
       "anthropic": "Claude",
       "google": "Gemini",
       "deepseek": "DeepSeek",
@@ -1054,6 +1055,36 @@
       "bocha": "Bocha",
       "brave": "Brave Search",
       "baidu": "Baidu"
+    },
+    "codexOAuth": {
+      "experimental": "Integração experimental de terceiros com o Codex; usa a cota do seu plano ChatGPT.",
+      "unavailableTitle": "O login do Codex não está disponível",
+      "unavailable": {
+        "FEATURE_DISABLED": "Ative o Codex OAuth no servidor para usar este provedor.",
+        "SERVERLESS_UNSUPPORTED": "O Codex OAuth requer um servidor Node auto-hospedado com armazenamento persistente.",
+        "ACCESS_CODE_REQUIRED": "Configure ACCESS_CODE antes de ativar o Codex OAuth em produção.",
+        "DATA_DIR_UNWRITABLE": "O servidor não consegue gravar no diretório de dados. Verifique as permissões de /app/data."
+      },
+      "connectedAs": "Conectado como {email}",
+      "connected": "Conectado ao ChatGPT",
+      "signInBrowser": "Entrar com o ChatGPT",
+      "signInDevice": "Usar código do dispositivo",
+      "waiting": "Aguardando autorização…",
+      "deviceInstructions": "Abra a página de verificação e informe este código de uso único.",
+      "openVerification": "Abrir página de verificação",
+      "copyCode": "Copiar código",
+      "copied": "Copiado",
+      "cancel": "Cancelar login",
+      "signOut": "Sair",
+      "models": "Modelos disponíveis",
+      "testConnection": "Testar conexão",
+      "testSuccess": "Conexão com o Codex concluída.",
+      "testUnauthorized": "Entre novamente com o ChatGPT.",
+      "testForbidden": "Este workspace do ChatGPT não tem acesso ao Codex.",
+      "testRateLimited": "A cota ou o limite de requisições do seu plano ChatGPT foi atingido.",
+      "testFailed": "Falha na conexão com o Codex.",
+      "loginFailed": "Falha no login. Tente novamente ou use o código do dispositivo.",
+      "loginExpired": "Esta tentativa de login expirou. Inicie outra."
     },
     "providerTypes": {
       "openai": "Protocolo OpenAI",
@@ -1545,6 +1576,7 @@
     "selectAgents": "Selecionar Agentes",
     "noVisionWarning": "O modelo atual não suporta visão. As imagens ainda podem ser colocadas nos slides, mas o modelo não conseguirá entender o conteúdo das imagens para otimizar seleção e layout",
     "serverConfigured": "Servidor",
+    "connected": "Conectado",
     "serverConfiguredNotice": "Este provedor é gerenciado pelo servidor e não pode ser editado aqui. Para usar suas próprias credenciais, adicione um provedor separado.",
     "ttsProviderEnabledLabel": "Ativar este provedor",
     "ttsProviderEnabledHint": "Quando desligado, este provedor fica oculto no seletor de voz e nunca é atribuído automaticamente.",

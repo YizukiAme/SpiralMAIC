@@ -39,6 +39,7 @@ import { cn } from '@/lib/utils';
 import { createCustomProviderSettings, getProviderTypeLabel, modelInfoFromId } from './utils';
 import { ProviderList } from './provider-list';
 import { ProviderConfigPanel } from './provider-config-panel';
+import { CodexProviderSettings } from './codex-provider-settings';
 import { PDFSettings } from './pdf-settings';
 import { PDF_PROVIDERS } from '@/lib/pdf/constants';
 import type { PDFProviderId } from '@/lib/pdf/types';
@@ -376,6 +377,7 @@ export function SettingsDialog({ open, onOpenChange, initialSection }: SettingsD
         alternateBaseUrls: PROVIDERS[selectedProviderId]?.alternateBaseUrls,
         icon: providersConfig[selectedProviderId].icon,
         requiresApiKey: providersConfig[selectedProviderId].requiresApiKey,
+        credentialMode: providersConfig[selectedProviderId].credentialMode,
         models: providersConfig[selectedProviderId].models,
       }
     : undefined;
@@ -547,6 +549,7 @@ export function SettingsDialog({ open, onOpenChange, initialSection }: SettingsD
     defaultBaseUrl: config.defaultBaseUrl,
     icon: config.icon,
     requiresApiKey: config.requiresApiKey,
+    credentialMode: config.credentialMode,
     models: config.models,
     isServerConfigured: config.isServerConfigured,
   }));
@@ -1089,28 +1092,39 @@ export function SettingsDialog({ open, onOpenChange, initialSection }: SettingsD
 
               {activeSection === 'revisit' && <RevisitSettings />}
 
-              {activeSection === 'providers' && selectedProvider && (
-                <ProviderConfigPanel
-                  provider={selectedProvider}
-                  initialApiKey={providersConfig[selectedProviderId]?.apiKey || ''}
-                  initialBaseUrl={providersConfig[selectedProviderId]?.baseUrl || ''}
-                  initialRequiresApiKey={
-                    providersConfig[selectedProviderId]?.requiresApiKey ?? true
-                  }
-                  providersConfig={providersConfig}
-                  onConfigChange={(apiKey, baseUrl, requiresApiKey) =>
-                    handleProviderConfigChange(selectedProviderId, apiKey, baseUrl, requiresApiKey)
-                  }
-                  onSave={handleProviderConfigSave}
-                  onEditModel={(index) => handleEditModel(selectedProviderId, index)}
-                  onDeleteModel={(index) => handleDeleteModel(selectedProviderId, index)}
-                  onAddModel={handleAddModel}
-                  onModelsFetched={(ids) => handleModelsFetched(selectedProviderId, ids)}
-                  modelsUrl={providersConfig[selectedProviderId]?.modelsUrl}
-                  onResetToDefault={() => handleResetProvider(selectedProviderId)}
-                  isBuiltIn={providersConfig[selectedProviderId]?.isBuiltIn ?? true}
-                />
-              )}
+              {activeSection === 'providers' &&
+                selectedProvider &&
+                selectedProviderId === 'openai-codex' && <CodexProviderSettings />}
+
+              {activeSection === 'providers' &&
+                selectedProvider &&
+                selectedProviderId !== 'openai-codex' && (
+                  <ProviderConfigPanel
+                    provider={selectedProvider}
+                    initialApiKey={providersConfig[selectedProviderId]?.apiKey || ''}
+                    initialBaseUrl={providersConfig[selectedProviderId]?.baseUrl || ''}
+                    initialRequiresApiKey={
+                      providersConfig[selectedProviderId]?.requiresApiKey ?? true
+                    }
+                    providersConfig={providersConfig}
+                    onConfigChange={(apiKey, baseUrl, requiresApiKey) =>
+                      handleProviderConfigChange(
+                        selectedProviderId,
+                        apiKey,
+                        baseUrl,
+                        requiresApiKey,
+                      )
+                    }
+                    onSave={handleProviderConfigSave}
+                    onEditModel={(index) => handleEditModel(selectedProviderId, index)}
+                    onDeleteModel={(index) => handleDeleteModel(selectedProviderId, index)}
+                    onAddModel={handleAddModel}
+                    onModelsFetched={(ids) => handleModelsFetched(selectedProviderId, ids)}
+                    modelsUrl={providersConfig[selectedProviderId]?.modelsUrl}
+                    onResetToDefault={() => handleResetProvider(selectedProviderId)}
+                    isBuiltIn={providersConfig[selectedProviderId]?.isBuiltIn ?? true}
+                  />
+                )}
 
               {activeSection === 'pdf' && (
                 <PDFSettings selectedProviderId={selectedPdfProviderId} />

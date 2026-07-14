@@ -1035,6 +1035,7 @@
     "addProviderDescription": "カスタムモデルプロバイダーを追加して利用可能なAIモデルを拡張",
     "providerNames": {
       "openai": "OpenAI",
+      "openai-codex": "ChatGPT Codex",
       "anthropic": "Claude",
       "google": "Gemini",
       "deepseek": "DeepSeek",
@@ -1054,6 +1055,36 @@
       "bocha": "Bocha",
       "brave": "Brave Search",
       "baidu": "Baidu"
+    },
+    "codexOAuth": {
+      "experimental": "実験的なサードパーティ Codex 連携です。ChatGPT プランの利用枠を使用します。",
+      "unavailableTitle": "Codex サインインは利用できません",
+      "unavailable": {
+        "FEATURE_DISABLED": "サーバーで Codex OAuth を有効にしてください。",
+        "SERVERLESS_UNSUPPORTED": "Codex OAuth には永続ストレージを備えたセルフホスト Node サーバーが必要です。",
+        "ACCESS_CODE_REQUIRED": "本番環境で Codex OAuth を有効にする前に ACCESS_CODE を設定してください。",
+        "DATA_DIR_UNWRITABLE": "データディレクトリに書き込めません。/app/data の権限を確認してください。"
+      },
+      "connectedAs": "{email} として接続中",
+      "connected": "ChatGPT に接続済み",
+      "signInBrowser": "ChatGPT でサインイン",
+      "signInDevice": "デバイスコードを使用",
+      "waiting": "認証を待っています…",
+      "deviceInstructions": "確認ページを開き、このワンタイムコードを入力してください。",
+      "openVerification": "確認ページを開く",
+      "copyCode": "コードをコピー",
+      "copied": "コピーしました",
+      "cancel": "サインインをキャンセル",
+      "signOut": "サインアウト",
+      "models": "利用可能なモデル",
+      "testConnection": "接続をテスト",
+      "testSuccess": "Codex への接続に成功しました。",
+      "testUnauthorized": "ChatGPT でもう一度サインインしてください。",
+      "testForbidden": "この ChatGPT ワークスペースには Codex の権限がありません。",
+      "testRateLimited": "ChatGPT プランの利用枠またはレート上限に達しました。",
+      "testFailed": "Codex への接続に失敗しました。",
+      "loginFailed": "サインインに失敗しました。再試行するかデバイスコードを使用してください。",
+      "loginExpired": "サインインの有効期限が切れました。もう一度開始してください。"
     },
     "providerTypes": {
       "openai": "OpenAIプロトコル",
@@ -1545,6 +1576,7 @@
     "selectAgents": "エージェントを選択",
     "noVisionWarning": "現在のモデルは画像認識に対応していません。スライドに画像を配置することは可能ですが、モデルは画像の内容を理解して選択やレイアウトを最適化することができません",
     "serverConfigured": "サーバー",
+    "connected": "接続済み",
     "serverConfiguredNotice": "このプロバイダーはサーバーで管理されており、ここでは編集できません。独自の認証情報を使うには、別のプロバイダーを追加してください。",
     "ttsProviderEnabledLabel": "このプロバイダーを有効化",
     "ttsProviderEnabledHint": "オフにすると、このプロバイダーは音声選択に表示されず、自動割り当てもされません。",
