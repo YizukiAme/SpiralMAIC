@@ -87,46 +87,51 @@ describe('Codex provider and OpenAI SDK integration', () => {
   });
 
   it.each([
-    CODEX_OAUTH_ERROR_CODES.CREDENTIALS_MISSING,
-    CODEX_OAUTH_ERROR_CODES.SIGNED_OUT,
-    CODEX_OAUTH_ERROR_CODES.INVALID_GRANT,
-    CODEX_OAUTH_ERROR_CODES.REFRESH_REJECTED,
-  ])('classifies a %s refresh failure as safe 401 through SDK middleware', async (code) => {
-    const tokenProvider = {
-      getValidCredentials: vi.fn(async () => ({
-        accessToken: 'old-token',
-        accountId: 'account-id',
-      })),
-      refreshIfCurrent: vi.fn(async () => {
-        throw new CodexOAuthError(code, false);
-      }),
-    };
-    const upstreamFetch = vi.fn<typeof fetch>(async () =>
-      Promise.resolve(new Response('private-upstream-body', { status: 401 })),
-    );
-    const customFetch = createCodexResponsesTransport({ tokenProvider, upstreamFetch });
-    const { model } = getModel({
-      providerId: 'openai-codex',
-      modelId: 'gpt-5.4',
-      apiKey: '',
-      customFetch,
-    });
+    [CODEX_OAUTH_ERROR_CODES.CREDENTIALS_MISSING, undefined],
+    [CODEX_OAUTH_ERROR_CODES.SIGNED_OUT, undefined],
+    [CODEX_OAUTH_ERROR_CODES.INVALID_GRANT, undefined],
+    [CODEX_OAUTH_ERROR_CODES.REFRESH_REJECTED, undefined],
+    [CODEX_OAUTH_ERROR_CODES.REFRESH_REJECTED, 403],
+    [CODEX_OAUTH_ERROR_CODES.REFRESH_REJECTED, 429],
+  ] as const)(
+    'classifies a %s refresh failure with upstream status %s as safe 401 through SDK middleware',
+    async (code, upstreamStatus) => {
+      const tokenProvider = {
+        getValidCredentials: vi.fn(async () => ({
+          accessToken: 'old-token',
+          accountId: 'account-id',
+        })),
+        refreshIfCurrent: vi.fn(async () => {
+          throw new CodexOAuthError(code, false, upstreamStatus);
+        }),
+      };
+      const upstreamFetch = vi.fn<typeof fetch>(async () =>
+        Promise.resolve(new Response('private-upstream-body', { status: 401 })),
+      );
+      const customFetch = createCodexResponsesTransport({ tokenProvider, upstreamFetch });
+      const { model } = getModel({
+        providerId: 'openai-codex',
+        modelId: 'gpt-5.4',
+        apiKey: '',
+        customFetch,
+      });
 
-    const error = await Promise.resolve(
-      (model as LanguageModelV3).doStream({
-        prompt: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }],
-      }),
-    ).catch((caught: unknown) => caught);
+      const error = await Promise.resolve(
+        (model as LanguageModelV3).doStream({
+          prompt: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }],
+        }),
+      ).catch((caught: unknown) => caught);
 
-    expect(error).toMatchObject({
-      name: 'CodexStreamError',
-      message: SAFE_STREAM_ERROR_MESSAGE,
-      statusCode: 401,
-    });
-    expect(error).not.toHaveProperty('cause');
-    expect(String(error)).not.toContain('private-upstream-body');
-    expect(upstreamFetch).toHaveBeenCalledTimes(1);
-  });
+      expect(error).toMatchObject({
+        name: 'CodexStreamError',
+        message: SAFE_STREAM_ERROR_MESSAGE,
+        statusCode: 401,
+      });
+      expect(error).not.toHaveProperty('cause');
+      expect(String(error)).not.toContain('private-upstream-body');
+      expect(upstreamFetch).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it.each([
     [CODEX_OAUTH_ERROR_CODES.NETWORK_ERROR, true],
