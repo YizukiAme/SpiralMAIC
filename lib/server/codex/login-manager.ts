@@ -23,7 +23,7 @@ import {
   type CodexClock,
   type TokenExchangeFetch,
 } from './token-provider';
-import type { CodexCredentialVault } from './vault';
+import type { CodexCredentialVault, CodexOAuthCredentials } from './vault';
 
 const BROWSER_CALLBACK_HOST = '127.0.0.1';
 const BROWSER_CALLBACK_PORT = 1455;
@@ -68,6 +68,7 @@ interface DeviceAttempt {
   deviceAuthId: string;
   nextPollAt: number;
   errorCode?: CodexLoginErrorCode;
+  pollInFlight?: Promise<CodexLoginAttempt>;
 }
 
 interface TerminalAttempt {
@@ -78,6 +79,22 @@ interface TerminalAttempt {
 }
 
 type ActiveAttempt = BrowserAttempt | DeviceAttempt | TerminalAttempt;
+
+function credentialsEqual(
+  left: Awaited<ReturnType<CodexCredentialVault['load']>>,
+  right: Awaited<ReturnType<CodexCredentialVault['load']>>,
+): boolean {
+  if (left === null || right === null) return left === right;
+  return (
+    left.version === right.version &&
+    left.accessToken === right.accessToken &&
+    left.refreshToken === right.refreshToken &&
+    left.expiresAt === right.expiresAt &&
+    left.accountId === right.accountId &&
+    left.email === right.email &&
+    left.updatedAt === right.updatedAt
+  );
+}
 
 function closeServer(server: Server): Promise<void> {
   if (!server.listening) return Promise.resolve();
@@ -123,6 +140,7 @@ export class CodexLoginManager {
   private activeAttempt: ActiveAttempt | null = null;
   private attemptGeneration = 0;
   private browserSetupTail: Promise<void> = Promise.resolve();
+  private readonly credentialWrites = new Set<Promise<boolean>>();
 
   constructor(options: CodexLoginManagerOptions) {
     this.vault = options.vault;
@@ -206,16 +224,25 @@ export class CodexLoginManager {
     const attempt = this.activeAttempt;
     if (!attempt) return null;
     if (attempt.method !== 'device' || attempt.status !== 'pending') {
+      if (attempt.status === 'expired') await this.waitForCredentialWrites();
       return toPublicAttempt(attempt);
     }
 
     const now = this.clock.now();
     if (now >= attempt.expiresAt) {
       attempt.status = 'expired';
+      await this.waitForCredentialWrites();
       return toPublicAttempt(attempt);
     }
+    if (attempt.pollInFlight) return attempt.pollInFlight;
     if (now < attempt.nextPollAt) return toPublicAttempt(attempt);
-    return this.pollDeviceAttempt(attempt, now);
+    const polling = this.pollDeviceAttempt(attempt, now);
+    attempt.pollInFlight = polling;
+    const clearPolling = () => {
+      if (attempt.pollInFlight === polling) attempt.pollInFlight = undefined;
+    };
+    void polling.then(clearPolling, clearPolling);
+    return polling;
   }
 
   async cancel(): Promise<void> {
@@ -226,11 +253,50 @@ export class CodexLoginManager {
   private async cancelActiveAttempt(): Promise<void> {
     const attempt = this.activeAttempt;
     this.activeAttempt = null;
-    if (attempt) {
-      if (attempt.method === 'browser' && 'server' in attempt) {
-        this.clearBrowserTimeout(attempt);
-        await closeServer(attempt.server);
+    const cleanup: Array<Promise<unknown>> = [this.waitForCredentialWrites()];
+    if (attempt?.method === 'browser' && 'server' in attempt) {
+      this.clearBrowserTimeout(attempt);
+      cleanup.push(closeServer(attempt.server));
+    }
+    await Promise.all(cleanup);
+  }
+
+  private async waitForCredentialWrites(): Promise<void> {
+    await Promise.all([...this.credentialWrites]);
+  }
+
+  private isAttemptCommitEligible(attempt: BrowserAttempt | DeviceAttempt): boolean {
+    if (this.activeAttempt !== attempt || attempt.status !== 'pending') return false;
+    if (this.clock.now() < attempt.expiresAt) return true;
+    attempt.status = 'expired';
+    return false;
+  }
+
+  private async persistAttemptCredentials(
+    attempt: BrowserAttempt | DeviceAttempt,
+    credentials: CodexOAuthCredentials,
+  ): Promise<boolean> {
+    const previous = await this.vault.load();
+    if (!this.isAttemptCommitEligible(attempt)) return false;
+
+    const write = (async (): Promise<boolean> => {
+      await this.vault.save(credentials);
+      if (this.isAttemptCommitEligible(attempt)) {
+        attempt.status = 'complete';
+        return true;
       }
+
+      const current = await this.vault.load();
+      if (!credentialsEqual(current, credentials)) return false;
+      if (previous) await this.vault.save(previous);
+      else await this.vault.clear();
+      return false;
+    })();
+    this.credentialWrites.add(write);
+    try {
+      return await write;
+    } finally {
+      this.credentialWrites.delete(write);
     }
   }
 
@@ -347,21 +413,25 @@ export class CodexLoginManager {
         }),
       });
     } catch {
+      if (!this.isAttemptCommitEligible(attempt)) return toPublicAttempt(attempt);
       attempt.status = 'failed';
       attempt.errorCode = 'NETWORK_ERROR';
       return toPublicAttempt(attempt);
     }
     if (response.status === 403 || response.status === 404) {
+      this.isAttemptCommitEligible(attempt);
       return toPublicAttempt(attempt);
     }
     let payload: unknown;
     try {
       payload = await response.json();
     } catch {
+      if (!this.isAttemptCommitEligible(attempt)) return toPublicAttempt(attempt);
       attempt.status = 'failed';
       attempt.errorCode = 'INVALID_RESPONSE';
       return toPublicAttempt(attempt);
     }
+    if (!this.isAttemptCommitEligible(attempt)) return toPublicAttempt(attempt);
     if (!response.ok || !payload || typeof payload !== 'object' || Array.isArray(payload)) {
       attempt.status = 'failed';
       attempt.errorCode = response.status >= 500 ? 'UPSTREAM_ERROR' : 'INVALID_RESPONSE';
@@ -384,14 +454,7 @@ export class CodexLoginManager {
       attempt.errorCode = 'INVALID_RESPONSE';
       return toPublicAttempt(attempt);
     }
-    if (
-      this.activeAttempt !== attempt ||
-      attempt.status !== 'pending' ||
-      this.clock.now() >= attempt.expiresAt
-    ) {
-      if (this.clock.now() >= attempt.expiresAt) attempt.status = 'expired';
-      return toPublicAttempt(attempt);
-    }
+    if (!this.isAttemptCommitEligible(attempt)) return toPublicAttempt(attempt);
     let credentials;
     try {
       credentials = await exchangeAuthorizationCode({
@@ -402,6 +465,7 @@ export class CodexLoginManager {
         clock: this.clock,
       });
     } catch (error) {
+      if (!this.isAttemptCommitEligible(attempt)) return toPublicAttempt(attempt);
       attempt.status = 'failed';
       attempt.errorCode =
         error instanceof CodexOAuthError && error.code === CODEX_OAUTH_ERROR_CODES.NETWORK_ERROR
@@ -412,19 +476,17 @@ export class CodexLoginManager {
             : 'INVALID_RESPONSE';
       return toPublicAttempt(attempt);
     }
-    if (this.activeAttempt !== attempt || attempt.status !== 'pending') {
-      return toPublicAttempt(attempt);
-    }
+    if (!this.isAttemptCommitEligible(attempt)) return toPublicAttempt(attempt);
+    let committed: boolean;
     try {
-      await this.vault.save(credentials);
+      committed = await this.persistAttemptCredentials(attempt, credentials);
     } catch {
+      if (!this.isAttemptCommitEligible(attempt)) return toPublicAttempt(attempt);
       attempt.status = 'failed';
       attempt.errorCode = 'STORAGE_ERROR';
       return toPublicAttempt(attempt);
     }
-    if (this.activeAttempt === attempt && attempt.status === 'pending') {
-      attempt.status = 'complete';
-    }
+    if (!committed) return toPublicAttempt(attempt);
     return toPublicAttempt(attempt);
   }
 
@@ -479,25 +541,30 @@ export class CodexLoginManager {
         tokenExchangeFetch: this.oauthFetch,
         clock: this.clock,
       });
-      if (this.activeAttempt !== attempt || attempt.status !== 'pending') {
+      if (!this.isAttemptCommitEligible(attempt)) {
         response.statusCode = 409;
         response.end('Codex authorization was cancelled.');
         return;
       }
+      let committed: boolean;
       try {
-        await this.vault.save(credentials);
+        committed = await this.persistAttemptCredentials(attempt, credentials);
       } catch {
-        attempt.status = 'failed';
-        attempt.errorCode = 'STORAGE_ERROR';
-        this.clearBrowserTimeout(attempt);
+        if (this.activeAttempt === attempt && attempt.status === 'pending') {
+          attempt.status = 'failed';
+          attempt.errorCode = 'STORAGE_ERROR';
+          this.clearBrowserTimeout(attempt);
+        }
         response.statusCode = 400;
         response.end('Codex authorization failed.');
         return;
       }
-      if (this.activeAttempt === attempt) {
-        attempt.status = 'complete';
-        this.clearBrowserTimeout(attempt);
+      if (!committed) {
+        response.statusCode = 409;
+        response.end('Codex authorization was cancelled.');
+        return;
       }
+      this.clearBrowserTimeout(attempt);
       response.statusCode = 200;
       response.setHeader('content-type', 'text/plain; charset=utf-8');
       response.end('Codex authorization complete. You can close this window.');
@@ -530,7 +597,7 @@ export class CodexLoginManager {
     }
     attempt.status = 'expired';
     attempt.timeoutHandle = undefined;
-    await closeServer(attempt.server);
+    await Promise.all([closeServer(attempt.server), this.waitForCredentialWrites()]);
   }
 
   private clearBrowserTimeout(attempt: BrowserAttempt): void {
