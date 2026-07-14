@@ -10,6 +10,53 @@ type CodexProviderMetadata = NonNullable<CodexGenerateResult['providerMetadata']
 
 export const CODEX_RESPONSES_BASE_URL = 'https://chatgpt.com/backend-api/codex';
 export const CODEX_RESPONSES_ENDPOINT = `${CODEX_RESPONSES_BASE_URL}/responses`;
+export const CODEX_STREAM_ERROR_MESSAGE = 'Codex response stream could not be processed';
+type SafeCodexStatusCode = 401 | 403 | 429;
+
+function extractSafeStatusCode(error: unknown): SafeCodexStatusCode | undefined {
+  const seen = new Set<unknown>();
+  let current = error;
+
+  for (let depth = 0; depth < 8; depth += 1) {
+    if (!isRecord(current) || seen.has(current)) return undefined;
+    seen.add(current);
+    try {
+      for (const candidate of [current.statusCode, current.status, current.upstreamStatus]) {
+        if (candidate === 401 || candidate === 403 || candidate === 429) return candidate;
+      }
+      current = current.cause;
+    } catch {
+      return undefined;
+    }
+  }
+
+  return undefined;
+}
+
+export class CodexStreamError extends Error {
+  declare readonly statusCode?: SafeCodexStatusCode;
+
+  constructor(statusCode?: SafeCodexStatusCode) {
+    super(CODEX_STREAM_ERROR_MESSAGE);
+    Object.defineProperty(this, 'name', {
+      value: 'CodexStreamError',
+      configurable: true,
+      enumerable: false,
+    });
+    if (statusCode !== undefined) {
+      Object.defineProperty(this, 'statusCode', {
+        value: statusCode,
+        configurable: false,
+        enumerable: false,
+        writable: false,
+      });
+    }
+  }
+}
+
+function createCodexStreamError(source?: unknown): CodexStreamError {
+  return new CodexStreamError(extractSafeStatusCode(source));
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -75,8 +122,56 @@ interface ToolInputState {
   completed: boolean;
 }
 
-function invalidStream(message: string): Error {
-  return new Error(`Invalid Codex stream: ${message}`);
+function sanitizeCodexStream(result: CodexStreamResult): CodexStreamResult {
+  const reader = result.stream.getReader();
+  let released = false;
+
+  const release = () => {
+    if (released) return;
+    released = true;
+    try {
+      reader.releaseLock();
+    } catch {
+      // The safe wrapper owns this reader; there is nothing useful to expose.
+    }
+  };
+
+  const cancel = async () => {
+    if (released) return;
+    try {
+      await reader.cancel();
+    } catch {
+      // Never expose a source-stream cancellation failure.
+    } finally {
+      release();
+    }
+  };
+
+  const stream = new ReadableStream<CodexStreamPart>({
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          release();
+          controller.close();
+          return;
+        }
+        controller.enqueue(
+          value.type === 'error'
+            ? ({ type: 'error', error: createCodexStreamError(value.error) } as CodexStreamPart)
+            : value,
+        );
+      } catch (error) {
+        await cancel();
+        controller.error(createCodexStreamError(error));
+      }
+    },
+    async cancel() {
+      await cancel();
+    },
+  });
+
+  return { ...result, stream };
 }
 
 export async function aggregateCodexStream(
@@ -91,7 +186,12 @@ export async function aggregateCodexStream(
   let usage: CodexGenerateResult['usage'] | undefined;
   let providerMetadata: CodexGenerateResult['providerMetadata'];
 
-  const reader = result.stream.getReader();
+  let reader: ReadableStreamDefaultReader<CodexStreamPart>;
+  try {
+    reader = result.stream.getReader();
+  } catch (error) {
+    throw createCodexStreamError(error);
+  }
   try {
     while (true) {
       const { done, value: rawPart } = await reader.read();
@@ -113,7 +213,7 @@ export async function aggregateCodexStream(
 
         case 'text-start':
         case 'reasoning-start': {
-          if (textStates.has(part.id)) throw invalidStream(`duplicate content id ${part.id}`);
+          if (textStates.has(part.id)) throw createCodexStreamError();
           const kind = part.type === 'text-start' ? 'text' : 'reasoning';
           const item = {
             type: kind,
@@ -131,7 +231,7 @@ export async function aggregateCodexStream(
           const state = textStates.get(part.id);
           const expectedKind = part.type === 'text-delta' ? 'text' : 'reasoning';
           if (!state || state.kind !== expectedKind || state.ended) {
-            throw invalidStream(`delta for unknown content id ${part.id}`);
+            throw createCodexStreamError();
           }
           const item = content[state.contentIndex] as Extract<
             CodexContent,
@@ -147,7 +247,7 @@ export async function aggregateCodexStream(
           const state = textStates.get(part.id);
           const expectedKind = part.type === 'text-end' ? 'text' : 'reasoning';
           if (!state || state.kind !== expectedKind || state.ended) {
-            throw invalidStream(`end for unknown content id ${part.id}`);
+            throw createCodexStreamError();
           }
           state.ended = true;
           setMetadata(
@@ -158,7 +258,7 @@ export async function aggregateCodexStream(
         }
 
         case 'tool-input-start': {
-          if (toolStates.has(part.id)) throw invalidStream(`duplicate tool input id ${part.id}`);
+          if (toolStates.has(part.id)) throw createCodexStreamError();
           const item = {
             type: 'tool-call',
             toolCallId: part.id,
@@ -184,8 +284,7 @@ export async function aggregateCodexStream(
 
         case 'tool-input-delta': {
           const state = toolStates.get(part.id);
-          if (!state || state.ended)
-            throw invalidStream(`delta for unknown tool input id ${part.id}`);
+          if (!state || state.ended) throw createCodexStreamError();
           state.input += part.delta;
           const item = content[state.contentIndex] as Extract<CodexContent, { type: 'tool-call' }>;
           item.input = state.input;
@@ -195,8 +294,7 @@ export async function aggregateCodexStream(
 
         case 'tool-input-end': {
           const state = toolStates.get(part.id);
-          if (!state || state.ended)
-            throw invalidStream(`end for unknown tool input id ${part.id}`);
+          if (!state || state.ended) throw createCodexStreamError();
           state.ended = true;
           setMetadata(
             content[state.contentIndex] as { providerMetadata?: CodexProviderMetadata },
@@ -212,10 +310,10 @@ export async function aggregateCodexStream(
             break;
           }
           if (!state.ended || state.completed || state.toolName !== part.toolName) {
-            throw invalidStream(`incomplete tool input id ${part.toolCallId}`);
+            throw createCodexStreamError();
           }
           if (state.input && state.input !== part.input) {
-            throw invalidStream(`tool input mismatch for id ${part.toolCallId}`);
+            throw createCodexStreamError();
           }
           state.completed = true;
           const item = content[state.contentIndex] as Extract<CodexContent, { type: 'tool-call' }>;
@@ -234,54 +332,58 @@ export async function aggregateCodexStream(
           break;
 
         case 'finish':
-          if (finishReason || usage) throw invalidStream('duplicate finish part');
+          if (finishReason || usage) throw createCodexStreamError();
           finishReason = part.finishReason;
           usage = part.usage;
           providerMetadata = part.providerMetadata;
           break;
 
         case 'error':
-          if (part.error instanceof Error) throw part.error;
-          throw invalidStream('provider emitted an error');
+          throw createCodexStreamError(part.error);
 
         case 'raw':
           break;
 
         default:
-          throw invalidStream(
-            `unsupported part ${String((part as unknown as Record<string, unknown>).type)}`,
-          );
+          throw createCodexStreamError();
       }
     }
+
+    if (!finishReason || !usage) throw createCodexStreamError();
+    for (const state of textStates.values()) {
+      if (!state.ended) throw createCodexStreamError();
+    }
+    for (const state of toolStates.values()) {
+      if (!state.ended || !state.completed) throw createCodexStreamError();
+    }
+
+    const response =
+      responseMetadata || result.response?.headers
+        ? {
+            ...responseMetadata,
+            ...(result.response?.headers ? { headers: result.response.headers } : {}),
+          }
+        : undefined;
+
+    return {
+      content,
+      finishReason,
+      usage,
+      warnings,
+      ...(result.request ? { request: result.request } : {}),
+      ...(response ? { response } : {}),
+      ...(providerMetadata ? { providerMetadata } : {}),
+    };
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw createCodexStreamError(error);
   } finally {
-    reader.releaseLock();
+    try {
+      reader.releaseLock();
+    } catch {
+      // The reader is already released or its stream failed; keep the error safe.
+    }
   }
-
-  if (!finishReason || !usage) throw invalidStream('missing finish part');
-  for (const [id, state] of textStates) {
-    if (!state.ended) throw invalidStream(`unterminated content id ${id}`);
-  }
-  for (const [id, state] of toolStates) {
-    if (!state.ended || !state.completed) throw invalidStream(`unterminated tool input id ${id}`);
-  }
-
-  const response =
-    responseMetadata || result.response?.headers
-      ? {
-          ...responseMetadata,
-          ...(result.response?.headers ? { headers: result.response.headers } : {}),
-        }
-      : undefined;
-
-  return {
-    content,
-    finishReason,
-    usage,
-    warnings,
-    ...(result.request ? { request: result.request } : {}),
-    ...(response ? { response } : {}),
-    ...(providerMetadata ? { providerMetadata } : {}),
-  };
 }
 
 export const codexLanguageModelMiddleware: LanguageModelMiddleware = {
@@ -298,7 +400,20 @@ export const codexLanguageModelMiddleware: LanguageModelMiddleware = {
     normalized.providerOptions = normalizeProviderOptions(params.providerOptions);
     return normalized;
   },
-  wrapGenerate: async ({ doStream }) => aggregateCodexStream(await doStream()),
+  wrapGenerate: async ({ doStream }) => {
+    try {
+      return await aggregateCodexStream(await doStream());
+    } catch (error) {
+      throw createCodexStreamError(error);
+    }
+  },
+  wrapStream: async ({ doStream }) => {
+    try {
+      return sanitizeCodexStream(await doStream());
+    } catch (error) {
+      throw createCodexStreamError(error);
+    }
+  },
 };
 
 export function wrapCodexLanguageModel(model: LanguageModelV3): LanguageModelV3 {

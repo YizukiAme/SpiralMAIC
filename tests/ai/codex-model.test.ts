@@ -10,6 +10,21 @@ const USAGE = {
   outputTokens: { total: 2, text: 2, reasoning: 0 },
 };
 
+const SAFE_STREAM_ERROR_MESSAGE = 'Codex response stream could not be processed';
+
+function expectSafeStreamError(error: unknown, secret?: string): asserts error is Error {
+  expect(error).toBeInstanceOf(Error);
+  expect(error).toMatchObject({
+    name: 'CodexStreamError',
+    message: SAFE_STREAM_ERROR_MESSAGE,
+  });
+  for (const field of ['cause', 'originalError', 'responseBody', 'data']) {
+    expect(error).not.toHaveProperty(field);
+  }
+  expect(Object.keys(error as object)).toEqual([]);
+  if (secret) expect(String(error)).not.toContain(secret);
+}
+
 function createStream(parts: Array<Record<string, unknown>>) {
   return new ReadableStream({
     start(controller) {
@@ -262,11 +277,14 @@ describe('Codex language model middleware', () => {
     });
   });
 
-  it('surfaces non-Error stream error parts as safe Error instances', async () => {
+  it.each([
+    ['an Error', new Error('raw-error-secret')],
+    ['a non-Error', { message: 'object-error-secret', token: 'secret-token' }],
+  ])('replaces %s stream error part with a fresh safe error', async (_label, upstreamError) => {
     const model = wrapCodexLanguageModel(
       createLanguageModel({
         doStream: vi.fn(async () => ({
-          stream: createStream([{ type: 'error', error: 'upstream-secret-body' }]) as never,
+          stream: createStream([{ type: 'error', error: upstreamError }]) as never,
         })),
       }),
     );
@@ -275,46 +293,204 @@ describe('Codex language model middleware', () => {
       model.doGenerate({ prompt: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }] }),
     ).catch((caught: unknown) => caught);
 
-    expect(error).toBeInstanceOf(Error);
-    expect(String(error)).not.toContain('upstream-secret-body');
+    expectSafeStreamError(error, 'secret');
+    expect(error).not.toBe(upstreamError);
+  });
+
+  it.each(['generate', 'stream'] as const)(
+    'sanitizes an underlying doStream rejection on the %s path',
+    async (path) => {
+      const upstreamError = Object.assign(new Error('do-stream-rejection-secret'), {
+        responseBody: 'secret-response-body',
+      });
+      const model = wrapCodexLanguageModel(
+        createLanguageModel({ doStream: vi.fn(async () => Promise.reject(upstreamError)) }),
+      );
+      const options: ModelCallOptions = {
+        prompt: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }],
+      };
+
+      const error = await Promise.resolve(
+        path === 'generate' ? model.doGenerate(options) : model.doStream(options),
+      ).catch((caught: unknown) => caught);
+
+      expectSafeStreamError(error, 'secret');
+      expect(error).not.toBe(upstreamError);
+      expect(error).not.toHaveProperty('responseBody');
+    },
+  );
+
+  it.each([401, 403, 429] as const)(
+    'copies safe status %s from a rejection cause without retaining the cause',
+    async (statusCode) => {
+      const upstreamError = Object.assign(new Error('outer-secret'), {
+        cause: Object.assign(new Error('inner-secret'), { upstreamStatus: statusCode }),
+      });
+      const model = wrapCodexLanguageModel(
+        createLanguageModel({ doStream: vi.fn(async () => Promise.reject(upstreamError)) }),
+      );
+
+      const error = await Promise.resolve(
+        model.doStream({
+          prompt: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }],
+        }),
+      ).catch((caught: unknown) => caught);
+
+      expectSafeStreamError(error, 'secret');
+      expect(error).toHaveProperty('statusCode', statusCode);
+      expect(error).not.toHaveProperty('upstreamStatus');
+    },
+  );
+
+  it.each(['403', 403.5, 200, 500, Number.NaN, { value: 403 }])(
+    'does not copy an unapproved or non-numeric status %o',
+    async (statusCode) => {
+      const model = wrapCodexLanguageModel(
+        createLanguageModel({
+          doStream: vi.fn(async () => Promise.reject({ statusCode, message: 'status-secret' })),
+        }),
+      );
+
+      const error = await Promise.resolve(
+        model.doStream({
+          prompt: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }],
+        }),
+      ).catch((caught: unknown) => caught);
+
+      expectSafeStreamError(error, 'secret');
+      expect(error).not.toHaveProperty('statusCode');
+    },
+  );
+
+  it('sanitizes every streaming error part while preserving all other parts', async () => {
+    const rawError = new Error('stream-part-secret');
+    const streamParts = [
+      { type: 'stream-start', warnings: [] },
+      { type: 'text-start', id: 'text-1' },
+      { type: 'text-delta', id: 'text-1', delta: 'hello' },
+      { type: 'error', error: rawError },
+      { type: 'error', error: { message: 'second-stream-secret' } },
+      { type: 'text-end', id: 'text-1' },
+      {
+        type: 'finish',
+        usage: USAGE,
+        finishReason: { unified: 'stop', raw: 'completed' },
+      },
+    ];
+    const model = wrapCodexLanguageModel(
+      createLanguageModel({
+        doStream: vi.fn(async () => ({ stream: createStream(streamParts) as never })),
+      }),
+    );
+
+    const result = await model.doStream({
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }],
+    });
+    const parts = await collectStream(result.stream);
+
+    expect(parts.filter((part) => (part as { type?: string }).type !== 'error')).toEqual(
+      streamParts.filter((part) => part.type !== 'error'),
+    );
+    const errorParts = parts.filter(
+      (part): part is { type: 'error'; error: unknown } =>
+        (part as { type?: string }).type === 'error',
+    );
+    expect(errorParts).toHaveLength(2);
+    for (const part of errorParts) expectSafeStreamError(part.error, 'secret');
+    expect(errorParts[0]?.error).not.toBe(rawError);
+  });
+
+  it('sanitizes an asynchronous source-stream failure', async () => {
+    const upstreamError = new Error('reader-failure-secret');
+    const model = wrapCodexLanguageModel(
+      createLanguageModel({
+        doStream: vi.fn(async () => ({
+          stream: new ReadableStream({
+            start(controller) {
+              controller.error(upstreamError);
+            },
+          }) as never,
+        })),
+      }),
+    );
+    const result = await model.doStream({
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }],
+    });
+
+    const error = await collectStream(result.stream).catch((caught: unknown) => caught);
+    expectSafeStreamError(error, 'secret');
+    expect(error).not.toBe(upstreamError);
   });
 
   it.each([
     {
       name: 'missing finish metadata',
       parts: [{ type: 'stream-start', warnings: [] }],
-      message: /missing finish part/,
+      secret: undefined,
     },
     {
       name: 'an unknown required stream part',
       parts: [
-        { type: 'future-required-part' },
+        { type: 'future-required-part-secret' },
         {
           type: 'finish',
           usage: USAGE,
           finishReason: { unified: 'stop', raw: 'completed' },
         },
       ],
-      message: /unsupported part future-required-part/,
+      secret: 'future-required-part-secret',
+    },
+    {
+      name: 'a delta carrying an unknown secret id',
+      parts: [
+        { type: 'text-delta', id: 'upstream-secret-id', delta: 'partial' },
+        {
+          type: 'finish',
+          usage: USAGE,
+          finishReason: { unified: 'stop', raw: 'completed' },
+        },
+      ],
+      secret: 'upstream-secret-id',
     },
     {
       name: 'unterminated content',
       parts: [
-        { type: 'text-start', id: 'text-1' },
-        { type: 'text-delta', id: 'text-1', delta: 'partial' },
+        { type: 'text-start', id: 'unterminated-secret-id' },
+        { type: 'text-delta', id: 'unterminated-secret-id', delta: 'partial' },
         {
           type: 'finish',
           usage: USAGE,
           finishReason: { unified: 'stop', raw: 'completed' },
         },
       ],
-      message: /unterminated content id text-1/,
+      secret: 'unterminated-secret-id',
     },
-  ])('rejects $name instead of silently returning partial output', async ({ parts, message }) => {
+  ])('rejects $name with one stable safe error', async ({ parts, secret }) => {
     const model = wrapCodexLanguageModel(
       createLanguageModel({
         doStream: vi.fn(async () => ({ stream: createStream(parts) as never })),
       }),
+    );
+
+    const error = await Promise.resolve(
+      model.doGenerate({
+        prompt: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }],
+      }),
+    ).catch((caught: unknown) => caught);
+
+    expectSafeStreamError(error, secret);
+  });
+
+  it('cancels the source reader when aggregation fails', async () => {
+    const cancel = vi.fn();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue({ type: 'future-required-part-secret' });
+      },
+      cancel,
+    });
+    const model = wrapCodexLanguageModel(
+      createLanguageModel({ doStream: vi.fn(async () => ({ stream: stream as never })) }),
     );
 
     await expect(
@@ -323,6 +499,7 @@ describe('Codex language model middleware', () => {
           prompt: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }],
         }),
       ),
-    ).rejects.toThrow(message);
+    ).rejects.toThrow(SAFE_STREAM_ERROR_MESSAGE);
+    expect(cancel).toHaveBeenCalledTimes(1);
   });
 });
