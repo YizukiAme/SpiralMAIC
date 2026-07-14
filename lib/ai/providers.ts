@@ -1234,6 +1234,27 @@ export const PROVIDERS: Record<ProviderId, ProviderConfig> = {
   },
 };
 
+// Codex discovery exposes only IDs and display names. Seed its fallback
+// registry from the canonical OpenAI catalog so settings sync preserves the
+// same context/output limits and capabilities for shared model IDs.
+const openAIModelsById = new Map(PROVIDERS.openai.models.map((model) => [model.id, model]));
+PROVIDERS['openai-codex'].models = PROVIDERS['openai-codex'].models.map((fallback) => {
+  const catalogModel = openAIModelsById.get(fallback.id);
+  if (!catalogModel) return fallback;
+  return {
+    ...catalogModel,
+    capabilities: catalogModel.capabilities
+      ? {
+          ...catalogModel.capabilities,
+          ...(catalogModel.capabilities.thinking
+            ? { thinking: { ...catalogModel.capabilities.thinking } }
+            : {}),
+        }
+      : undefined,
+    source: 'probed',
+  };
+});
+
 applyModelMetadata(PROVIDERS);
 
 /**

@@ -6,8 +6,17 @@ import type { ModelInfo } from '@/lib/types/provider';
 import type { CodexTokenProvider } from './token-provider';
 import { withCodexCredentialVaultMutation, type CodexCredentialVault } from './vault';
 
-export const CODEX_MODELS_ENDPOINT = `https://chatgpt.com/backend-api/codex/models?client_version=${packageMetadata.version}`;
+/**
+ * Protocol compatibility advertised to the Codex models endpoint.
+ *
+ * This is intentionally independent from OpenMAIC's package version. Keep it
+ * aligned with a verified official Codex release whose model schema and
+ * minimal_client_version semantics this adapter supports.
+ */
+export const CODEX_COMPATIBILITY_VERSION = '0.144.4';
+export const CODEX_MODELS_ENDPOINT = `https://chatgpt.com/backend-api/codex/models?client_version=${CODEX_COMPATIBILITY_VERSION}`;
 export const CODEX_MODELS_CACHE_TTL_MS = 5 * 60 * 1000;
+export const CODEX_MODELS_REQUEST_TIMEOUT_MS = 5_000;
 
 export const CODEX_FALLBACK_MODELS: ModelInfo[] = [
   { id: 'gpt-5.5', name: 'GPT-5.5', source: 'probed' },
@@ -18,6 +27,7 @@ export const CODEX_FALLBACK_MODELS: ModelInfo[] = [
 export const CODEX_MODELS_ERROR_CODES = {
   INVALID_ENDPOINT: 'INVALID_ENDPOINT',
   INVALID_REQUEST: 'INVALID_REQUEST',
+  AUTH_REQUIRED: 'AUTH_REQUIRED',
   NETWORK_ERROR: 'NETWORK_ERROR',
   UPSTREAM_ERROR: 'UPSTREAM_ERROR',
   INVALID_RESPONSE: 'INVALID_RESPONSE',
@@ -29,6 +39,7 @@ export type CodexModelsErrorCode =
 const SAFE_ERROR_MESSAGES: Record<CodexModelsErrorCode, string> = {
   INVALID_ENDPOINT: 'Codex model service rejected an unsupported endpoint',
   INVALID_REQUEST: 'Codex model service rejected an invalid request',
+  AUTH_REQUIRED: 'Codex sign-in must be renewed',
   NETWORK_ERROR: 'Codex model service could not be reached',
   UPSTREAM_ERROR: 'Codex model service is temporarily unavailable',
   INVALID_RESPONSE: 'Codex model service returned an invalid response',
@@ -80,8 +91,77 @@ function numericPriority(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
 }
 
+interface SemanticVersion {
+  major: bigint;
+  minor: bigint;
+  patch: bigint;
+  prerelease: string[] | null;
+}
+
+const SEMVER_PATTERN =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+
+function parseSemanticVersion(value: unknown): SemanticVersion | null {
+  if (typeof value !== 'string') return null;
+  const match = SEMVER_PATTERN.exec(value);
+  if (!match) return null;
+
+  const prerelease = match[4]?.split('.') ?? null;
+  if (prerelease?.some((part) => /^\d+$/.test(part) && part.length > 1 && part.startsWith('0'))) {
+    return null;
+  }
+
+  return {
+    major: BigInt(match[1]),
+    minor: BigInt(match[2]),
+    patch: BigInt(match[3]),
+    prerelease,
+  };
+}
+
+function comparePrerelease(left: string[] | null, right: string[] | null): number {
+  if (left === null) return right === null ? 0 : 1;
+  if (right === null) return -1;
+
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    const leftPart = left[index];
+    const rightPart = right[index];
+    if (leftPart === undefined) return -1;
+    if (rightPart === undefined) return 1;
+    if (leftPart === rightPart) continue;
+
+    const leftNumeric = /^\d+$/.test(leftPart);
+    const rightNumeric = /^\d+$/.test(rightPart);
+    if (leftNumeric && rightNumeric) {
+      return BigInt(leftPart) < BigInt(rightPart) ? -1 : 1;
+    }
+    if (leftNumeric !== rightNumeric) return leftNumeric ? -1 : 1;
+    return leftPart < rightPart ? -1 : 1;
+  }
+  return 0;
+}
+
+function compareSemanticVersions(left: SemanticVersion, right: SemanticVersion): number {
+  for (const field of ['major', 'minor', 'patch'] as const) {
+    if (left[field] !== right[field]) return left[field] < right[field] ? -1 : 1;
+  }
+  return comparePrerelease(left.prerelease, right.prerelease);
+}
+
+function supportsClientVersion(minimum: unknown, clientVersion: string): boolean {
+  if (minimum === undefined || minimum === null) return true;
+  const parsedMinimum = parseSemanticVersion(minimum);
+  const parsedClient = parseSemanticVersion(clientVersion);
+  if (!parsedMinimum || !parsedClient) return false;
+  return compareSemanticVersions(parsedMinimum, parsedClient) <= 0;
+}
+
 /** Convert the upstream envelope to the only model fields safe for client sync. */
-export function parseCodexModels(payload: unknown): ModelInfo[] {
+export function parseCodexModels(
+  payload: unknown,
+  clientVersion = CODEX_COMPATIBILITY_VERSION,
+): ModelInfo[] {
   if (!isRecord(payload) || !Array.isArray(payload.models)) {
     throw new CodexModelsError(CODEX_MODELS_ERROR_CODES.INVALID_RESPONSE);
   }
@@ -92,8 +172,8 @@ export function parseCodexModels(payload: unknown): ModelInfo[] {
       (entry): entry is { value: Record<string, unknown>; sourceIndex: number } =>
         isRecord(entry.value) &&
         nonEmptyString(entry.value.slug) !== undefined &&
-        entry.value.supported_in_api !== false &&
-        entry.value.visibility === 'list',
+        entry.value.visibility === 'list' &&
+        supportsClientVersion(entry.value.minimal_client_version, clientVersion),
     )
     .sort((left, right) => {
       const priority = numericPriority(left.value.priority) - numericPriority(right.value.priority);
@@ -138,6 +218,38 @@ async function cancelResponseBody(response: Response): Promise<void> {
   await response.body?.cancel().catch(() => undefined);
 }
 
+async function withModelsRequestTimeout<T>(
+  inputSignal: AbortSignal | null | undefined,
+  operation: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController();
+  let rejectAbort!: (error: CodexModelsError) => void;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    rejectAbort = reject;
+  });
+  const abort = () => {
+    if (controller.signal.aborted) return;
+    controller.abort();
+    rejectAbort(new CodexModelsError(CODEX_MODELS_ERROR_CODES.NETWORK_ERROR));
+  };
+  const timer = setTimeout(abort, CODEX_MODELS_REQUEST_TIMEOUT_MS);
+
+  if (inputSignal?.aborted) abort();
+  else inputSignal?.addEventListener('abort', abort, { once: true });
+
+  try {
+    if (controller.signal.aborted) return await aborted;
+    return await Promise.race([operation(controller.signal), aborted]);
+  } finally {
+    clearTimeout(timer);
+    inputSignal?.removeEventListener('abort', abort);
+  }
+}
+
+function credentialsError(): CodexModelsError {
+  return new CodexModelsError(CODEX_MODELS_ERROR_CODES.AUTH_REQUIRED);
+}
+
 /** The only authenticated network boundary for Codex model discovery. */
 export function createCodexModelsTransport(
   options: CreateCodexModelsTransportOptions,
@@ -152,21 +264,42 @@ export function createCodexModelsTransport(
       throw new CodexModelsError(CODEX_MODELS_ERROR_CODES.INVALID_REQUEST);
     }
 
-    const credentials = await options.tokenProvider.getValidCredentials();
-    let response: Response;
-    try {
-      response = await upstreamFetch(CODEX_MODELS_ENDPOINT, {
-        method: 'GET',
-        headers: createHeaders(init?.headers, credentials),
-        redirect: 'manual',
-      });
-    } catch {
-      throw new CodexModelsError(CODEX_MODELS_ERROR_CODES.NETWORK_ERROR);
-    }
+    return withModelsRequestTimeout(init?.signal, async (signal) => {
+      const request = async (forceRefresh: boolean): Promise<Response> => {
+        let credentials: { accessToken: string; accountId: string };
+        try {
+          credentials = forceRefresh
+            ? await options.tokenProvider.getValidCredentials({ forceRefresh: true })
+            : await options.tokenProvider.getValidCredentials();
+        } catch {
+          throw credentialsError();
+        }
 
-    if (response.status === 304 || response.ok) return response;
-    await cancelResponseBody(response);
-    throw new CodexModelsError(CODEX_MODELS_ERROR_CODES.UPSTREAM_ERROR, response.status);
+        try {
+          return await upstreamFetch(CODEX_MODELS_ENDPOINT, {
+            method: 'GET',
+            headers: createHeaders(init?.headers, credentials),
+            redirect: 'manual',
+            signal,
+          });
+        } catch {
+          throw new CodexModelsError(CODEX_MODELS_ERROR_CODES.NETWORK_ERROR);
+        }
+      };
+
+      let response = await request(false);
+      if (response.status === 401) {
+        await cancelResponseBody(response);
+        response = await request(true);
+      }
+
+      if (response.status === 304 || response.ok) return response;
+      await cancelResponseBody(response);
+      if (response.status === 401) {
+        throw new CodexModelsError(CODEX_MODELS_ERROR_CODES.AUTH_REQUIRED, response.status);
+      }
+      throw new CodexModelsError(CODEX_MODELS_ERROR_CODES.UPSTREAM_ERROR, response.status);
+    });
   };
 }
 
@@ -201,12 +334,21 @@ export class CodexModelDiscovery {
   }
 
   async getModels(): Promise<ModelInfo[]> {
+    return this.getModelsForCurrentCredentials(true);
+  }
+
+  private async getModelsForCurrentCredentials(
+    allowSameAccountRotationRetry: boolean,
+    expectedAccountId?: string,
+  ): Promise<ModelInfo[]> {
     // Settle refresh rotation before deriving the cache generation. Otherwise
     // this very request could refresh the token inside the transport and make
     // its own valid response look stale.
+    let settledCredentials: { accessToken: string; accountId: string };
     try {
-      await this.tokenProvider.getValidCredentials();
+      settledCredentials = await this.tokenProvider.getValidCredentials();
     } catch {
+      if (expectedAccountId) return [];
       const preservedGeneration = await this.credentialGeneration().catch(() => null);
       if (!preservedGeneration) {
         this.invalidate();
@@ -216,6 +358,8 @@ export class CodexModelDiscovery {
         this.cache?.generation === preservedGeneration ? this.cache.models : CODEX_FALLBACK_MODELS,
       );
     }
+    if (expectedAccountId && settledCredentials.accountId !== expectedAccountId) return [];
+
     const generation = await this.credentialGeneration();
     if (!generation) {
       this.invalidate();
@@ -230,15 +374,73 @@ export class CodexModelDiscovery {
     const invalidationGeneration = this.invalidationGeneration;
     const flightKey = `${invalidationGeneration}:${generation}`;
     const existing = this.inFlight.get(flightKey);
-    if (existing) return cloneModels(await existing);
+    if (existing) {
+      const models = await existing;
+      return cloneModels(
+        await this.retryAfterSameAccountRotation(models, {
+          allowRetry: allowSameAccountRotationRetry,
+          accountId: settledCredentials.accountId,
+          generation,
+          invalidationGeneration,
+        }),
+      );
+    }
 
     const operation = this.refresh(generation, now, invalidationGeneration);
     this.inFlight.set(flightKey, operation);
     try {
-      return cloneModels(await operation);
+      const models = await operation;
+      return cloneModels(
+        await this.retryAfterSameAccountRotation(models, {
+          allowRetry: allowSameAccountRotationRetry,
+          accountId: settledCredentials.accountId,
+          generation,
+          invalidationGeneration,
+        }),
+      );
     } finally {
       if (this.inFlight.get(flightKey) === operation) this.inFlight.delete(flightKey);
     }
+  }
+
+  private async retryAfterSameAccountRotation(
+    models: ModelInfo[],
+    options: {
+      allowRetry: boolean;
+      accountId: string;
+      generation: string;
+      invalidationGeneration: number;
+    },
+  ): Promise<ModelInfo[]> {
+    if (
+      models.length > 0 ||
+      !options.allowRetry ||
+      this.invalidationGeneration !== options.invalidationGeneration
+    ) {
+      return models;
+    }
+
+    const nextGeneration = await this.credentialGeneration().catch(() => null);
+    if (!nextGeneration || nextGeneration === options.generation) return models;
+
+    let currentCredentials: { accessToken: string; accountId: string };
+    try {
+      currentCredentials = await this.tokenProvider.getValidCredentials();
+    } catch {
+      return [];
+    }
+    if (
+      currentCredentials.accountId !== options.accountId ||
+      this.invalidationGeneration !== options.invalidationGeneration
+    ) {
+      return [];
+    }
+
+    // A 401-triggered refresh rotates the credential generation after this
+    // request chose its cache key. Discard that response, then discover once
+    // under the new generation. The account check and one-shot retry prevent
+    // an old request from publishing a different login's models or looping.
+    return this.getModelsForCurrentCredentials(false, options.accountId);
   }
 
   private async refresh(
