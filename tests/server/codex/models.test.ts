@@ -1,13 +1,38 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  CODEX_COMPATIBILITY_VERSION,
   CODEX_FALLBACK_MODELS,
   CODEX_MODELS_ENDPOINT,
+  CODEX_MODELS_REQUEST_TIMEOUT_MS,
   CodexModelDiscovery,
   createCodexModelsTransport,
+  getCodexCredentialGeneration,
   parseCodexModels,
 } from '@/lib/server/codex/models';
-import type { CodexTokenProvider } from '@/lib/server/codex/token-provider';
+import {
+  ManagedCodexTokenProvider,
+  type CodexTokenProvider,
+} from '@/lib/server/codex/token-provider';
+import type { CodexCredentialVault, CodexOAuthCredentials } from '@/lib/server/codex/vault';
+
+const NOW = 1_700_000_000_000;
+
+class MemoryVault implements CodexCredentialVault {
+  constructor(public current: CodexOAuthCredentials | null) {}
+
+  async load(): Promise<CodexOAuthCredentials | null> {
+    return this.current;
+  }
+
+  async save(credentials: CodexOAuthCredentials): Promise<void> {
+    this.current = credentials;
+  }
+
+  async clear(): Promise<void> {
+    this.current = null;
+  }
+}
 
 function createTokenProvider() {
   return {
@@ -31,6 +56,12 @@ function modelResponse(
   });
 }
 
+function unsignedJwt(payload: Record<string, unknown>): string {
+  const header = Buffer.from(JSON.stringify({ alg: 'none' })).toString('base64url');
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  return `${header}.${body}.models-test-signature`;
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((resolvePromise) => {
@@ -40,12 +71,37 @@ function deferred<T>() {
 }
 
 describe('Codex model parsing', () => {
-  it('filters unsupported and hidden records, sorts by priority, and deduplicates slugs', () => {
+  it('uses the official Codex compatibility version instead of the OpenMAIC app version', () => {
+    expect(CODEX_COMPATIBILITY_VERSION).toBe('0.144.4');
+    expect(CODEX_MODELS_ENDPOINT).toBe(
+      'https://chatgpt.com/backend-api/codex/models?client_version=0.144.4',
+    );
+  });
+
+  it('keeps ChatGPT models unsupported by the API, filters hidden/incompatible records, and deduplicates slugs', () => {
     const parsed = parseCodexModels({
       models: [
         { slug: 'gpt-last', display_name: 'GPT Last', priority: 30, visibility: 'list' },
         { slug: 'gpt-hidden', priority: 1, visibility: 'hide' },
-        { slug: 'gpt-unsupported', priority: 2, visibility: 'list', supported_in_api: false },
+        {
+          slug: 'gpt-future',
+          priority: 1,
+          visibility: 'list',
+          minimal_client_version: '0.144.5',
+        },
+        {
+          slug: 'gpt-malformed-minimum',
+          priority: 1,
+          visibility: 'list',
+          minimal_client_version: '0.144',
+        },
+        {
+          slug: 'gpt-chatgpt-only',
+          priority: 2,
+          visibility: 'list',
+          supported_in_api: false,
+          minimal_client_version: '0.144.4',
+        },
         { slug: 'gpt-first', name: 'GPT First', priority: 5, visibility: 'list' },
         { slug: 'gpt-last', display_name: 'Duplicate', priority: 0, visibility: 'list' },
         { slug: '', priority: 0, visibility: 'list' },
@@ -55,8 +111,31 @@ describe('Codex model parsing', () => {
 
     expect(parsed).toEqual([
       { id: 'gpt-last', name: 'Duplicate', source: 'probed' },
+      { id: 'gpt-chatgpt-only', name: 'gpt-chatgpt-only', source: 'probed' },
       { id: 'gpt-first', name: 'GPT First', source: 'probed' },
     ]);
+  });
+
+  it('compares prerelease minimum versions with SemVer precedence', () => {
+    expect(
+      parseCodexModels(
+        {
+          models: [
+            {
+              slug: 'compatible-prerelease',
+              visibility: 'list',
+              minimal_client_version: '0.145.0-beta.2',
+            },
+            {
+              slug: 'future-prerelease',
+              visibility: 'list',
+              minimal_client_version: '0.145.0-beta.11',
+            },
+          ],
+        },
+        '0.145.0-beta.10',
+      ).map((model) => model.id),
+    ).toEqual(['compatible-prerelease']);
   });
 
   it('rejects malformed envelopes instead of exposing raw fields', () => {
@@ -140,6 +219,92 @@ describe('Codex models transport boundary', () => {
     expect(error.message).toBe('Codex model service is temporarily unavailable');
     expect(JSON.stringify(error)).not.toContain(sentinel);
   });
+
+  it('aborts an upstream models request after five seconds', async () => {
+    vi.useFakeTimers();
+    try {
+      let upstreamSignal: AbortSignal | undefined;
+      const transport = createCodexModelsTransport({
+        tokenProvider: createTokenProvider(),
+        upstreamFetch: vi.fn(async (_input, init) => {
+          upstreamSignal = init?.signal ?? undefined;
+          return await new Promise<Response>(() => undefined);
+        }),
+      });
+
+      const request = transport(CODEX_MODELS_ENDPOINT);
+      const rejection = expect(request).rejects.toMatchObject({ code: 'NETWORK_ERROR' });
+      await vi.advanceTimersByTimeAsync(CODEX_MODELS_REQUEST_TIMEOUT_MS);
+
+      await rejection;
+      expect(upstreamSignal?.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('force-refreshes credentials and replays exactly once after a 401', async () => {
+    const tokenProvider = {
+      getValidCredentials: vi.fn(async (options?: { forceRefresh?: boolean }) =>
+        options?.forceRefresh
+          ? { accessToken: 'fresh-access', accountId: 'fresh-account' }
+          : { accessToken: 'old-access', accountId: 'old-account' },
+      ),
+    } satisfies CodexTokenProvider;
+    const upstreamFetch = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('first-sensitive-body', { status: 401 }))
+      .mockResolvedValueOnce(modelResponse([]));
+    const transport = createCodexModelsTransport({ tokenProvider, upstreamFetch });
+
+    await expect(transport(CODEX_MODELS_ENDPOINT)).resolves.toBeInstanceOf(Response);
+
+    expect(tokenProvider.getValidCredentials).toHaveBeenNthCalledWith(1);
+    expect(tokenProvider.getValidCredentials).toHaveBeenNthCalledWith(2, { forceRefresh: true });
+    expect(upstreamFetch).toHaveBeenCalledTimes(2);
+    expect(new Headers(upstreamFetch.mock.calls[0][1]?.headers).get('authorization')).toBe(
+      'Bearer old-access',
+    );
+    expect(new Headers(upstreamFetch.mock.calls[1][1]?.headers).get('authorization')).toBe(
+      'Bearer fresh-access',
+    );
+  });
+
+  it('does not retry a second 401 or expose response and refresh failures', async () => {
+    const tokenProvider = {
+      getValidCredentials: vi
+        .fn()
+        .mockResolvedValueOnce({ accessToken: 'old-access', accountId: 'old-account' })
+        .mockResolvedValueOnce({ accessToken: 'fresh-access', accountId: 'fresh-account' }),
+    } satisfies CodexTokenProvider;
+    const upstreamFetch = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('first-sensitive-body', { status: 401 }))
+      .mockResolvedValueOnce(new Response('second-sensitive-body', { status: 401 }));
+    const transport = createCodexModelsTransport({ tokenProvider, upstreamFetch });
+
+    const error = await transport(CODEX_MODELS_ENDPOINT).catch((caught) => caught);
+
+    expect(error).toMatchObject({ code: 'AUTH_REQUIRED', upstreamStatus: 401 });
+    expect(String(error)).not.toContain('sensitive-body');
+    expect(JSON.stringify(error)).not.toContain('sensitive-body');
+    expect(tokenProvider.getValidCredentials).toHaveBeenCalledTimes(2);
+    expect(upstreamFetch).toHaveBeenCalledTimes(2);
+
+    const refreshFailure = createCodexModelsTransport({
+      tokenProvider: {
+        getValidCredentials: vi
+          .fn()
+          .mockResolvedValueOnce({ accessToken: 'old-access', accountId: 'old-account' })
+          .mockRejectedValueOnce(new Error('refresh-secret-cause')),
+      },
+      upstreamFetch: vi.fn(async () => new Response('body-secret', { status: 401 })),
+    });
+    const refreshError = await refreshFailure(CODEX_MODELS_ENDPOINT).catch((caught) => caught);
+    expect(refreshError).toMatchObject({ code: 'AUTH_REQUIRED' });
+    expect(String(refreshError)).not.toContain('refresh-secret-cause');
+    expect(JSON.stringify(refreshError)).not.toContain('body-secret');
+  });
 });
 
 describe('Codex model discovery cache', () => {
@@ -216,6 +381,134 @@ describe('Codex model discovery cache', () => {
     expect(await discovery.getModels()).toEqual(CODEX_FALLBACK_MODELS);
   });
 
+  it('returns the same-generation stale list when a timed-out refresh is aborted', async () => {
+    vi.useFakeTimers();
+    try {
+      let now = 1_000;
+      let upstreamSignal: AbortSignal | undefined;
+      const upstreamFetch = vi
+        .fn()
+        .mockResolvedValueOnce(modelResponse([{ slug: 'gpt-stale', visibility: 'list' }]))
+        .mockImplementationOnce(async (_input, init) => {
+          upstreamSignal = init?.signal ?? undefined;
+          return await new Promise<Response>(() => undefined);
+        });
+      const discovery = new CodexModelDiscovery({
+        tokenProvider: createTokenProvider(),
+        credentialGeneration: async () => 'account-a:1',
+        upstreamFetch,
+        clock: { now: () => now },
+      });
+
+      await expect(discovery.getModels()).resolves.toMatchObject([{ id: 'gpt-stale' }]);
+      now += 300_001;
+      const refresh = discovery.getModels();
+      await vi.advanceTimersByTimeAsync(CODEX_MODELS_REQUEST_TIMEOUT_MS);
+
+      await expect(refresh).resolves.toMatchObject([{ id: 'gpt-stale' }]);
+      expect(upstreamSignal?.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('returns fallback models when a cold discovery request times out', async () => {
+    vi.useFakeTimers();
+    try {
+      const discovery = new CodexModelDiscovery({
+        tokenProvider: createTokenProvider(),
+        credentialGeneration: async () => 'account-a:1',
+        upstreamFetch: vi.fn(async () => await new Promise<Response>(() => undefined)),
+      });
+
+      const request = discovery.getModels();
+      await vi.advanceTimersByTimeAsync(CODEX_MODELS_REQUEST_TIMEOUT_MS);
+
+      await expect(request).resolves.toEqual(CODEX_FALLBACK_MODELS);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('clears invalid-grant credentials after a models 401 and publishes no fallback models', async () => {
+    const credentials: CodexOAuthCredentials = {
+      version: 1,
+      accessToken: 'expired-access-secret',
+      refreshToken: 'invalid-refresh-secret',
+      expiresAt: NOW + 3_600_000,
+      accountId: 'account-secret',
+      updatedAt: NOW,
+    };
+    const vault = new MemoryVault(credentials);
+    const tokenProvider = new ManagedCodexTokenProvider({
+      vault,
+      clock: { now: () => NOW },
+      tokenExchangeFetch: vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              error: 'invalid_grant',
+              error_description: 'refresh-secret-upstream-body',
+            }),
+            { status: 400, headers: { 'content-type': 'application/json' } },
+          ),
+      ),
+    });
+    const discovery = new CodexModelDiscovery({
+      tokenProvider,
+      credentialGeneration: () => getCodexCredentialGeneration(vault),
+      upstreamFetch: vi.fn(async () => new Response('models-sensitive-body', { status: 401 })),
+    });
+
+    await expect(discovery.getModels()).resolves.toEqual([]);
+    expect(await vault.load()).toBeNull();
+  });
+
+  it('rediscovers models under a same-account generation after a 401 refresh rotates credentials', async () => {
+    const credentials: CodexOAuthCredentials = {
+      version: 1,
+      accessToken: 'old-access-secret',
+      refreshToken: 'old-refresh-secret',
+      expiresAt: NOW + 3_600_000,
+      accountId: 'same-account',
+      updatedAt: NOW - 1,
+    };
+    const vault = new MemoryVault(credentials);
+    const refreshedAccess = unsignedJwt({ chatgpt_account_id: 'same-account' });
+    const tokenProvider = new ManagedCodexTokenProvider({
+      vault,
+      clock: { now: () => NOW },
+      tokenExchangeFetch: vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              access_token: refreshedAccess,
+              refresh_token: 'rotated-refresh-secret',
+              expires_in: 3600,
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          ),
+      ),
+    });
+    const upstreamFetch = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('expired-models-token', { status: 401 }))
+      .mockResolvedValueOnce(
+        modelResponse([{ slug: 'must-not-cross-generation', visibility: 'list' }]),
+      )
+      .mockResolvedValueOnce(modelResponse([{ slug: 'gpt-after-refresh', visibility: 'list' }]));
+    const discovery = new CodexModelDiscovery({
+      tokenProvider,
+      credentialGeneration: () => getCodexCredentialGeneration(vault),
+      upstreamFetch,
+    });
+
+    expect((await discovery.getModels()).map((model) => model.id)).toEqual(['gpt-after-refresh']);
+    expect(upstreamFetch).toHaveBeenCalledTimes(3);
+    expect((await discovery.getModels()).map((model) => model.id)).toEqual(['gpt-after-refresh']);
+    expect(upstreamFetch).toHaveBeenCalledTimes(3);
+  });
+
   it('never returns fallback or stale models after credentials disappear', async () => {
     let generation: string | null = 'account-a:1';
     const discovery = new CodexModelDiscovery({
@@ -252,8 +545,14 @@ describe('Codex model discovery cache', () => {
       .fn()
       .mockImplementationOnce(() => accountA.promise)
       .mockResolvedValueOnce(modelResponse([{ slug: 'gpt-b', visibility: 'list' }]));
+    const tokenProvider = {
+      getValidCredentials: vi.fn(async () => ({
+        accessToken: 'access-secret',
+        accountId: generation?.startsWith('account-b') ? 'account-b' : 'account-a',
+      })),
+    } satisfies CodexTokenProvider;
     const discovery = new CodexModelDiscovery({
-      tokenProvider: createTokenProvider(),
+      tokenProvider,
       credentialGeneration: async () => generation,
       upstreamFetch,
     });

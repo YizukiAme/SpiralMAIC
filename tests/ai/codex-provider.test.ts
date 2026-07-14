@@ -51,6 +51,24 @@ describe('native Codex provider seam', () => {
     ).toThrow(/server transport/i);
   });
 
+  it('clones the OpenAI catalog metadata for every Codex fallback model', () => {
+    for (const modelId of ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini']) {
+      const openai = PROVIDERS.openai.models.find((model) => model.id === modelId);
+      const codex = PROVIDERS['openai-codex'].models.find((model) => model.id === modelId);
+
+      expect(openai).toBeDefined();
+      expect(codex).toMatchObject({
+        id: modelId,
+        contextWindow: openai?.contextWindow,
+        outputWindow: openai?.outputWindow,
+        capabilities: openai?.capabilities,
+        source: 'probed',
+      });
+      expect(codex).not.toBe(openai);
+      expect(codex?.capabilities).not.toBe(openai?.capabilities);
+    }
+  });
+
   it('always uses Responses with the injected transport and fixed non-secret SDK settings', () => {
     const transport = vi.fn<typeof fetch>();
 
