@@ -183,6 +183,7 @@ describe('revisit session helpers', () => {
   test('chat request uses student and assistant seats with revisit contexts', () => {
     const message = createTeacherRevisitMessage('Let me teach it.', 10);
     const request = createRevisitChatRequest({
+      attemptId: 'attempt-1',
       stage,
       scenes: [scene],
       blueprint,
@@ -197,6 +198,7 @@ describe('revisit session helpers', () => {
       ...REVISIT_DEFAULT_STUDENT_AGENT_IDS,
       REVISIT_ASSISTANT_AGENT_ID,
     ]);
+    expect(request.session).toEqual({ kind: 'revisit-attempt', id: 'attempt-1' });
     expect(request.config.revisitProbeContext).toContain('Candidate probes');
     expect(request.config.revisitGateContext).toContain('latest_teacher_turn');
     expect(request.config.revisitFallbackDirective).toBe('probe');
@@ -205,6 +207,7 @@ describe('revisit session helpers', () => {
 
   test('chat request falls back to rescue after the page probe budget is exhausted', () => {
     const request = createRevisitChatRequest({
+      attemptId: 'attempt-1',
       stage,
       scenes: [scene],
       blueprint,
@@ -277,6 +280,7 @@ describe('revisit session helpers', () => {
   test('chat request carries generated revisit agent configs to the stateless server', () => {
     const message = createTeacherRevisitMessage('Let me teach it.', 10);
     const request = createRevisitChatRequest({
+      attemptId: 'attempt-1',
       stage,
       scenes: [scene],
       blueprint,

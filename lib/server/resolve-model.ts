@@ -19,6 +19,11 @@ import { getStageRoute, type LlmStage } from '@/lib/server/model-routes';
 import { getCodexOAuthAvailability } from '@/lib/server/codex/availability';
 import { getCodexAuthRuntime } from '@/lib/server/codex/runtime';
 import { createCodexResponsesTransport } from '@/lib/server/codex/transport';
+import {
+  createEphemeralCodexLogicalSession,
+  deriveCodexUpstreamSessionId,
+  type CodexLogicalSession,
+} from '@/lib/server/codex/logical-session';
 
 export interface ResolvedModel extends ModelWithInfo {
   /** Original model string (e.g. "openai/gpt-4o-mini") */
@@ -57,6 +62,7 @@ export async function resolveModel(params: {
   providerType?: string;
   thinkingConfig?: ThinkingConfig;
   serviceTier?: ModelServiceTier;
+  logicalSession?: CodexLogicalSession;
 }): Promise<ResolvedModel> {
   // Resolution order: stage route > x-model > DEFAULT_MODEL.
   // A configured stage route is the operator's deliberate per-stage choice and
@@ -96,7 +102,12 @@ export async function resolveModel(params: {
         // to the standard tier without making the underlying model unavailable.
       }
     }
-    const transport = createCodexResponsesTransport({ tokenProvider });
+    const transport = createCodexResponsesTransport({
+      tokenProvider,
+      sessionId: deriveCodexUpstreamSessionId(
+        params.logicalSession ?? createEphemeralCodexLogicalSession(),
+      ),
+    });
     const { model, modelInfo } = getModel({
       providerId,
       modelId,
@@ -204,6 +215,7 @@ export async function resolveModelFromHeaders(
   stage?: LlmStage,
   thinkingConfig?: ThinkingConfig,
   serviceTier?: ModelServiceTier,
+  logicalSession?: CodexLogicalSession,
 ): Promise<ResolvedModel> {
   return resolveModel({
     modelString: req.headers.get('x-model') || undefined,
@@ -213,6 +225,7 @@ export async function resolveModelFromHeaders(
     providerType: req.headers.get('x-provider-type') || undefined,
     thinkingConfig,
     serviceTier: serviceTier ?? normalizeServiceTier(req.headers.get('x-service-tier')),
+    ...(logicalSession ? { logicalSession } : {}),
   });
 }
 
@@ -226,6 +239,7 @@ export async function resolveModelFromRequest(
   req: NextRequest,
   body: unknown,
   stage?: LlmStage,
+  logicalSession?: CodexLogicalSession,
 ): Promise<ResolvedModel> {
   // Pass the client's body thinking into resolveModel so the single arbiter
   // there decides (a routed stage may override or drop it). See resolveModel.
@@ -234,5 +248,6 @@ export async function resolveModelFromRequest(
     stage,
     getThinkingConfigFromBody(body),
     getServiceTierFromBody(body),
+    logicalSession,
   );
 }

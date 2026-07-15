@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto';
-
 import packageMetadata from '../../../package.json';
 
 import { CODEX_RESPONSES_ENDPOINT } from '@/lib/ai/codex-model';
@@ -9,6 +7,11 @@ import {
   refreshCodexCredentialsIfCurrent,
   type CodexTokenProvider,
 } from './token-provider';
+import {
+  createEphemeralCodexLogicalSession,
+  deriveCodexUpstreamSessionId,
+  type CodexUpstreamSessionId,
+} from './logical-session';
 
 export { CODEX_RESPONSES_ENDPOINT } from '@/lib/ai/codex-model';
 
@@ -48,23 +51,7 @@ export class CodexResponsesTransportError extends Error {
 interface CreateCodexResponsesTransportOptions {
   tokenProvider: CodexTokenProvider;
   upstreamFetch?: typeof globalThis.fetch;
-}
-
-const SESSION_ID_KEY = Symbol.for('openmaic.codex.responses.session-id.v1');
-const sessionHost = globalThis as unknown as Record<PropertyKey, unknown>;
-
-function getProcessSessionId(): string {
-  const existing = sessionHost[SESSION_ID_KEY];
-  if (typeof existing === 'string' && existing.length > 0) return existing;
-
-  const sessionId = randomUUID();
-  Object.defineProperty(sessionHost, SESSION_ID_KEY, {
-    value: sessionId,
-    enumerable: false,
-    configurable: false,
-    writable: false,
-  });
-  return sessionId;
+  sessionId?: CodexUpstreamSessionId;
 }
 
 const REMOVED_BODY_FIELDS = [
@@ -86,7 +73,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function normalizeBody(body: BodyInit | null | undefined): string {
+function normalizeBody(body: BodyInit | null | undefined, sessionId: string): string {
   if (body === undefined || body === null || typeof body !== 'string') {
     throw new CodexResponsesTransportError(CODEX_RESPONSES_TRANSPORT_ERROR_CODES.INVALID_REQUEST);
   }
@@ -101,7 +88,11 @@ function normalizeBody(body: BodyInit | null | undefined): string {
     throw new CodexResponsesTransportError(CODEX_RESPONSES_TRANSPORT_ERROR_CODES.INVALID_REQUEST);
   }
 
-  const normalized: Record<string, unknown> = { ...parsed, store: false };
+  const normalized: Record<string, unknown> = {
+    ...parsed,
+    store: false,
+    prompt_cache_key: sessionId,
+  };
   const include = Array.isArray(normalized.include)
     ? normalized.include.filter((value): value is string => typeof value === 'string')
     : [];
@@ -111,11 +102,15 @@ function normalizeBody(body: BodyInit | null | undefined): string {
   normalized.include = include;
 
   if (Array.isArray(normalized.input)) {
-    normalized.input = normalized.input.map((item) =>
-      isRecord(item) && item.role === 'system' ? { ...item, role: 'developer' } : item,
-    );
+    normalized.input = normalized.input.map((item) => {
+      if (!isRecord(item)) return item;
+      const { id: _itemId, ...withoutItemId } = item;
+      return item.role === 'system' ? { ...withoutItemId, role: 'developer' } : withoutItemId;
+    });
   }
 
+  delete normalized.thread_id;
+  delete normalized['thread-id'];
   for (const field of REMOVED_BODY_FIELDS) delete normalized[field];
   return JSON.stringify(normalized);
 }
@@ -178,7 +173,8 @@ export function createCodexResponsesTransport(
   options: CreateCodexResponsesTransportOptions,
 ): typeof globalThis.fetch {
   const upstreamFetch = options.upstreamFetch ?? globalThis.fetch.bind(globalThis);
-  const sessionId = getProcessSessionId();
+  const sessionId =
+    options.sessionId ?? deriveCodexUpstreamSessionId(createEphemeralCodexLogicalSession());
 
   return async (input, init) => {
     if (typeof input !== 'string' || input !== CODEX_RESPONSES_ENDPOINT) {
@@ -187,7 +183,7 @@ export function createCodexResponsesTransport(
       );
     }
 
-    const body = normalizeBody(init?.body);
+    const body = normalizeBody(init?.body, sessionId);
     let originalCredentials: { accessToken: string; accountId: string } | null = null;
     const request = async (
       forceRefresh: boolean,

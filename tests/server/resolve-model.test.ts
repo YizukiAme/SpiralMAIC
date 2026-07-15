@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { deriveCodexUpstreamSessionId } from '@/lib/server/codex/logical-session';
+
 // Mock the heavy downstream of resolveModel so the test isolates the model
 // string *resolution order*: stage route > x-model > DEFAULT_MODEL > builtin.
 // model-routes is left real (it just reads MODEL_ROUTES) so we exercise the
@@ -32,7 +34,9 @@ const mocks = vi.hoisted(() => {
     codexTokenProvider,
     codexModelDiscovery,
     codexTransport: vi.fn(),
-    createCodexResponsesTransport: vi.fn(() => vi.fn()),
+    createCodexResponsesTransport: vi.fn(
+      (_options: { tokenProvider: unknown; sessionId?: string }) => vi.fn(),
+    ),
   };
 });
 
@@ -201,6 +205,7 @@ describe('resolveModel — per-stage resolution order', () => {
     expect(mocks.codexTokenProvider.getValidCredentials).toHaveBeenCalledWith();
     expect(mocks.createCodexResponsesTransport).toHaveBeenCalledWith({
       tokenProvider: mocks.codexTokenProvider,
+      sessionId: expect.stringMatching(/^oma_[A-Za-z0-9_-]{43}$/),
     });
     expect(mocks.getModelCalls.at(-1)).toEqual({
       providerId: 'openai-codex',
@@ -214,6 +219,33 @@ describe('resolveModel — per-stage resolution order', () => {
       apiKey: '',
     });
     expect(resolved.baseUrl).toBeUndefined();
+  });
+
+  it('binds a provided logical session to the Codex transport for this model resolution', async () => {
+    const { resolveModel } = await import('@/lib/server/resolve-model');
+    const logicalSession = { kind: 'revisit-attempt', id: 'attempt-1' } as const;
+
+    await resolveModel({
+      modelString: 'openai-codex:gpt-5.4',
+      logicalSession,
+    });
+
+    expect(mocks.createCodexResponsesTransport).toHaveBeenCalledWith({
+      tokenProvider: mocks.codexTokenProvider,
+      sessionId: deriveCodexUpstreamSessionId(logicalSession),
+    });
+  });
+
+  it('creates a fresh ephemeral identity for each one-shot Codex model resolution', async () => {
+    const { resolveModel } = await import('@/lib/server/resolve-model');
+
+    await resolveModel({ modelString: 'openai-codex:gpt-5.4' });
+    await resolveModel({ modelString: 'openai-codex:gpt-5.4' });
+
+    const firstSessionId = mocks.createCodexResponsesTransport.mock.calls[0]?.[0]?.sessionId;
+    const secondSessionId = mocks.createCodexResponsesTransport.mock.calls[1]?.[0]?.sessionId;
+    expect(firstSessionId).toMatch(/^oma_[A-Za-z0-9_-]{43}$/);
+    expect(secondSessionId).not.toBe(firstSessionId);
   });
 
   it('accepts priority for an unrouted Codex model only after server discovery confirms support', async () => {

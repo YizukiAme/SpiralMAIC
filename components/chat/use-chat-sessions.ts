@@ -533,6 +533,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
 
       const outcome = await runAgentLoop(
         {
+          session: { kind: 'chat', id: sessionId },
           config: requestTemplate.config,
           userProfile: requestTemplate.userProfile,
           apiKey: requestTemplate.apiKey,

@@ -105,6 +105,34 @@ function normalizeProviderOptions(
   >;
 }
 
+function stripDecodedOpenAIItemId(part: unknown): unknown {
+  if (!isRecord(part) || !isRecord(part.providerOptions)) return part;
+  const openai = part.providerOptions.openai;
+  if (!isRecord(openai) || !Object.prototype.hasOwnProperty.call(openai, 'itemId')) return part;
+
+  const { itemId: _itemId, ...safeOpenAI } = openai;
+  const { openai: _openai, ...otherProviderOptions } = part.providerOptions;
+  const safeProviderOptions =
+    Object.keys(safeOpenAI).length > 0
+      ? { ...otherProviderOptions, openai: safeOpenAI }
+      : otherProviderOptions;
+  const { providerOptions: _providerOptions, ...safePart } = part;
+  return Object.keys(safeProviderOptions).length > 0
+    ? { ...safePart, providerOptions: safeProviderOptions }
+    : safePart;
+}
+
+function sanitizeCodexReplayPrompt<T>(prompt: T): T {
+  if (!Array.isArray(prompt)) return prompt;
+  return prompt.map((message) => {
+    if (!isRecord(message) || !Array.isArray(message.content)) return message;
+    return {
+      ...message,
+      content: message.content.map(stripDecodedOpenAIItemId),
+    };
+  }) as T;
+}
+
 function mergeProviderMetadata(...values: Array<unknown>): CodexProviderMetadata | undefined {
   const merged: Record<string, Record<string, unknown>> = {};
   for (const value of values) {
@@ -407,6 +435,7 @@ function createCodexLanguageModelMiddleware(
     specificationVersion: 'v3',
     transformParams: async ({ params }) => {
       const normalized = { ...params };
+      normalized.prompt = sanitizeCodexReplayPrompt(params.prompt);
       delete normalized.maxOutputTokens;
       delete normalized.temperature;
       delete normalized.topP;

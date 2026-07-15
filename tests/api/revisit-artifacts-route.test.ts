@@ -60,6 +60,7 @@ describe('revisit artifacts route', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        jobId: 'artifact-job-1',
         kind: 'flashcards',
         options: {
           focusMode: 'selected-scenes',
@@ -93,6 +94,7 @@ describe('revisit artifacts route', () => {
       request,
       expect.any(Object),
       'revisit-materials',
+      { kind: 'revisit-artifact', id: 'artifact-job-1' },
     );
     expect(mocks.buildStudyArtifactPrompt).toHaveBeenCalledWith(
       expect.objectContaining({
