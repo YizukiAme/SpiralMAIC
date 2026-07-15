@@ -102,6 +102,10 @@ test('imports the featured demo into recent learning and dismisses its card', as
 
   const demo = page.getByRole('region', { name: '演示课程' });
   await expect(demo.getByRole('heading', { name: '厚壁菌门与肥胖' })).toBeVisible();
+  const coverBounds = await demo.locator('img').first().locator('..').boundingBox();
+  expect(coverBounds).not.toBeNull();
+  expect(coverBounds!.width / coverBounds!.height).toBeGreaterThan(1.72);
+  expect(coverBounds!.width / coverBounds!.height).toBeLessThan(1.82);
   const demoBounds = await demo.boundingBox();
   const viewportHeight = await page.evaluate(() => window.innerHeight);
   expect(demoBounds).not.toBeNull();
