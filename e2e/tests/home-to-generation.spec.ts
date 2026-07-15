@@ -64,6 +64,19 @@ test.describe('Home → Generation', () => {
     expect(page.url()).toContain('/generation-preview');
   });
 
+  test('guides an empty Spiral home to the course generator', async ({ page }) => {
+    const home = new HomePage(page);
+    await home.goto();
+
+    await page.getByRole('switch', { name: 'Spiral mode' }).click();
+
+    await expect(page.getByText('Generate a course before using Spiral')).toBeVisible();
+    await page.getByRole('button', { name: 'Generate a course' }).click();
+
+    await expect(home.textarea).toBeVisible();
+    await expect(home.textarea).toBeFocused();
+  });
+
   test('keeps body spacing stable when the settings dialog opens', async ({ page }) => {
     const home = new HomePage(page);
     await home.goto();

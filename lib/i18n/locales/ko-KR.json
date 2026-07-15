@@ -29,7 +29,9 @@
   },
   "home": {
     "slogan": "멀티 에이전트 인터랙티브 교실에서 펼치는 생성형 학습",
-    "greetingWithName": "안녕하세요, {{name}}!"
+    "greetingWithName": "안녕하세요, {{name}}!",
+    "spiralEmptyCoursePrompt": "먼저 강좌를 하나 생성해 주세요",
+    "generateFirstCourse": "강좌 생성"
   },
   "toolbar": {
     "pdfParser": "파서",
