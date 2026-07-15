@@ -29,9 +29,7 @@
   },
   "home": {
     "slogan": "التعلّم التوليدي في فصل تفاعلي متعدد الوكلاء",
-    "greetingWithName": "مرحبًا، {{name}}",
-    "spiralEmptyCoursePrompt": "أنشئ دورة أولًا قبل استخدام Spiral",
-    "generateFirstCourse": "إنشاء دورة"
+    "greetingWithName": "مرحبًا، {{name}}"
   },
   "toolbar": {
     "pdfParser": "محلل PDF",

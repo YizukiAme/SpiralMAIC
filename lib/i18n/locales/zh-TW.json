@@ -29,9 +29,7 @@
   },
   "home": {
     "slogan": "多智能體互動課室中的生成式學習",
-    "greetingWithName": "嗨，{{name}}",
-    "spiralEmptyCoursePrompt": "請先生成一節課程",
-    "generateFirstCourse": "去生成課程"
+    "greetingWithName": "嗨，{{name}}"
   },
   "toolbar": {
     "pdfParser": "解析器",
