@@ -1673,7 +1673,7 @@ export function getModel(config: ModelConfig): ModelWithInfo {
           middleware: extractReasoningMiddleware({ tagName: 'think' }),
         });
       }
-      if (isCodex) model = wrapCodexLanguageModel(model);
+      if (isCodex) model = wrapCodexLanguageModel(model, { serviceTier: config.serviceTier });
       break;
     }
 

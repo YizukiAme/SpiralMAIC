@@ -7,7 +7,7 @@
 
 import type { NextRequest } from 'next/server';
 import { getModel, parseModelString, type ModelWithInfo } from '@/lib/ai/providers';
-import type { ThinkingConfig } from '@/lib/types/provider';
+import type { ModelServiceTier, ThinkingConfig } from '@/lib/types/provider';
 import {
   isServerConfiguredProvider,
   resolveApiKey,
@@ -33,6 +33,8 @@ export interface ResolvedModel extends ModelWithInfo {
   baseUrl?: string;
   /** Optional per-request thinking configuration from the client. */
   thinkingConfig?: ThinkingConfig;
+  /** Server-validated Codex request tier. */
+  serviceTier?: ModelServiceTier;
 }
 
 /**
@@ -54,6 +56,7 @@ export async function resolveModel(params: {
   baseUrl?: string;
   providerType?: string;
   thinkingConfig?: ThinkingConfig;
+  serviceTier?: ModelServiceTier;
 }): Promise<ResolvedModel> {
   // Resolution order: stage route > x-model > DEFAULT_MODEL.
   // A configured stage route is the operator's deliberate per-stage choice and
@@ -78,14 +81,28 @@ export async function resolveModel(params: {
       throw new Error(`Codex OAuth provider is unavailable (${availability.reason})`);
     }
 
-    const { tokenProvider } = getCodexAuthRuntime();
+    const { tokenProvider, modelDiscovery } = getCodexAuthRuntime();
     await tokenProvider.getValidCredentials();
+    let serviceTier: ModelServiceTier | undefined;
+    if (!stageModel && params.serviceTier === 'priority') {
+      try {
+        const discoveredModels = await modelDiscovery.getModels();
+        const discoveredModel = discoveredModels.find((model) => model.id === modelId);
+        if (discoveredModel?.capabilities?.serviceTiers?.includes('priority')) {
+          serviceTier = 'priority';
+        }
+      } catch {
+        // Capability discovery is an allowlist check. Failure safely falls back
+        // to the standard tier without making the underlying model unavailable.
+      }
+    }
     const transport = createCodexResponsesTransport({ tokenProvider });
     const { model, modelInfo } = getModel({
       providerId,
       modelId,
       apiKey: '',
       customFetch: transport,
+      ...(serviceTier ? { serviceTier } : {}),
     });
 
     return {
@@ -97,6 +114,7 @@ export async function resolveModel(params: {
       apiKey: '',
       baseUrl: undefined,
       thinkingConfig: stageModel ? stageRoute?.thinking : params.thinkingConfig,
+      ...(serviceTier ? { serviceTier } : {}),
     };
   }
 
@@ -165,10 +183,19 @@ function getThinkingConfigFromBody(body: unknown): ThinkingConfig | undefined {
   return config && typeof config === 'object' ? (config as ThinkingConfig) : undefined;
 }
 
+function normalizeServiceTier(value: unknown): ModelServiceTier | undefined {
+  return value === 'priority' ? value : undefined;
+}
+
+function getServiceTierFromBody(body: unknown): ModelServiceTier | undefined {
+  if (!body || typeof body !== 'object') return undefined;
+  return normalizeServiceTier((body as { serviceTier?: unknown }).serviceTier);
+}
+
 /**
  * Resolve a language model from standard request headers.
  *
- * Reads: x-model, x-api-key, x-base-url, x-provider-type
+ * Reads: x-model, x-api-key, x-base-url, x-provider-type, x-service-tier
  * Note: requiresApiKey is derived server-side from the provider registry,
  * never from client headers, to prevent auth bypass.
  */
@@ -176,6 +203,7 @@ export async function resolveModelFromHeaders(
   req: NextRequest,
   stage?: LlmStage,
   thinkingConfig?: ThinkingConfig,
+  serviceTier?: ModelServiceTier,
 ): Promise<ResolvedModel> {
   return resolveModel({
     modelString: req.headers.get('x-model') || undefined,
@@ -184,6 +212,7 @@ export async function resolveModelFromHeaders(
     baseUrl: req.headers.get('x-base-url') || undefined,
     providerType: req.headers.get('x-provider-type') || undefined,
     thinkingConfig,
+    serviceTier: serviceTier ?? normalizeServiceTier(req.headers.get('x-service-tier')),
   });
 }
 
@@ -200,5 +229,10 @@ export async function resolveModelFromRequest(
 ): Promise<ResolvedModel> {
   // Pass the client's body thinking into resolveModel so the single arbiter
   // there decides (a routed stage may override or drop it). See resolveModel.
-  return resolveModelFromHeaders(req, stage, getThinkingConfigFromBody(body));
+  return resolveModelFromHeaders(
+    req,
+    stage,
+    getThinkingConfigFromBody(body),
+    getServiceTierFromBody(body),
+  );
 }

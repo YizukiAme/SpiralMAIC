@@ -1058,7 +1058,6 @@
     },
     "codexOAuth": {
       "experimental": "実験的なサードパーティ Codex 連携です。ChatGPT プランの利用枠を使用します。",
-      "connectTitle": "ChatGPT 接続",
       "unavailableTitle": "Codex サインインは利用できません",
       "unavailable": {
         "FEATURE_DISABLED": "サーバーで Codex OAuth を有効にしてください。",
@@ -1078,6 +1077,8 @@
       "cancel": "サインインをキャンセル",
       "signOut": "サインアウト",
       "models": "利用可能なモデル",
+      "fastMode": "Fast モード",
+      "fastModeDescription": "対応モデルにのみ適用されます。約 1.5 倍高速ですが、ChatGPT プランの利用枠をより多く消費します。",
       "testConnection": "接続をテスト",
       "testSuccess": "Codex への接続に成功しました。",
       "testUnauthorized": "ChatGPT でもう一度サインインしてください。",

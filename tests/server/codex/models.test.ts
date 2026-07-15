@@ -124,6 +124,59 @@ describe('Codex model parsing', () => {
     ]);
   });
 
+  it('exposes only the supported Fast service tier from current and legacy catalog metadata', () => {
+    const parsed = parseCodexModels({
+      models: [
+        {
+          slug: 'ranking-priority-only',
+          visibility: 'list',
+          priority: 1,
+        },
+        {
+          slug: 'modern-fast',
+          visibility: 'list',
+          priority: 10,
+          service_tiers: [
+            { id: 'priority', name: 'Fast' },
+            { id: 'flex', name: 'Flex' },
+            { id: 7 },
+            'priority',
+          ],
+        },
+        {
+          slug: 'legacy-fast',
+          visibility: 'list',
+          priority: 20,
+          additional_speed_tiers: ['fast', 'unknown', null],
+        },
+        {
+          slug: 'malformed-tiers',
+          visibility: 'list',
+          priority: 30,
+          service_tiers: [{ id: 'fast' }, { id: ' priority' }, null],
+          additional_speed_tiers: ['priority', { id: 'fast' }],
+        },
+      ],
+    });
+
+    expect(parsed).toEqual([
+      { id: 'ranking-priority-only', name: 'ranking-priority-only', source: 'probed' },
+      {
+        id: 'modern-fast',
+        name: 'modern-fast',
+        source: 'probed',
+        capabilities: { serviceTiers: ['priority'] },
+      },
+      {
+        id: 'legacy-fast',
+        name: 'legacy-fast',
+        source: 'probed',
+        capabilities: { serviceTiers: ['priority'] },
+      },
+      { id: 'malformed-tiers', name: 'malformed-tiers', source: 'probed' },
+    ]);
+  });
+
   it('compares prerelease minimum versions with SemVer precedence', () => {
     expect(
       parseCodexModels(

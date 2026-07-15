@@ -1058,7 +1058,6 @@
     },
     "codexOAuth": {
       "experimental": "실험적인 타사 Codex 연동이며 ChatGPT 요금제 한도를 사용합니다.",
-      "connectTitle": "ChatGPT 연결",
       "unavailableTitle": "Codex 로그인을 사용할 수 없습니다",
       "unavailable": {
         "FEATURE_DISABLED": "서버에서 Codex OAuth를 활성화해 주세요.",
@@ -1078,6 +1077,8 @@
       "cancel": "로그인 취소",
       "signOut": "로그아웃",
       "models": "사용 가능한 모델",
+      "fastMode": "Fast 모드",
+      "fastModeDescription": "지원 모델에만 적용됩니다. 약 1.5배 더 빠르지만 ChatGPT 요금제 사용량을 더 많이 소모합니다.",
       "testConnection": "연결 테스트",
       "testSuccess": "Codex 연결에 성공했습니다.",
       "testUnauthorized": "ChatGPT로 다시 로그인하세요.",

@@ -9,6 +9,7 @@ import type {
   StatelessEvent,
 } from '@/lib/types/chat';
 import type { Scene, Stage } from '@/lib/types/stage';
+import type { ModelServiceTier } from '@/lib/types/provider';
 import type { RevisitExamBlueprint, RevisitGateDecision, RevisitProbe } from '@/lib/revisit/types';
 
 export const REVISIT_STUDENT_AGENT_ID = 'default-4';
@@ -214,6 +215,7 @@ export function createRevisitChatRequest(args: {
   apiKey: string;
   baseUrl?: string;
   providerType?: string;
+  serviceTier?: ModelServiceTier;
   agentIds?: RevisitAgentIds;
   agentConfigs?: NonNullable<StatelessChatRequest['config']['agentConfigs']>;
 }): StatelessChatRequest {
@@ -257,6 +259,7 @@ export function createRevisitChatRequest(args: {
     model: args.model,
     ...(args.baseUrl ? { baseUrl: args.baseUrl } : {}),
     ...(args.providerType ? { providerType: args.providerType } : {}),
+    ...(args.serviceTier ? { serviceTier: args.serviceTier } : {}),
   };
 }
 

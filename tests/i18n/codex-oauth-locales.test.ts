@@ -23,7 +23,6 @@ const CODEX_KEYS = [
   'settings.providerNames.openai-codex',
   'settings.connected',
   'settings.codexOAuth.experimental',
-  'settings.codexOAuth.connectTitle',
   'settings.codexOAuth.unavailableTitle',
   'settings.codexOAuth.unavailable.FEATURE_DISABLED',
   'settings.codexOAuth.unavailable.SERVERLESS_UNSUPPORTED',
@@ -41,6 +40,8 @@ const CODEX_KEYS = [
   'settings.codexOAuth.cancel',
   'settings.codexOAuth.signOut',
   'settings.codexOAuth.models',
+  'settings.codexOAuth.fastMode',
+  'settings.codexOAuth.fastModeDescription',
   'settings.codexOAuth.testConnection',
   'settings.codexOAuth.testSuccess',
   'settings.codexOAuth.testUnauthorized',
@@ -77,6 +78,19 @@ describe('Codex OAuth locale coverage', () => {
     );
     for (const messages of Object.values(locales)) {
       expect(messages.settings.codexOAuth.experimental).not.toMatch(/ban|suspend|封禁|封號|停權/i);
+    }
+  });
+
+  it('describes fast mode speed and ChatGPT quota cost in English', () => {
+    expect(enUS.settings.codexOAuth.fastMode).toBe('Fast mode');
+    expect(enUS.settings.codexOAuth.fastModeDescription).toBe(
+      'Applies only to supported models: about 1.5x faster, but uses more of your ChatGPT plan quota.',
+    );
+  });
+
+  it('does not keep copy for the removed connection notice', () => {
+    for (const messages of Object.values(locales)) {
+      expect(messages.settings.codexOAuth).not.toHaveProperty('connectTitle');
     }
   });
 });

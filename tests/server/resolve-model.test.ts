@@ -13,6 +13,15 @@ const mocks = vi.hoisted(() => {
   const codexTokenProvider = {
     getValidCredentials: vi.fn(async () => ({ accessToken: 'token', accountId: 'account' })),
   };
+  const codexModelDiscovery = {
+    getModels: vi.fn(async () => [
+      {
+        id: 'gpt-5.4',
+        name: 'GPT-5.4',
+        capabilities: { serviceTiers: ['priority'] },
+      },
+    ]),
+  };
   return {
     getModelCalls: [] as Array<Record<string, unknown>>,
     getCodexOAuthAvailability: vi.fn(async () => ({
@@ -21,6 +30,7 @@ const mocks = vi.hoisted(() => {
       methods: ['device'],
     })),
     codexTokenProvider,
+    codexModelDiscovery,
     codexTransport: vi.fn(),
     createCodexResponsesTransport: vi.fn(() => vi.fn()),
   };
@@ -53,7 +63,10 @@ vi.mock('@/lib/server/codex/availability', () => ({
 }));
 
 vi.mock('@/lib/server/codex/runtime', () => ({
-  getCodexAuthRuntime: () => ({ tokenProvider: mocks.codexTokenProvider }),
+  getCodexAuthRuntime: () => ({
+    tokenProvider: mocks.codexTokenProvider,
+    modelDiscovery: mocks.codexModelDiscovery,
+  }),
 }));
 
 vi.mock('@/lib/server/codex/transport', () => ({
@@ -75,6 +88,14 @@ describe('resolveModel — per-stage resolution order', () => {
       accessToken: 'token',
       accountId: 'account',
     });
+    mocks.codexModelDiscovery.getModels.mockClear();
+    mocks.codexModelDiscovery.getModels.mockResolvedValue([
+      {
+        id: 'gpt-5.4',
+        name: 'GPT-5.4',
+        capabilities: { serviceTiers: ['priority'] },
+      },
+    ]);
     mocks.createCodexResponsesTransport.mockClear();
     mocks.createCodexResponsesTransport.mockReturnValue(mocks.codexTransport);
     delete process.env.MODEL_ROUTES;
@@ -193,6 +214,76 @@ describe('resolveModel — per-stage resolution order', () => {
       apiKey: '',
     });
     expect(resolved.baseUrl).toBeUndefined();
+  });
+
+  it('accepts priority for an unrouted Codex model only after server discovery confirms support', async () => {
+    const { resolveModel } = await import('@/lib/server/resolve-model');
+
+    const resolved = await resolveModel({
+      modelString: 'openai-codex:gpt-5.4',
+      serviceTier: 'priority',
+    });
+
+    expect(mocks.codexModelDiscovery.getModels).toHaveBeenCalledTimes(1);
+    expect(mocks.getModelCalls.at(-1)).toMatchObject({ serviceTier: 'priority' });
+    expect(resolved.serviceTier).toBe('priority');
+  });
+
+  it('drops priority when the discovered Codex model does not advertise it', async () => {
+    mocks.codexModelDiscovery.getModels.mockResolvedValueOnce([
+      { id: 'gpt-5.4', name: 'GPT-5.4', capabilities: { serviceTiers: [] } },
+    ]);
+    const { resolveModel } = await import('@/lib/server/resolve-model');
+
+    const resolved = await resolveModel({
+      modelString: 'openai-codex:gpt-5.4',
+      serviceTier: 'priority',
+    });
+
+    expect(mocks.getModelCalls.at(-1)).not.toHaveProperty('serviceTier');
+    expect(resolved.serviceTier).toBeUndefined();
+  });
+
+  it('does not let a client tier bleed into a routed Codex stage', async () => {
+    process.env.MODEL_ROUTES = JSON.stringify({ 'pbl-chat': 'openai-codex:gpt-5.4' });
+    const { resolveModel } = await import('@/lib/server/resolve-model');
+
+    const resolved = await resolveModel({
+      stage: 'pbl-chat',
+      modelString: 'openai-codex:gpt-client',
+      serviceTier: 'priority',
+    });
+
+    expect(mocks.codexModelDiscovery.getModels).not.toHaveBeenCalled();
+    expect(mocks.getModelCalls.at(-1)).not.toHaveProperty('serviceTier');
+    expect(resolved.serviceTier).toBeUndefined();
+  });
+
+  it('only accepts the exact priority service-tier header', async () => {
+    const { NextRequest } = await import('next/server');
+    const { resolveModelFromHeaders } = await import('@/lib/server/resolve-model');
+
+    await resolveModelFromHeaders(
+      new NextRequest('http://localhost/api/test', {
+        headers: {
+          'x-model': 'openai-codex:gpt-5.4',
+          'x-service-tier': 'fast',
+        },
+      }),
+    );
+    expect(mocks.codexModelDiscovery.getModels).not.toHaveBeenCalled();
+    expect(mocks.getModelCalls.at(-1)).not.toHaveProperty('serviceTier');
+
+    await resolveModelFromHeaders(
+      new NextRequest('http://localhost/api/test', {
+        headers: {
+          'x-model': 'openai-codex:gpt-5.4',
+          'x-service-tier': 'priority',
+        },
+      }),
+    );
+    expect(mocks.codexModelDiscovery.getModels).toHaveBeenCalledTimes(1);
+    expect(mocks.getModelCalls.at(-1)).toMatchObject({ serviceTier: 'priority' });
   });
 
   it('rejects an unavailable Codex provider before reading credentials or constructing a model', async () => {

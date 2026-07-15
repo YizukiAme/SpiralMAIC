@@ -152,6 +152,7 @@ export async function runRevisitAgentLoop({
       model: request.model,
       providerType: request.providerType,
       thinkingConfig: request.thinkingConfig,
+      serviceTier: request.serviceTier,
     },
     {
       getStoreState: () => getStoreState?.() ?? request.storeState,

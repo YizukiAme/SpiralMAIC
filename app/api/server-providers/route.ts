@@ -24,13 +24,17 @@ function noStore(response: Response): Response {
 
 export async function GET() {
   try {
-    const providers = getServerProviders();
+    const providers: Record<string, { models?: string[]; fastModels?: string[] }> =
+      getServerProviders();
     try {
       const codex = await getCodexNativeServerProvider();
       if (codex?.models.length) {
         // Rebuild the DTO explicitly so no future internal account/status field
         // can accidentally cross this public settings boundary.
-        providers['openai-codex'] = { models: [...codex.models] };
+        providers['openai-codex'] = {
+          models: [...codex.models],
+          fastModels: [...codex.fastModels],
+        };
       }
     } catch {
       // Model discovery is optional. Every existing provider category remains

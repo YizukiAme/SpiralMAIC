@@ -1058,7 +1058,6 @@
     },
     "codexOAuth": {
       "experimental": "Integração experimental de terceiros com o Codex; usa a cota do seu plano ChatGPT.",
-      "connectTitle": "Conexão com o ChatGPT",
       "unavailableTitle": "O login do Codex não está disponível",
       "unavailable": {
         "FEATURE_DISABLED": "Ative o Codex OAuth no servidor para usar este provedor.",
@@ -1078,6 +1077,8 @@
       "cancel": "Cancelar login",
       "signOut": "Sair",
       "models": "Modelos disponíveis",
+      "fastMode": "Modo rápido",
+      "fastModeDescription": "Aplica-se apenas a modelos compatíveis: cerca de 1,5x mais rápido, mas consome mais da cota do seu plano do ChatGPT.",
       "testConnection": "Testar conexão",
       "testSuccess": "Conexão com o Codex concluída.",
       "testUnauthorized": "Entre novamente com o ChatGPT.",

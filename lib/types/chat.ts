@@ -6,7 +6,7 @@
  */
 
 import type { UIMessage } from 'ai';
-import type { ThinkingConfig } from './provider';
+import type { ModelServiceTier, ThinkingConfig } from './provider';
 import type { RevisitGateDecision } from '@/lib/revisit/types';
 
 // Session Types
@@ -310,6 +310,8 @@ export interface StatelessChatRequest {
   thinking?: ThinkingConfig;
   /** UI-selected per-model thinking config. Takes precedence over `thinking`. */
   thinkingConfig?: ThinkingConfig;
+  /** Server-validated Codex service tier requested by the current model selection. */
+  serviceTier?: ModelServiceTier;
 }
 
 /**

@@ -37,6 +37,7 @@ describe('/api/server-providers Codex publication', () => {
   it('publishes sanitized Codex models only when native OAuth reports connected', async () => {
     getCodexNativeServerProvider.mockResolvedValue({
       models: ['gpt-live'],
+      fastModels: ['gpt-live'],
       accountId: 'must-not-leak',
       email: 'must-not-leak@example.com',
     });
@@ -47,7 +48,7 @@ describe('/api/server-providers Codex publication', () => {
 
     expect(body.providers).toEqual({
       openai: { models: ['gpt-5.4'] },
-      'openai-codex': { models: ['gpt-live'] },
+      'openai-codex': { models: ['gpt-live'], fastModels: ['gpt-live'] },
     });
     expect(JSON.stringify(body)).not.toContain('must-not-leak');
   });
