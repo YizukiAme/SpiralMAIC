@@ -34,6 +34,7 @@ describe('LLM thinking provider options', () => {
     aiMock.generateText.mockClear();
     usageMock.normalizeUsage.mockClear();
     usageMock.recordUsage.mockClear();
+    aiMock.streamText.mockClear();
   });
 
   it('sends GPT-5.6 max reasoning effort through OpenAI provider options', async () => {
@@ -56,6 +57,29 @@ describe('LLM thinking provider options', () => {
           openai: {
             reasoningEffort: 'max',
           },
+        },
+      }),
+    );
+  });
+
+  it('sends a selected GPT-5.6 Codex reasoning effort through Responses options', async () => {
+    await callLLM(
+      {
+        model: {
+          provider: 'openai.responses',
+          modelId: 'gpt-5.6-luna',
+        },
+        prompt: 'hi',
+      } as Parameters<typeof callLLM>[0],
+      'test',
+      undefined,
+      { mode: 'enabled', effort: 'low' },
+    );
+
+    expect(aiMock.generateText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerOptions: {
+          openai: { reasoningEffort: 'low' },
         },
       }),
     );

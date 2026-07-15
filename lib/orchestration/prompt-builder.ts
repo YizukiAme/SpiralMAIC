@@ -12,6 +12,10 @@ import { buildStateContext } from './summarizers/state-context';
 import { buildVirtualWhiteboardContext } from './summarizers/whiteboard-ledger';
 import { buildPeerContextSection } from './summarizers/peer-context';
 import { buildPrompt, PROMPT_IDS } from '@/lib/prompts';
+import type { RevisitAgentPromptContext, RevisitResponseDirective } from '@/lib/revisit/types';
+import type { OvertimeChatContext } from '@/lib/overtime/types';
+import { getOvertimeAgentActions } from '@/lib/overtime/chat';
+import { buildOvertimeCourseDigest } from '@/lib/overtime/prompt-context';
 
 // ==================== Role Guidelines ====================
 
@@ -127,14 +131,19 @@ export function buildStructuredPrompt(
   whiteboardLedger?: WhiteboardActionRecord[],
   userProfile?: { nickname?: string; bio?: string },
   agentResponses?: AgentTurnSummary[],
-  revisitProbeContext?: string,
+  revisitPromptContext?: RevisitAgentPromptContext,
+  overtimeContext?: OvertimeChatContext,
 ): string {
   // Determine current scene type for action filtering
   const currentScene = storeState.currentSceneId
     ? storeState.scenes.find((s) => s.id === storeState.currentSceneId)
     : undefined;
   const sceneType = currentScene?.type;
-  const effectiveActions = getEffectiveActions(agentConfig.allowedActions, sceneType);
+  const effectiveActions = getOvertimeAgentActions(
+    getEffectiveActions(agentConfig.allowedActions, sceneType),
+    agentConfig.role,
+    overtimeContext,
+  );
   const hasSlideActions =
     effectiveActions.includes('spotlight') || effectiveActions.includes('laser');
 
@@ -151,12 +160,20 @@ export function buildStructuredPrompt(
     actionDescriptions: getActionDescriptions(effectiveActions),
     slideActionGuidelines: hasSlideActions ? SLIDE_ACTION_GUIDELINES : '',
     mutualExclusionNote: hasSlideActions ? MUTUAL_EXCLUSION_NOTE : '',
-    stateContext: buildStateContext(storeState),
-    virtualWhiteboardContext: buildVirtualWhiteboardContext(storeState, whiteboardLedger),
+    stateContext: overtimeContext
+      ? buildOvertimeStateContext(storeState)
+      : buildStateContext(storeState),
+    virtualWhiteboardContext: overtimeContext
+      ? ''
+      : buildVirtualWhiteboardContext(storeState, whiteboardLedger),
     lengthGuidelines: buildLengthGuidelines(agentConfig.role),
-    whiteboardGuidelines: buildWhiteboardGuidelines(agentConfig.role),
+    whiteboardGuidelines: overtimeContext ? '' : buildWhiteboardGuidelines(agentConfig.role),
     discussionContextSection: buildDiscussionContextSection(discussionContext, agentResponses),
-    revisitProbeContext,
+    revisitProbeContext: revisitPromptContext?.pageContext,
+    revisitResponseInstruction: buildRevisitResponseInstruction(
+      revisitPromptContext?.responseDirective,
+    ),
+    overtimeTeachingSection: buildOvertimeTeachingSection(overtimeContext, storeState),
   };
 
   const prompt = buildPrompt(PROMPT_IDS.AGENT_SYSTEM, vars);
@@ -164,6 +181,50 @@ export function buildStructuredPrompt(
     throw new Error('agent-system template not found');
   }
   return prompt.system;
+}
+
+function buildOvertimeTeachingSection(
+  context: OvertimeChatContext | undefined,
+  storeState: StatelessChatRequest['storeState'],
+): string {
+  if (!context) return '';
+  const courseDigest = buildOvertimeCourseDigest(storeState.scenes);
+  return `
+# Post-class Overtime Teaching
+The original course is already complete. You are answering one learner in a post-class follow-up, not opening a lesson or addressing a class. Answer the learner's latest message directly and continue naturally from what they asked.
+
+You can see the bounded summary of the completed course below. Use it as factual context. Never claim that you cannot see the earlier lesson, and never restart it from the beginning.
+
+${courseDigest || 'The completed course currently has no readable page details.'}
+
+Never greet the class, restart the course, repeat the original opening, invite a general classroom discussion, or send the learner back to page 1. Do not narrate or point at an existing slide. Always give an ordinary text answer first. Then choose one of these outcomes:
+- No action: the answer is transient clarification and does not deserve a permanent page.
+- request_learning_extension with disposition "append_page": the answer deserves exactly one durable classroom page in this course.
+- request_learning_extension with disposition "new_course": the request is clearly off-topic or needs multiple pages of systematic teaching.
+
+Do not call the action merely because it is available. Prefer no action for small factual questions, confirmations, and answers already covered by an existing page. For append_page, choose exactly one teachingMove: extend (deeper/new concept), remediate (reteach forgotten material), apply (practice or transfer), or trace (origin/history). Quiz may check or apply known concepts but must not introduce a new concept.
+
+Calling request_learning_extension submits a generation request; it does not mean the page is ready. When you call it, say only that the request was submitted and the page is being prepared. Never say it has already been generated, is visible, or is ready. The application state is the only source of truth for planning, generation, failure, and readiness.`;
+}
+
+function buildOvertimeStateContext(storeState: StatelessChatRequest['storeState']): string {
+  return `# Current State
+Mode: post-class overtime
+Course: ${storeState.stage?.name || 'Untitled course'}
+Completed pages: ${storeState.scenes.length}`;
+}
+
+function buildRevisitResponseInstruction(directive: RevisitResponseDirective | undefined): string {
+  switch (directive) {
+    case 'acknowledge':
+      return 'Directive: ACKNOWLEDGE. Give one brief acceptance or one-sentence summary. Do not ask a question, introduce a new topic, or extend into later pages.';
+    case 'probe':
+      return 'Directive: PROBE. Ask exactly one short, concrete question about a genuine unresolved point on the current page. Do not ask about later pages.';
+    case 'rescue':
+      return 'Directive: RESCUE. Briefly correct or reframe the current-page explanation to unblock the human teacher. Do not create another question.';
+    default:
+      return '';
+  }
 }
 
 // ==================== Length Guidelines ====================

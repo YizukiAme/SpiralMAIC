@@ -8,6 +8,7 @@ vi.mock('@/lib/runtime/store', () => ({
   deleteStageRuntimeSafely: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('@/lib/utils/database', () => ({
+  deleteStageWithRelatedData: vi.fn().mockResolvedValue(undefined),
   db: {
     stages: { delete: vi.fn().mockResolvedValue(undefined) },
     scenes: {

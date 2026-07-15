@@ -6,8 +6,9 @@
  */
 
 import type { UIMessage } from 'ai';
-import type { ThinkingConfig } from './provider';
-import type { RevisitGateDecision } from '@/lib/revisit/types';
+import type { ModelServiceTier, ThinkingConfig } from './provider';
+import type { RevisitGateDecision, RevisitResponseDirective } from '@/lib/revisit/types';
+import type { OvertimeChatContext } from '@/lib/overtime/types';
 
 // Session Types
 export type SessionType = 'qa' | 'discussion' | 'lecture';
@@ -287,6 +288,10 @@ export interface StatelessChatRequest {
     revisitProbeContext?: string;
     /** Optional reverse-teaching gate context for the director's existing route call */
     revisitGateContext?: string;
+    /** Conservative actor behavior when the director omits a valid revisit gate */
+    revisitFallbackDirective?: Exclude<RevisitResponseDirective, 'acknowledge'>;
+    /** Enables teacher-only post-class extension decisions in a validated formal context. */
+    overtimeContext?: OvertimeChatContext;
     /** Which agent should speak first in a discussion */
     triggerAgentId?: string;
     /** Full agent configs for generated (non-default) agents that aren't in the server-side registry */
@@ -323,6 +328,8 @@ export interface StatelessChatRequest {
   thinking?: ThinkingConfig;
   /** UI-selected per-model thinking config. Takes precedence over `thinking`. */
   thinkingConfig?: ThinkingConfig;
+  /** Server-validated Codex service tier requested by the current model selection. */
+  serviceTier?: ModelServiceTier;
 }
 
 /**

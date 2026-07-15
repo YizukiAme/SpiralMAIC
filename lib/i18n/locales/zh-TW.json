@@ -234,7 +234,9 @@
       "imageDrop": "拖曳圖片或點按選擇檔案",
       "imageOr": "或貼上圖片網址",
       "imageUrlPlaceholder": "https://…",
-      "imageInsert": "插入"
+      "imageInsert": "插入",
+      "expandToolbar": "展開插入工具",
+      "collapseToolbar": "收起插入工具"
     },
     "nav": {
       "addSlide": "新增投影片",
@@ -287,7 +289,7 @@
       "commentPromptLabel": "評分指引",
       "commentPromptPlaceholder": "應如何評判這道主觀題？",
       "empty": "尚無題目",
-      "emptyHint": "點選「新增題目」建立第一題。",
+      "emptyHint": "點選上方「新增題目」建立第一題。",
       "type": {
         "single": "單選",
         "multiple": "多選",
@@ -841,19 +843,19 @@
   },
   "upload": {
     "pdfSizeLimit": "支援最大50MB的PDF檔案",
-    "courseMaterialSizeLimit": "支援文件、簡報、表格、圖像、純文字，最大 50MB（實際支援格式依所選解析器而定）",
+    "courseMaterialSizeLimit": "支援最大 50MB 的 PDF、DOCX、PPTX、TXT 和 Markdown 檔案",
     "generateFailed": "生成課堂失敗，請重試",
     "requirementPlaceholder": "輸入你想學的任何內容，例如：\n「從零學 Python，30 分鐘寫出第一個程式」\n「用白板為我講解傅立葉轉換」\n「阿瓦隆桌遊怎麼玩」",
     "requirementRequired": "請輸入課程需求",
     "fileTooLarge": "檔案過大，請選擇小於 50MB 的檔案",
     "courseMaterialCountLimit": "最多可上傳 5 個課程材料檔案",
     "courseMaterialTotalSizeLimit": "課程材料總大小需小於 150MB",
-    "unsupportedCourseMaterial": "目前的解析器不支援此格式，請切換解析器或選擇其他檔案"
+    "unsupportedCourseMaterial": "不支援的課程材料類型，請上傳 PDF、DOCX、PPTX、TXT 或 Markdown 檔案"
   },
   "generation": {
     "pdfLoadFailed": "無法載入 PDF 檔案，請重試",
     "pdfParseFailed": "PDF 解析失敗",
-    "analyzingCourseMaterial": "解析文件",
+    "analyzingCourseMaterial": "解析 {{type}} 檔案",
     "analyzingCourseMaterialDesc": "正在擷取文件結構和內容...",
     "courseMaterialLoadFailed": "無法載入課程材料，請重試",
     "courseMaterialParseFailed": "課程材料解析失敗",
@@ -959,7 +961,18 @@
     "webSearchFailed": "網路搜尋失敗",
     "outlinesReadyCount": "{{ready}} / {{total}} 章節就緒",
     "jumpToBlankTitle": "跳到待補充標題的章節",
-    "analyzingMediaMaterial": "解析音視訊內容"
+    "analyzingMediaMaterial": "解析音視訊內容",
+    "revisitPreparingPath": "準備複習路徑",
+    "revisitPreparingPathDesc": "正在分析這堂課的關鍵知識點...",
+    "revisitGeneratingPage": "生成挑戰頁面",
+    "revisitGeneratingPageDesc": "正在生成反向講解提示頁...",
+    "revisitReady": "複習挑戰已準備好",
+    "revisitReadyDesc": "第一張挑戰頁已生成，即將打開課堂。",
+    "generatingCourse": "正在生成課程",
+    "openingClassroom": "即將開啟課堂...",
+    "outlineReady": "課程大綱已生成",
+    "generatingFirstPage": "首頁內容生成中...",
+    "firstPageReady": "首頁已就緒！正在開啟課堂..."
   },
   "settings": {
     "title": "設定",
@@ -1060,7 +1073,8 @@
       "bocha": "Bocha",
       "brave": "Brave Search",
       "baidu": "Baidu",
-      "searxng": "SearXNG"
+      "searxng": "SearXNG",
+      "openai-codex": "Codex"
     },
     "providerTypes": {
       "openai": "OpenAI 協定",
@@ -1666,10 +1680,49 @@
       "multiplierValue": "{{value}} 倍",
       "demoArea": "展示區",
       "acceleratedClock": "加速時鐘",
-      "gateSkip": "跳過頁面門控"
+      "gateSkip": "跳過頁面門控",
+      "virtualClock": "虛擬時鐘",
+      "virtualClockDetail": "首次推進會複製完整 Spiral 資料；正式記錄不會被模擬操作修改。",
+      "simulatedTime": "目前時間",
+      "realTime": "真實系統時間",
+      "demoOffset": "Demo 時間已前進 {{hours}} 小時",
+      "restoreRealTime": "恢復真實時間"
     },
     "alidocmindAccessKeyId": "AccessKey ID",
-    "alidocmindAccessKeySecret": "AccessKey Secret"
+    "alidocmindAccessKeySecret": "AccessKey Secret",
+    "codexOAuth": {
+      "experimental": "實驗性第三方 Codex 接入；使用你的 ChatGPT 方案額度。",
+      "unavailableTitle": "Codex 登入目前不可用",
+      "unavailable": {
+        "FEATURE_DISABLED": "請在伺服器啟用 Codex OAuth 後使用此提供者。",
+        "SERVERLESS_UNSUPPORTED": "Codex OAuth 需要具持久化儲存的自託管 Node 伺服器。",
+        "ACCESS_CODE_REQUIRED": "正式環境啟用 Codex OAuth 前必須設定 ACCESS_CODE。",
+        "DATA_DIR_UNWRITABLE": "伺服器無法寫入資料目錄，請檢查 /app/data 權限。"
+      },
+      "connectedAs": "已連線為 {email}",
+      "connected": "已連線 ChatGPT",
+      "signInBrowser": "使用 ChatGPT 登入",
+      "signInDevice": "使用裝置代碼",
+      "waiting": "正在等待授權…",
+      "deviceInstructions": "開啟驗證頁面並輸入此一次性代碼。",
+      "openVerification": "開啟驗證頁面",
+      "copyCode": "複製代碼",
+      "copied": "已複製",
+      "cancel": "取消登入",
+      "signOut": "登出",
+      "models": "可用模型",
+      "fastMode": "Fast 模式",
+      "fastModeDescription": "僅對支援的模型生效：速度約為 1.5 倍，但會消耗更多 ChatGPT 方案額度。",
+      "testConnection": "測試連線",
+      "testSuccess": "Codex 連線成功。",
+      "testUnauthorized": "請重新使用 ChatGPT 登入。",
+      "testForbidden": "此 ChatGPT 工作區沒有 Codex 權限。",
+      "testRateLimited": "已達到 ChatGPT 方案額度或頻率限制。",
+      "testFailed": "Codex 連線失敗。",
+      "loginFailed": "登入失敗，請重試或改用裝置代碼。",
+      "loginExpired": "本次登入已過期，請重新開始。"
+    },
+    "connected": "已連線"
   },
   "profile": {
     "title": "個人資料",
@@ -1740,8 +1793,8 @@
       "assistant": "AI 助教",
       "emptyTranscript": "准备好后，就开始讲这一页。",
       "thinking": "学生正在思考...",
-      "teachThisPage": "給同學們講解這一頁吧！",
-      "assistantOpening": "這場挑戰會圍繞「{{stage}}」展開，第一頁是「{{page}}」。我會在旁邊幫大家守住節奏；準備好了就給同學們講講這一頁吧。",
+      "teachThisPage": "講解這一頁吧！",
+      "assistantOpening": "{{overview}} 這次會沿著這條脈絡回顧和應用。先從「{{page}}」開始，請你講講這一頁。",
       "teacherPlaceholder": "用自己的话把这一页讲给学生听...",
       "send": "发送",
       "finish": "下课",
@@ -1768,7 +1821,305 @@
         "rescue": "助教",
         "fail": "重试"
       },
-      "open": "复习挑战"
+      "open": "复习挑战",
+      "studentStatus": {
+        "listening": "正在聽老師講",
+        "thinking": "正在消化，等待判斷",
+        "questioning": "有未解決問題",
+        "uncertain": "仍不確定，需要補充",
+        "satisfied": "已理解並認可",
+        "rescue": "助教救援中"
+      },
+      "assistantOpeningFallback": "上一堂課圍繞「{{stage}}」展開，依次學習了{{topics}}等關鍵內容。",
+      "complete": "完成挑戰",
+      "readyToComplete": "挑戰內容已全部通過",
+      "completeDescription": "完成後將生成本次挑戰報告並更新學習記錄。",
+      "generatingReport": "正在生成挑戰報告",
+      "generatingReportDescription": "正在評估講解、解疑、遷移與糾錯表現，請稍候。",
+      "retryReport": "重新生成報告",
+      "reportReady": "挑戰報告已生成",
+      "replayComplete": "再次挑戰結束",
+      "replayNotCounted": "本次為再次挑戰，不計入記錄"
+    },
+    "panel": {
+      "title": "複習面板",
+      "loading": "正在讀取這堂課的複習狀態...",
+      "memoryStatus": "記憶狀態",
+      "suggestedReview": "建議複習",
+      "createdAt": "課程建立",
+      "completedAt": "結課時間",
+      "notRecorded": "未記錄",
+      "quizAccuracy": "課堂正確率",
+      "noQuiz": "暫無測驗",
+      "latestChallenge": "上次挑戰",
+      "currentMemory": "目前記憶",
+      "pendingAssessment": "待評估概念",
+      "openCourse": "開啟正課",
+      "completeCourseFirst": "先完成正課",
+      "none": "暫無",
+      "now": "現在"
+    },
+    "tabs": {
+      "challenge": "Reverse Challenge",
+      "materials": "教學材料",
+      "demo": "Demo 臨時盒"
+    },
+    "history": {
+      "title": "挑戰記錄",
+      "empty": "還沒有 Reverse Challenge",
+      "completed": "已完成",
+      "unfinished": "未完成",
+      "reportOnly": "僅報告",
+      "preparationFailed": "準備失敗",
+      "preparing": "準備未完成",
+      "ready": "可以進入",
+      "replayable": "可再次挑戰",
+      "awaitingCompletion": "完成挑戰後，這裡會顯示完整報告。",
+      "generateNew": "生成新挑戰",
+      "actions": {
+        "prepare": "重新準備",
+        "enter": "進入挑戰",
+        "replay": "再次挑戰",
+        "none": ""
+      }
+    },
+    "lowBenefit": {
+      "title": "現在挑戰的收益可能較低",
+      "description": "目前記憶保持率為 {{percent}}%，建議複習時間是 {{date}}。",
+      "later": "稍後再說",
+      "generateAnyway": "仍然生成"
+    },
+    "report": {
+      "summary": "挑戰總結",
+      "errors": "事實錯誤",
+      "noErrors": "沒有記錄到事實錯誤。",
+      "corrected": "已糾正",
+      "uncorrected": "未糾正",
+      "pages": "逐頁表現",
+      "passed": "已通過",
+      "notPassed": "未通過",
+      "probes": "{{count}} 次探針",
+      "unavailable": "這筆舊記錄只有報告，無法再次進入。",
+      "dimensions": {
+        "clarity": "講解清晰度",
+        "doubtResolution": "解疑能力",
+        "transfer": "遷移應用",
+        "errorCorrection": "糾錯能力"
+      }
+    },
+    "demo": {
+      "title": "Demo 臨時盒",
+      "subtitle": "查看獨立保存的模擬時間批次。",
+      "batches": "展示批次",
+      "isolated": "每個批次使用獨立資料副本，不會寫入正式學習記錄。",
+      "empty": "還沒有 Demo 資料",
+      "active": "使用中",
+      "archived": "已封存",
+      "batchName": "Demo · {{date}}",
+      "counts": "Reverse {{attempts}} · 報告 {{reports}} · 材料 {{artifacts}} · 練習 {{practice}}",
+      "clear": "清空 Demo 資料",
+      "clearTitle": "清空所有 Demo 資料？",
+      "clearDescription": "所有展示批次及其挑戰、報告、材料和練習記錄都會被永久刪除。"
+    },
+    "studio": {
+      "title": "教學材料工作臺",
+      "subtitle": "依需要分別建立、儲存並使用不同形式的教學材料。",
+      "createTitle": "建立教學材料",
+      "createDescription": "每次只生成一種作品；其他材料仍可繼續查看和使用。",
+      "queueActive": "有工作排隊中",
+      "libraryTitle": "我的教學材料",
+      "emptyTitle": "還沒有教學材料",
+      "emptyDescription": "從上方選擇一種材料開始，完成後會儲存在這裡。",
+      "latestVersion": "最新為 v{{version}}",
+      "generate": "生成",
+      "regenerate": "再次生成",
+      "retry": "重試",
+      "openCourse": "進入正課",
+      "customizeButton": "自訂",
+      "cancelGeneration": "取消生成",
+      "open": "開啟",
+      "moreActions": "更多操作",
+      "regenerateSame": "依原設定再次生成",
+      "rename": "重新命名",
+      "renameTitle": "重新命名作品",
+      "renameDescription": "只修改此版本在材料庫中顯示的名稱。",
+      "renamed": "作品已重新命名",
+      "deleteTitle": "刪除這份作品？",
+      "deleteDescription": "此版本及其閃卡或測驗進度會一併永久刪除。",
+      "deleted": "作品已刪除",
+      "save": "儲存",
+      "deleteAction": "刪除",
+      "kinds": {
+        "briefing": {
+          "title": "視覺簡報",
+          "description": "把重點、比較與脈絡排成可列印的單頁摘要。"
+        },
+        "mindMap": {
+          "title": "心智圖",
+          "description": "探索概念關係、例子與記憶狀態，形成知識結構。"
+        },
+        "studyGuide": {
+          "title": "學習指南",
+          "description": "依章節整理重點、定義、例子、迷思與練習提示。"
+        },
+        "faq": {
+          "title": "FAQ",
+          "description": "用常見問題與清楚回答檢查容易混淆的知識點。"
+        },
+        "flashcards": {
+          "title": "閃卡",
+          "description": "用翻面回想及會了／不會標記進行主動提取練習。"
+        },
+        "quiz": {
+          "title": "測驗",
+          "description": "逐題作答、查看解析，也能只重做錯題。"
+        }
+      },
+      "status": {
+        "generating": "生成中",
+        "queued": "排隊中",
+        "failed": "生成失敗",
+        "interrupted": "已中斷",
+        "ready": "已生成",
+        "empty": "未生成",
+        "stale": "課程內容已更新"
+      },
+      "groups": {
+        "understanding": {
+          "title": "理解與總結",
+          "description": "梳理重點並消除模糊之處"
+        },
+        "structure": {
+          "title": "知識結構",
+          "description": "看清概念之間的連結"
+        },
+        "practice": {
+          "title": "主動練習",
+          "description": "透過提取與作答鞏固記憶"
+        }
+      },
+      "customize": {
+        "title": "自訂生成",
+        "description": "設定本次作品的範圍、重點與呈現形式。",
+        "focus": "內容範圍",
+        "focusDescription": "選擇模型應優先使用課堂中的哪些內容。",
+        "focusModes": {
+          "balanced": {
+            "title": "全課並突出弱點",
+            "description": "涵蓋全課，同時增加薄弱知識點的比重"
+          },
+          "weak-points": {
+            "title": "只聚焦弱點",
+            "description": "依記憶狀態與最近挑戰中的不足生成"
+          },
+          "selected-scenes": {
+            "title": "選擇課堂頁面",
+            "description": "只使用你勾選的頁面作為主要來源"
+          }
+        },
+        "selectScenes": "選擇頁面",
+        "selectScenesRequired": "請至少選擇一個課堂頁面。",
+        "customInstructions": "自訂要求",
+        "customInstructionsPlaceholder": "例如：多用生活中的遷移案例，避免術語堆疊……",
+        "orientation": "版式",
+        "detail": "詳細程度",
+        "depth": "導圖層級",
+        "includeExamples": "在導圖節點中包含例子",
+        "itemCount": "數量",
+        "difficulty": "難度"
+      },
+      "options": {
+        "portrait": "直向",
+        "landscape": "橫向",
+        "square": "方形",
+        "compact": "精簡",
+        "standard": "標準",
+        "detailed": "詳細",
+        "easy": "簡單",
+        "medium": "中等",
+        "hard": "困難"
+      }
+    },
+    "viewer": {
+      "tableOfContents": "目錄",
+      "noSections": "這份指南沒有獨立章節",
+      "overview": "概覽",
+      "sections": "章節",
+      "concepts": "知識點",
+      "sourcePages": "來源頁面",
+      "version": "版本 {{version}}",
+      "questionCount": "共 {{count}} 個問題",
+      "searchFaq": "搜尋問題和答案",
+      "clearSearch": "清除搜尋",
+      "allTopics": "全部主題",
+      "faqResults": "找到 {{count}} 個問題",
+      "noFaqMatches": "沒有符合的問題",
+      "collapseAll": "全部收起",
+      "expandAll": "全部展開",
+      "flashcardsProgress": "已會 {{mastered}} / {{total}} 張",
+      "shuffle": "打亂",
+      "onlyDifficult": "只練錯卡",
+      "needsPractice": "還需練習",
+      "mastered": "已會",
+      "unseen": "未標記",
+      "showFront": "顯示卡片正面",
+      "showBack": "顯示卡片答案",
+      "answer": "答案",
+      "prompt": "提示",
+      "tapForFront": "點擊返回正面",
+      "tapToReveal": "點擊翻面查看答案",
+      "previous": "上一張",
+      "next": "下一張",
+      "notYet": "還不會",
+      "gotIt": "會了",
+      "noDifficultCards": "目前沒有錯卡",
+      "backToAllCards": "返回全部閃卡",
+      "quizResult": "本次成績",
+      "correctCount": "答對 {{correct}} / {{total}} 題",
+      "retryWrong": "只重做錯題",
+      "questionProgress": "第 {{current}} / {{total}} 題",
+      "hint": "查看提示",
+      "submitQuiz": "提交測驗",
+      "answerKey": "答案與解析",
+      "searchMindMap": "搜尋導圖節點",
+      "expandNode": "展開節點",
+      "collapseNode": "收合節點",
+      "nodeDetails": "節點詳情",
+      "noCourseMemoryEvidence": "完成一次計入紀錄的 Reverse Challenge 後，這裡會顯示記憶保持率。",
+      "nodeMemoryUnlinked": "此節點尚未連結到已評估概念。",
+      "memoryPercent": "目前記憶 {{percent}}%",
+      "examples": "例子",
+      "sources": "來源頁面",
+      "sourcePageLabel": "第 {{page}} 頁 · {{title}}",
+      "sourcePageRemoved": "原頁面已移除",
+      "notFound": "找不到這份複習作品。",
+      "courseUnavailable": "原課程資料無法使用。",
+      "loadFailed": "無法開啟複習作品",
+      "exportPdf": "匯出 PDF",
+      "exportPng": "匯出 PNG",
+      "exportSvg": "匯出 SVG",
+      "exportComplete": "視覺作品已匯出",
+      "exportFailed": "匯出失敗，請重試"
+    }
+  },
+  "overtime": {
+    "retry": "重新準備課件",
+    "status": {
+      "failed": "課件準備失敗",
+      "interrupted": "課件準備已中斷"
+    },
+    "phase": {
+      "outline": "正在規劃加時課件...",
+      "content": "正在生成課件內容...",
+      "actions": "正在編排講解...",
+      "tts": "正在準備語音...",
+      "commit": "正在追加到課程..."
+    },
+    "newCourse": {
+      "title": "這個問題適合單獨開一節課",
+      "description": "你可以把它收斂成一張加時課件留在本課，也可以生成一門完整的新課程。",
+      "stay": "留在本課",
+      "create": "建立新課"
     }
   }
 }

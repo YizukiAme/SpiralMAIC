@@ -24,7 +24,7 @@ import {
 import type { AgentEvent } from '@earendil-works/pi-agent-core';
 import { useStageStore } from '@/lib/store/stage';
 import { useCanvasStore } from '@/lib/store/canvas';
-import { getCurrentModelConfig } from '@/lib/utils/model-config';
+import { buildModelRequestHeaders, getCurrentModelConfig } from '@/lib/utils/model-config';
 import type { SceneContextMap } from '@/app/api/agent/edit/route';
 import { mergeAssistantParts, type PiPart } from './merge-assistant-parts';
 import { resolveSceneOutline } from './resolve-scene-outline';
@@ -560,10 +560,7 @@ export function useAgentRuntime(opts: UseAgentRuntimeOptions) {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'x-model': cfg.modelString || '',
-            'x-api-key': cfg.apiKey || '',
-            'x-base-url': cfg.baseUrl || '',
-            'x-provider-type': cfg.providerType || '',
+            ...buildModelRequestHeaders(cfg),
           },
           body: JSON.stringify({
             message: userText,

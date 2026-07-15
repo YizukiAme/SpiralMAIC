@@ -234,7 +234,9 @@
       "imageDrop": "Перетащите изображение или нажмите, чтобы выбрать файл",
       "imageOr": "или вставьте URL изображения",
       "imageUrlPlaceholder": "https://…",
-      "imageInsert": "Вставить"
+      "imageInsert": "Вставить",
+      "expandToolbar": "Показать инструменты вставки",
+      "collapseToolbar": "Скрыть инструменты вставки"
     },
     "nav": {
       "addSlide": "Добавить слайд",
@@ -287,7 +289,7 @@
       "commentPromptLabel": "Указания по оценке",
       "commentPromptPlaceholder": "Как оценивать этот развёрнутый ответ?",
       "empty": "Пока нет вопросов",
-      "emptyHint": "Нажмите «Добавить вопрос», чтобы создать первый.",
+      "emptyHint": "Нажмите «Добавить вопрос» выше, чтобы создать первый.",
       "type": {
         "single": "Один выбор",
         "multiple": "Несколько вариантов",
@@ -857,19 +859,19 @@
   },
   "upload": {
     "pdfSizeLimit": "Поддержка PDF до 50 МБ",
-    "courseMaterialSizeLimit": "Документы, презентации, таблицы, изображения, текст — до 50 МБ (список форматов зависит от выбранного парсера)",
+    "courseMaterialSizeLimit": "Поддержка PDF, DOCX, PPTX, TXT и Markdown до 50 МБ",
     "generateFailed": "Ошибка генерации, попробуйте снова",
     "requirementPlaceholder": "Расскажите, что вы хотите изучить, например:\n\"Научи меня Python с нуля за 30 минут\"\n\"Объясни преобразование Фурье на доске\"\n\"Как играть в настольную игру Авалон\"",
     "requirementRequired": "Пожалуйста, укажите требования к курсу",
     "fileTooLarge": "Файл слишком большой. Выберите файл до 50 МБ",
     "courseMaterialCountLimit": "Можно загрузить до 5 файлов материалов курса",
     "courseMaterialTotalSizeLimit": "Общий размер материалов курса должен быть меньше 150 МБ",
-    "unsupportedCourseMaterial": "Текущий парсер не поддерживает этот формат. Смените парсер или выберите другой файл."
+    "unsupportedCourseMaterial": "Неподдерживаемый тип материала. Загрузите PDF, DOCX, PPTX, TXT или Markdown."
   },
   "generation": {
     "pdfLoadFailed": "Не удалось загрузить PDF, попробуйте снова",
     "pdfParseFailed": "Ошибка обработки PDF",
-    "analyzingCourseMaterial": "Анализ документов",
+    "analyzingCourseMaterial": "Анализ файла {{type}}",
     "analyzingCourseMaterialDesc": "Извлечение структуры и содержимого документа...",
     "courseMaterialLoadFailed": "Не удалось загрузить материал курса, попробуйте снова",
     "courseMaterialParseFailed": "Ошибка обработки материала курса",
@@ -975,7 +977,18 @@
     "webSearchFailed": "Ошибка веб-поиска",
     "outlinesReadyCount": "Готово разделов: {{ready}} / {{total}}",
     "jumpToBlankTitle": "Перейти к разделу без заголовка",
-    "analyzingMediaMaterial": "Анализ аудио/видео"
+    "analyzingMediaMaterial": "Анализ аудио/видео",
+    "revisitPreparingPath": "Preparing Review Path",
+    "revisitPreparingPathDesc": "Analyzing the key ideas from this lesson...",
+    "revisitGeneratingPage": "Generating Challenge Page",
+    "revisitGeneratingPageDesc": "Generating reverse-teaching prompt pages...",
+    "revisitReady": "Review Challenge Ready",
+    "revisitReadyDesc": "The first challenge page is ready. Opening the classroom now.",
+    "generatingCourse": "Генерация курса",
+    "openingClassroom": "Открытие класса...",
+    "outlineReady": "Структура курса сгенерирована",
+    "generatingFirstPage": "Генерация первой страницы...",
+    "firstPageReady": "Первая страница готова! Открываю класс..."
   },
   "settings": {
     "title": "Настройки",
@@ -1076,7 +1089,8 @@
       "bocha": "Bocha",
       "brave": "Brave Search",
       "baidu": "Baidu",
-      "searxng": "SearXNG"
+      "searxng": "SearXNG",
+      "openai-codex": "Codex"
     },
     "providerTypes": {
       "openai": "Протокол OpenAI",
@@ -1682,10 +1696,49 @@
       "multiplierValue": "{{value}}x",
       "demoArea": "Демо",
       "acceleratedClock": "Ускоренные часы",
-      "gateSkip": "Пропуск проверок страниц"
+      "gateSkip": "Пропуск проверок страниц",
+      "virtualClock": "Виртуальные часы",
+      "virtualClockDetail": "При первом сдвиге все данные Spiral копируются; официальные записи не меняются.",
+      "simulatedTime": "Текущее время",
+      "realTime": "Системное время",
+      "demoOffset": "Demo-время сдвинуто на {{hours}} ч.",
+      "restoreRealTime": "Вернуть реальное время"
     },
     "alidocmindAccessKeyId": "AccessKey ID",
-    "alidocmindAccessKeySecret": "AccessKey Secret"
+    "alidocmindAccessKeySecret": "AccessKey Secret",
+    "codexOAuth": {
+      "experimental": "Экспериментальная сторонняя интеграция Codex; использует квоту вашего тарифа ChatGPT.",
+      "unavailableTitle": "Вход в Codex недоступен",
+      "unavailable": {
+        "FEATURE_DISABLED": "Включите Codex OAuth на сервере, чтобы использовать этого провайдера.",
+        "SERVERLESS_UNSUPPORTED": "Для Codex OAuth нужен самостоятельно размещённый Node-сервер с постоянным хранилищем.",
+        "ACCESS_CODE_REQUIRED": "Перед включением Codex OAuth в production настройте ACCESS_CODE.",
+        "DATA_DIR_UNWRITABLE": "Сервер не может записывать в каталог данных. Проверьте права /app/data."
+      },
+      "connectedAs": "Подключено как {email}",
+      "connected": "Подключено к ChatGPT",
+      "signInBrowser": "Войти через ChatGPT",
+      "signInDevice": "Использовать код устройства",
+      "waiting": "Ожидание авторизации…",
+      "deviceInstructions": "Откройте страницу проверки и введите этот одноразовый код.",
+      "openVerification": "Открыть страницу проверки",
+      "copyCode": "Копировать код",
+      "copied": "Скопировано",
+      "cancel": "Отменить вход",
+      "signOut": "Выйти",
+      "models": "Доступные модели",
+      "fastMode": "Быстрый режим",
+      "fastModeDescription": "Работает только с поддерживаемыми моделями: примерно в 1,5 раза быстрее, но расходует больше квоты вашего тарифа ChatGPT.",
+      "testConnection": "Проверить подключение",
+      "testSuccess": "Подключение к Codex выполнено.",
+      "testUnauthorized": "Войдите через ChatGPT ещё раз.",
+      "testForbidden": "У этого рабочего пространства ChatGPT нет доступа к Codex.",
+      "testRateLimited": "Достигнута квота или частотный лимит тарифа ChatGPT.",
+      "testFailed": "Не удалось подключиться к Codex.",
+      "loginFailed": "Не удалось войти. Повторите попытку или используйте код устройства.",
+      "loginExpired": "Срок этой попытки входа истёк. Начните заново."
+    },
+    "connected": "Подключено"
   },
   "profile": {
     "title": "Профиль",
@@ -1740,8 +1793,8 @@
       "assistant": "AI assistant",
       "emptyTranscript": "Start teaching this page when you are ready.",
       "thinking": "Student is thinking...",
-      "teachThisPage": "Teach this page to your students.",
-      "assistantOpening": "This challenge is about \"{{stage}}\". The first page is \"{{page}}\". I will keep the class on track from the side; when you are ready, teach this page to your students.",
+      "teachThisPage": "Teach this page.",
+      "assistantOpening": "{{overview}} This challenge will revisit and apply that progression. Start with \"{{page}}\" and teach this page in your own words.",
       "teacherPlaceholder": "Teach this page in your own words...",
       "send": "Send",
       "finish": "Dismiss class",
@@ -1768,7 +1821,305 @@
         "rescue": "Assistant",
         "fail": "Retry"
       },
-      "open": "Review challenge"
+      "open": "Review challenge",
+      "studentStatus": {
+        "listening": "Listening to the teacher",
+        "thinking": "Thinking, waiting for the check",
+        "questioning": "Has an unresolved question",
+        "uncertain": "Still uncertain; needs more",
+        "satisfied": "Understands and agrees",
+        "rescue": "Assistant rescue in progress"
+      },
+      "assistantOpeningFallback": "The completed lesson on \"{{stage}}\" covered {{topics}} in sequence.",
+      "complete": "Complete challenge",
+      "readyToComplete": "All challenge pages passed",
+      "completeDescription": "Complete the challenge to generate your report and update the learning record.",
+      "generatingReport": "Generating challenge report",
+      "generatingReportDescription": "Evaluating clarity, doubt resolution, transfer, and error correction.",
+      "retryReport": "Generate report again",
+      "reportReady": "Challenge report is ready",
+      "replayComplete": "Повторное прохождение завершено",
+      "replayNotCounted": "Это повторное прохождение не учитывается в истории"
+    },
+    "panel": {
+      "title": "Обзор повторения",
+      "loading": "Загрузка состояния повторения курса...",
+      "memoryStatus": "Состояние памяти",
+      "suggestedReview": "Рекомендуемое повторение",
+      "createdAt": "Курс создан",
+      "completedAt": "Курс завершён",
+      "notRecorded": "Не записано",
+      "quizAccuracy": "Точность ответов",
+      "noQuiz": "Нет теста",
+      "latestChallenge": "Последнее испытание",
+      "currentMemory": "Текущая память",
+      "pendingAssessment": "Ожидают оценки",
+      "openCourse": "Открыть курс",
+      "completeCourseFirst": "Сначала завершите курс",
+      "none": "Пока нет",
+      "now": "Сейчас"
+    },
+    "tabs": {
+      "challenge": "Reverse Challenge",
+      "materials": "Материалы для повторения",
+      "demo": "Demo-бокс"
+    },
+    "history": {
+      "title": "История испытаний",
+      "empty": "Reverse Challenge пока нет",
+      "completed": "Завершено",
+      "unfinished": "Не завершено",
+      "reportOnly": "Только отчёт",
+      "preparationFailed": "Ошибка подготовки",
+      "preparing": "Подготовка не завершена",
+      "ready": "Готово к входу",
+      "replayable": "Можно пройти снова",
+      "awaitingCompletion": "После завершения здесь появится полный отчёт.",
+      "generateNew": "Создать новое испытание",
+      "actions": {
+        "prepare": "Подготовить снова",
+        "enter": "Войти в испытание",
+        "replay": "Пройти снова",
+        "none": ""
+      }
+    },
+    "lowBenefit": {
+      "title": "Сейчас польза нового испытания может быть невысокой",
+      "description": "Текущая память — {{percent}}%. Рекомендуемое повторение: {{date}}.",
+      "later": "Позже",
+      "generateAnyway": "Всё равно создать"
+    },
+    "report": {
+      "summary": "Итог испытания",
+      "errors": "Фактические ошибки",
+      "noErrors": "Фактических ошибок не зафиксировано.",
+      "corrected": "Исправлено",
+      "uncorrected": "Не исправлено",
+      "pages": "Результаты по страницам",
+      "passed": "Пройдено",
+      "notPassed": "Не пройдено",
+      "probes": "Проверок: {{count}}",
+      "unavailable": "В этой старой записи есть только отчёт; открыть её повторно нельзя.",
+      "dimensions": {
+        "clarity": "Ясность",
+        "doubtResolution": "Разрешение сомнений",
+        "transfer": "Перенос",
+        "errorCorrection": "Исправление ошибок"
+      }
+    },
+    "demo": {
+      "title": "Demo-бокс",
+      "subtitle": "Отдельно сохранённые сеансы виртуального времени.",
+      "batches": "Демо-сеансы",
+      "isolated": "Каждый сеанс использует отдельную копию данных и не меняет официальные записи.",
+      "empty": "Демо-данных пока нет",
+      "active": "Активен",
+      "archived": "В архиве",
+      "batchName": "Demo · {{date}}",
+      "counts": "Reverse {{attempts}} · отчёты {{reports}} · материалы {{artifacts}} · практика {{practice}}",
+      "clear": "Очистить Demo",
+      "clearTitle": "Удалить все Demo-данные?",
+      "clearDescription": "Все демо-сеансы, испытания, отчёты, материалы и практика будут удалены безвозвратно."
+    },
+    "studio": {
+      "title": "Студия учебных материалов",
+      "subtitle": "Создавайте, сохраняйте и используйте каждый материал отдельно.",
+      "createTitle": "Создать материалы",
+      "createDescription": "Генерируется один вид за раз, остальные остаются доступными.",
+      "queueActive": "Есть задания в очереди",
+      "libraryTitle": "Мои учебные материалы",
+      "emptyTitle": "Материалов пока нет",
+      "emptyDescription": "Выберите тип выше. Готовые материалы появятся здесь.",
+      "latestVersion": "Последняя версия: v{{version}}",
+      "generate": "Создать",
+      "regenerate": "Новая версия",
+      "retry": "Повторить",
+      "openCourse": "Открыть урок",
+      "customizeButton": "Настроить",
+      "cancelGeneration": "Отменить генерацию",
+      "open": "Открыть",
+      "moreActions": "Другие действия",
+      "regenerateSame": "Повторить с теми же настройками",
+      "rename": "Переименовать",
+      "renameTitle": "Переименовать материал",
+      "renameDescription": "Изменится только название этой версии в библиотеке.",
+      "renamed": "Материал переименован",
+      "deleteTitle": "Удалить этот материал?",
+      "deleteDescription": "Версия и прогресс карточек или теста будут удалены безвозвратно.",
+      "deleted": "Материал удалён",
+      "save": "Сохранить",
+      "deleteAction": "Удалить",
+      "kinds": {
+        "briefing": {
+          "title": "Визуальная сводка",
+          "description": "Соберите ключевые идеи, сравнения и этапы на одной странице для печати."
+        },
+        "mindMap": {
+          "title": "Карта мыслей",
+          "description": "Исследуйте связи понятий, примеры и состояние памяти на карте знаний."
+        },
+        "studyGuide": {
+          "title": "Учебное руководство",
+          "description": "Организуйте идеи, определения, примеры, ошибки и упражнения по разделам."
+        },
+        "faq": {
+          "title": "Частые вопросы",
+          "description": "Разберите типичные вопросы и проверьте похожие понятия."
+        },
+        "flashcards": {
+          "title": "Карточки",
+          "description": "Тренируйте активное воспроизведение и отмечайте освоенные или трудные карточки."
+        },
+        "quiz": {
+          "title": "Тест",
+          "description": "Отвечайте по одному вопросу, смотрите объяснения и повторяйте ошибки."
+        }
+      },
+      "status": {
+        "generating": "Создание",
+        "queued": "В очереди",
+        "failed": "Ошибка",
+        "interrupted": "Прервано",
+        "ready": "Готово",
+        "empty": "Не создано",
+        "stale": "Урок обновлён"
+      },
+      "groups": {
+        "understanding": {
+          "title": "Понимание и итоги",
+          "description": "Проясните урок и главные идеи"
+        },
+        "structure": {
+          "title": "Структура знаний",
+          "description": "Увидьте связи между понятиями"
+        },
+        "practice": {
+          "title": "Активная практика",
+          "description": "Укрепляйте память воспроизведением"
+        }
+      },
+      "customize": {
+        "title": "Настроить генерацию",
+        "description": "Задайте охват, акцент и формат материала.",
+        "focus": "Охват содержания",
+        "focusDescription": "Выберите, каким частям урока уделить больше внимания.",
+        "focusModes": {
+          "balanced": {
+            "title": "Весь урок и слабые места",
+            "description": "Охватить урок и усилить более слабые понятия"
+          },
+          "weak-points": {
+            "title": "Только слабые места",
+            "description": "Учесть состояние памяти и пробелы последнего испытания"
+          },
+          "selected-scenes": {
+            "title": "Выбрать страницы",
+            "description": "Использовать выбранные страницы как основной источник"
+          }
+        },
+        "selectScenes": "Выбрать страницы",
+        "selectScenesRequired": "Выберите хотя бы одну страницу урока.",
+        "customInstructions": "Особые пожелания",
+        "customInstructionsPlaceholder": "Например: больше жизненных примеров и меньше терминов...",
+        "orientation": "Макет",
+        "detail": "Подробность",
+        "depth": "Глубина карты",
+        "includeExamples": "Добавлять примеры в узлы",
+        "itemCount": "Количество",
+        "difficulty": "Сложность"
+      },
+      "options": {
+        "portrait": "Книжная",
+        "landscape": "Альбомная",
+        "square": "Квадрат",
+        "compact": "Кратко",
+        "standard": "Стандартно",
+        "detailed": "Подробно",
+        "easy": "Легко",
+        "medium": "Средне",
+        "hard": "Сложно"
+      }
+    },
+    "viewer": {
+      "tableOfContents": "Содержание",
+      "noSections": "В руководстве нет отдельных разделов",
+      "overview": "Обзор",
+      "sections": "Разделы",
+      "concepts": "Понятия",
+      "sourcePages": "Страницы-источники",
+      "version": "Версия {{version}}",
+      "questionCount": "Вопросов: {{count}}",
+      "searchFaq": "Поиск по вопросам и ответам",
+      "clearSearch": "Очистить поиск",
+      "allTopics": "Все темы",
+      "faqResults": "Найдено вопросов: {{count}}",
+      "noFaqMatches": "Подходящих вопросов нет",
+      "collapseAll": "Свернуть всё",
+      "expandAll": "Развернуть всё",
+      "flashcardsProgress": "Освоено {{mastered}} / {{total}}",
+      "shuffle": "Перемешать",
+      "onlyDifficult": "Только сложные",
+      "needsPractice": "Нужна практика",
+      "mastered": "Освоено",
+      "unseen": "Без отметки",
+      "showFront": "Показать лицевую сторону",
+      "showBack": "Показать ответ",
+      "answer": "Ответ",
+      "prompt": "Задание",
+      "tapForFront": "Нажмите, чтобы вернуться",
+      "tapToReveal": "Нажмите, чтобы открыть ответ",
+      "previous": "Назад",
+      "next": "Далее",
+      "notYet": "Пока нет",
+      "gotIt": "Знаю",
+      "noDifficultCards": "Сложных карточек пока нет",
+      "backToAllCards": "Вернуться ко всем",
+      "quizResult": "Результат теста",
+      "correctCount": "Верно {{correct}} / {{total}}",
+      "retryWrong": "Повторить ошибки",
+      "questionProgress": "Вопрос {{current}} / {{total}}",
+      "hint": "Показать подсказку",
+      "submitQuiz": "Завершить тест",
+      "answerKey": "Ответы и объяснения",
+      "searchMindMap": "Поиск узлов",
+      "expandNode": "Развернуть узел",
+      "collapseNode": "Свернуть узел",
+      "nodeDetails": "Сведения об узле",
+      "noCourseMemoryEvidence": "Завершите один учитываемый Reverse Challenge, чтобы увидеть здесь сохранность памяти.",
+      "nodeMemoryUnlinked": "Этот узел ещё не связан с оценённым понятием.",
+      "memoryPercent": "Текущая память {{percent}}%",
+      "examples": "Примеры",
+      "sources": "Страницы-источники",
+      "sourcePageLabel": "Страница {{page}} · {{title}}",
+      "sourcePageRemoved": "Исходная страница удалена",
+      "notFound": "Материал не найден.",
+      "courseUnavailable": "Исходный урок недоступен.",
+      "loadFailed": "Не удалось открыть материал",
+      "exportPdf": "Экспорт PDF",
+      "exportPng": "Экспорт PNG",
+      "exportSvg": "Экспорт SVG",
+      "exportComplete": "Визуальный материал экспортирован",
+      "exportFailed": "Ошибка экспорта"
+    }
+  },
+  "overtime": {
+    "retry": "Подготовить страницу снова",
+    "status": {
+      "failed": "Не удалось подготовить страницу",
+      "interrupted": "Подготовка страницы была прервана"
+    },
+    "phase": {
+      "outline": "Планируем дополнительную страницу...",
+      "content": "Создаём содержимое страницы...",
+      "actions": "Готовим объяснение...",
+      "tts": "Готовим озвучивание...",
+      "commit": "Добавляем страницу в курс..."
+    },
+    "newCourse": {
+      "title": "Этой теме лучше посвятить отдельный курс",
+      "description": "Оставьте в этом курсе краткий ответ на одной странице или создайте новый полный курс.",
+      "stay": "Оставить в этом курсе",
+      "create": "Создать новый курс"
     }
   }
 }

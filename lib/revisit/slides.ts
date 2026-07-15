@@ -31,7 +31,9 @@ export async function generateRevisitSkeletonScenes(args: {
   onScene?: (scene: Scene, index: number) => void;
   now?: number;
   pageTimeoutMs?: number;
+  signal?: AbortSignal;
 }): Promise<Scene[]> {
+  throwIfAborted(args.signal);
   const canCallModel =
     !args.modelConfig.requiresApiKey ||
     args.modelConfig.isServerConfigured ||
@@ -41,32 +43,70 @@ export async function generateRevisitSkeletonScenes(args: {
   }
 
   const outlines = buildRevisitSkeletonOutlines(args.blueprint);
-  const sourceStyle = findSourceSlideStyle(args.sourceScenes);
   const scenes: Scene[] = [];
 
-  for (const [index, outline] of outlines.entries()) {
-    const content = await requestSkeletonSlideContent({
+  for (const index of outlines.keys()) {
+    throwIfAborted(args.signal);
+    const scene = await generateRevisitSkeletonScene({
       stage: args.stage,
-      outline,
-      allOutlines: outlines,
-      timeoutMs: args.pageTimeoutMs ?? DEFAULT_REVISIT_SKELETON_PAGE_TIMEOUT_MS,
-    });
-    const page = args.blueprint.skeleton.pages[index];
-    if (!page) continue;
-    const scene = createGeneratedRevisitSkeletonScene({
-      stage: args.stage,
-      page,
-      order: index,
-      content,
-      sourceTheme: sourceStyle?.theme,
-      sourceBackground: sourceStyle?.background,
+      blueprint: args.blueprint,
+      sourceScenes: args.sourceScenes,
+      modelConfig: args.modelConfig,
+      pageIndex: index,
       now: args.now,
+      pageTimeoutMs: args.pageTimeoutMs,
+      signal: args.signal,
     });
     scenes[index] = scene;
     args.onScene?.(scene, index);
   }
 
   return scenes;
+}
+
+export async function generateRevisitSkeletonScene(args: {
+  stage: Stage;
+  blueprint: RevisitExamBlueprint;
+  sourceScenes: Scene[];
+  modelConfig: RevisitSlideModelConfig;
+  pageIndex: number;
+  now?: number;
+  pageTimeoutMs?: number;
+  signal?: AbortSignal;
+}): Promise<Scene> {
+  throwIfAborted(args.signal);
+  const canCallModel =
+    !args.modelConfig.requiresApiKey ||
+    args.modelConfig.isServerConfigured ||
+    args.modelConfig.apiKey;
+  if (!canCallModel) {
+    throw new Error('Revisit skeleton generation model is unavailable');
+  }
+
+  const outlines = buildRevisitSkeletonOutlines(args.blueprint);
+  const outline = outlines[args.pageIndex];
+  const page = args.blueprint.skeleton.pages[args.pageIndex];
+  if (!outline || !page) {
+    throw new Error(`Revisit skeleton page ${args.pageIndex} is missing`);
+  }
+
+  const sourceStyle = findSourceSlideStyle(args.sourceScenes);
+  const content = await requestSkeletonSlideContent({
+    stage: args.stage,
+    outline,
+    allOutlines: outlines,
+    timeoutMs: args.pageTimeoutMs ?? DEFAULT_REVISIT_SKELETON_PAGE_TIMEOUT_MS,
+    signal: args.signal,
+  });
+  return createGeneratedRevisitSkeletonScene({
+    stage: args.stage,
+    page,
+    order: args.pageIndex,
+    content,
+    sourceTheme: sourceStyle?.theme,
+    sourceBackground: sourceStyle?.background,
+    now: args.now,
+  });
 }
 
 export function buildRevisitSkeletonOutlines(blueprint: RevisitExamBlueprint): SceneOutline[] {
@@ -149,13 +189,18 @@ async function requestSkeletonSlideContent(args: {
   outline: SceneOutline;
   allOutlines: SceneOutline[];
   timeoutMs: number;
+  signal?: AbortSignal;
 }): Promise<GeneratedSlideContent> {
   // Delegate to the normal classroom generation client (fetchSceneContent):
   // same headers, retry/backoff, and error taxonomy as forward generation.
   // Revisit only adds a whole-page time budget and forces thinking off —
   // sparse outline pages gain nothing from provider reasoning, which pushed
   // per-page latency past any sane budget.
+  throwIfAborted(args.signal);
   const controller = new AbortController();
+  const abortFromCaller = () =>
+    controller.abort(args.signal?.reason ?? new DOMException('Aborted', 'AbortError'));
+  args.signal?.addEventListener('abort', abortFromCaller, { once: true });
   const timeout = setTimeout(
     () =>
       controller.abort(
@@ -197,7 +242,13 @@ async function requestSkeletonSlideContent(args: {
     throw error;
   } finally {
     clearTimeout(timeout);
+    args.signal?.removeEventListener('abort', abortFromCaller);
   }
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  throw signal.reason ?? new DOMException('Aborted', 'AbortError');
 }
 
 function toPlainText(value: string): string {

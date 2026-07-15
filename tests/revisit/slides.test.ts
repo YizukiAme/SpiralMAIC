@@ -192,4 +192,27 @@ describe('revisit skeleton slide scenes', () => {
     });
     expect(onScene).toHaveBeenCalledWith(scenes[0], 0);
   });
+
+  test('does not call the slide model after the revisit generation is aborted', async () => {
+    const controller = new AbortController();
+    controller.abort(new DOMException('superseded attempt', 'AbortError'));
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      generateRevisitSkeletonScenes({
+        stage,
+        blueprint,
+        sourceScenes,
+        modelConfig: {
+          modelString: 'openai:gpt-4.1-mini',
+          apiKey: 'key',
+          requiresApiKey: true,
+        },
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

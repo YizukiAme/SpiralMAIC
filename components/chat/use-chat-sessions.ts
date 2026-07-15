@@ -11,7 +11,7 @@ import type {
 import type { DiscussionRequest } from '@/components/roundtable';
 import type { Action, SpotlightAction, DiscussionAction } from '@/lib/types/action';
 import type { UIMessage } from 'ai';
-import type { ThinkingConfig } from '@/lib/types/provider';
+import type { ModelServiceTier, ThinkingConfig } from '@/lib/types/provider';
 import { useStageStore } from '@/lib/store';
 import { useCanvasStore } from '@/lib/store/canvas';
 import { useSettingsStore } from '@/lib/store/settings';
@@ -23,10 +23,15 @@ import { USER_AVATAR } from '@/lib/types/roundtable';
 import { StreamBuffer } from '@/lib/buffer/stream-buffer';
 import type { AgentStartItem, ActionItem } from '@/lib/buffer/stream-buffer';
 import { runAgentLoop, type AgentLoopStoreState } from '@/lib/chat/agent-loop';
+import { mergeAgentLoopMessages } from '@/lib/chat/session-messages';
 import { ActionEngine } from '@/lib/action/engine';
 import { readSubmittedState } from '@/lib/quiz/persistence';
 import { toast } from 'sonner';
 import { createLogger } from '@/lib/logger';
+import type { RequestLearningExtensionParams } from '@/lib/overtime/types';
+import { parseRequestLearningExtensionParams } from '@/lib/overtime/types';
+import { buildOvertimeRequestContext } from '@/lib/overtime/chat';
+import { createLearningExtensionActionDispatcher } from '@/lib/overtime/action-dispatch';
 
 const log = createLogger('ChatSessions');
 
@@ -82,6 +87,10 @@ interface UseChatSessionsOptions {
   ) => void;
   /** When provided and returns true, StreamBuffer holds on the current text item after reveal. */
   shouldHoldAfterReveal?: () => { holding: boolean; segmentDone: number } | boolean;
+  onLearningExtensionRequest?: (
+    request: RequestLearningExtensionParams,
+    userPrompt: string,
+  ) => void | Promise<void>;
 }
 
 export function useChatSessions(options: UseChatSessionsOptions = {}) {
@@ -94,6 +103,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
   const onStopSessionRef = useRef(options.onStopSession);
   const onSegmentSealedRef = useRef(options.onSegmentSealed);
   const shouldHoldAfterRevealRef = useRef(options.shouldHoldAfterReveal);
+  const onLearningExtensionRequestRef = useRef(options.onLearningExtensionRequest);
   useEffect(() => {
     onLiveSpeechRef.current = options.onLiveSpeech;
     onSpeechProgressRef.current = options.onSpeechProgress;
@@ -104,6 +114,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
     onStopSessionRef.current = options.onStopSession;
     onSegmentSealedRef.current = options.onSegmentSealed;
     shouldHoldAfterRevealRef.current = options.shouldHoldAfterReveal;
+    onLearningExtensionRequestRef.current = options.onLearningExtensionRequest;
   }, [
     options.onLiveSpeech,
     options.onSpeechProgress,
@@ -114,6 +125,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
     options.onStopSession,
     options.onSegmentSealed,
     options.shouldHoldAfterReveal,
+    options.onLearningExtensionRequest,
   ]);
   const { t } = useI18n();
 
@@ -489,6 +501,8 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
         model?: string;
         providerType?: string;
         thinkingConfig?: ThinkingConfig;
+        serviceTier?: ModelServiceTier;
+        latestUserPrompt?: string;
       },
       controller: AbortController,
       sessionType: SessionType,
@@ -509,6 +523,13 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
       // Tracks agent_start messageId so text_delta/action events with a missing
       // messageId can fall back to the current agent.
       let currentMessageId: string | null = null;
+      const dispatchLearningExtension = createLearningExtensionActionDispatcher({
+        handler: onLearningExtensionRequestRef.current,
+        userPrompt: requestTemplate.latestUserPrompt ?? '',
+        onError: (error) => {
+          log.error('[Overtime] Failed to handle learning extension action.', error);
+        },
+      });
 
       const outcome = await runAgentLoop(
         {
@@ -519,6 +540,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
           model: requestTemplate.model,
           providerType: requestTemplate.providerType,
           thinkingConfig: requestTemplate.thinkingConfig,
+          serviceTier: requestTemplate.serviceTier,
         },
         {
           getStoreState: (): AgentLoopStoreState => {
@@ -538,7 +560,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
 
           getMessages: () => {
             const currentSession = sessionsRef.current.find((s) => s.id === sessionId);
-            return currentSession?.messages ?? requestTemplate.messages;
+            return mergeAgentLoopMessages(requestTemplate.messages, currentSession?.messages);
           },
 
           fetchChat: (body, signal) =>
@@ -586,6 +608,17 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
                 const targetId = event.data.messageId ?? currentMessageId;
                 if (!targetId) break;
                 if (controller.signal.aborted) break;
+                if (event.data.actionName === 'request_learning_extension') {
+                  const request = parseRequestLearningExtensionParams(event.data.params);
+                  if (request) {
+                    dispatchLearningExtension(request);
+                  } else {
+                    log.warn('[Overtime] Ignoring malformed learning extension action.', {
+                      params: event.data.params,
+                    });
+                  }
+                  break;
+                }
                 currentBuffer.pushAction({
                   actionId: event.data.actionId,
                   actionName: event.data.actionName,
@@ -913,6 +946,15 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
       setIsStreaming(true);
 
       const currentState = useStageStore.getState();
+      const overtimeContext = buildOvertimeRequestContext({
+        stageId: currentState.stage?.id,
+        currentSceneId: currentState.currentSceneId,
+        scenes: currentState.scenes,
+        generationComplete: currentState.generationComplete,
+        outlineCount: currentState.outlines.length,
+        generatingOutlineCount: currentState.generatingOutlines.length,
+        activeDemoSessionId: useSettingsStore.getState().activeRevisitDemoSessionId,
+      });
 
       try {
         log.info(`[ChatArea] Resuming session: ${sessionId}`);
@@ -943,6 +985,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
             config: {
               agentIds,
               sessionType: session.type,
+              ...(overtimeContext ? { overtimeContext } : {}),
             },
             userProfile: {
               nickname: userProfileState.nickname || undefined,
@@ -953,6 +996,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
             model: mc.modelString,
             providerType: mc.providerType,
             thinkingConfig: mc.thinkingConfig,
+            serviceTier: mc.serviceTier,
           },
           controller,
           session.type,
@@ -1130,6 +1174,15 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
       });
 
       const currentState = useStageStore.getState();
+      const overtimeContext = buildOvertimeRequestContext({
+        stageId: currentState.stage?.id,
+        currentSceneId: currentState.currentSceneId,
+        scenes: currentState.scenes,
+        generationComplete: currentState.generationComplete,
+        outlineCount: currentState.outlines.length,
+        generatingOutlineCount: currentState.generatingOutlines.length,
+        activeDemoSessionId: useSettingsStore.getState().activeRevisitDemoSessionId,
+      });
 
       try {
         log.info(
@@ -1157,6 +1210,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
             config: {
               agentIds,
               sessionType,
+              ...(overtimeContext ? { overtimeContext } : {}),
             },
             userProfile: {
               nickname: userProfileState.nickname || undefined,
@@ -1167,6 +1221,8 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
             model: mc.modelString,
             providerType: mc.providerType,
             thinkingConfig: mc.thinkingConfig,
+            serviceTier: mc.serviceTier,
+            latestUserPrompt: content,
           },
           controller,
           sessionType,
@@ -1312,6 +1368,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
             model: mc.modelString,
             providerType: mc.providerType,
             thinkingConfig: mc.thinkingConfig,
+            serviceTier: mc.serviceTier,
           },
           controller,
           'discussion',

@@ -234,7 +234,9 @@
       "imageDrop": "이미지를 끌어다 놓거나 클릭하여 파일을 선택하세요",
       "imageOr": "또는 이미지 URL 붙여넣기",
       "imageUrlPlaceholder": "https://…",
-      "imageInsert": "삽입"
+      "imageInsert": "삽입",
+      "expandToolbar": "삽입 도구 표시",
+      "collapseToolbar": "삽입 도구 숨기기"
     },
     "nav": {
       "addSlide": "슬라이드 추가",
@@ -413,7 +415,7 @@
       "deleteOption": "선택지 삭제",
       "deleteQuestion": "문항 삭제",
       "empty": "아직 문항이 없습니다",
-      "emptyHint": "“문항 추가” 버튼으로 첫 문항을 만드세요.",
+      "emptyHint": "위의 “문항 추가” 버튼으로 첫 문항을 만드세요.",
       "markCorrect": "정답으로 표시",
       "moveDown": "아래로 이동",
       "moveUp": "위로 이동",
@@ -857,19 +859,19 @@
   },
   "upload": {
     "pdfSizeLimit": "최대 50MB PDF 파일을 지원합니다",
-    "courseMaterialSizeLimit": "문서, 슬라이드, 스프레드시트, 이미지, 텍스트 — 최대 50MB (지원 형식은 선택한 파서에 따라 다름)",
+    "courseMaterialSizeLimit": "최대 50MB PDF, DOCX, PPTX, TXT, Markdown 파일을 지원합니다",
     "generateFailed": "교실 생성에 실패했습니다. 다시 시도해주세요",
     "requirementPlaceholder": "학습하고 싶은 내용을 자유롭게 입력하세요, 예:\n\"파이썬을 30분 만에 처음부터 가르쳐주세요\"\n\"칠판에 푸리에 변환을 설명해주세요\"\n\"보드게임 Avalon 하는 방법\"",
     "requirementRequired": "강좌 요구사항을 입력해주세요",
     "fileTooLarge": "파일이 너무 큽니다. 50MB 미만의 파일을 선택해주세요",
     "courseMaterialCountLimit": "강의 자료 파일은 최대 5개까지 업로드할 수 있습니다",
     "courseMaterialTotalSizeLimit": "강의 자료 전체 크기는 150MB 미만이어야 합니다",
-    "unsupportedCourseMaterial": "현재 파서가 이 형식을 지원하지 않습니다. 파서를 변경하거나 다른 파일을 선택하세요."
+    "unsupportedCourseMaterial": "지원하지 않는 강의 자료 형식입니다. PDF, DOCX, PPTX, TXT 또는 Markdown을 업로드해주세요."
   },
   "generation": {
     "pdfLoadFailed": "PDF 파일 불러오기에 실패했습니다. 다시 시도해주세요",
     "pdfParseFailed": "PDF 파싱에 실패했습니다",
-    "analyzingCourseMaterial": "문서 분석 중",
+    "analyzingCourseMaterial": "{{type}} 파일 분석 중",
     "analyzingCourseMaterialDesc": "문서 구조와 내용을 추출하고 있어요...",
     "courseMaterialLoadFailed": "강의 자료를 불러오지 못했습니다. 다시 시도해주세요",
     "courseMaterialParseFailed": "강의 자료 파싱에 실패했습니다",
@@ -975,7 +977,18 @@
     "webSearchFailed": "웹 검색에 실패했습니다",
     "outlinesReadyCount": "{{ready}} / {{total}}개 섹션 준비됨",
     "jumpToBlankTitle": "제목이 필요한 섹션으로 이동",
-    "analyzingMediaMaterial": "오디오/비디오 분석 중"
+    "analyzingMediaMaterial": "오디오/비디오 분석 중",
+    "revisitPreparingPath": "Preparing Review Path",
+    "revisitPreparingPathDesc": "Analyzing the key ideas from this lesson...",
+    "revisitGeneratingPage": "Generating Challenge Page",
+    "revisitGeneratingPageDesc": "Generating reverse-teaching prompt pages...",
+    "revisitReady": "Review Challenge Ready",
+    "revisitReadyDesc": "The first challenge page is ready. Opening the classroom now.",
+    "generatingCourse": "강좌 생성 중",
+    "openingClassroom": "교실을 여는 중...",
+    "outlineReady": "강좌 개요가 생성되었습니다",
+    "generatingFirstPage": "첫 페이지를 생성하는 중...",
+    "firstPageReady": "첫 페이지 준비 완료! 교실을 여는 중..."
   },
   "settings": {
     "title": "설정",
@@ -1076,7 +1089,8 @@
       "bocha": "Bocha",
       "brave": "Brave Search",
       "baidu": "Baidu",
-      "searxng": "SearXNG"
+      "searxng": "SearXNG",
+      "openai-codex": "Codex"
     },
     "providerTypes": {
       "openai": "OpenAI 프로토콜",
@@ -1682,10 +1696,49 @@
       "multiplierValue": "{{value}}x",
       "demoArea": "데모",
       "acceleratedClock": "가속 시계",
-      "gateSkip": "페이지 게이트 건너뛰기"
+      "gateSkip": "페이지 게이트 건너뛰기",
+      "virtualClock": "가상 시계",
+      "virtualClockDetail": "처음 시간을 이동할 때 Spiral 데이터를 복제하며 정식 기록은 변경하지 않습니다.",
+      "simulatedTime": "현재 시간",
+      "realTime": "실제 시스템 시간",
+      "demoOffset": "Demo 시간이 {{hours}}시간 앞서 있습니다",
+      "restoreRealTime": "실제 시간으로 복원"
     },
     "alidocmindAccessKeyId": "AccessKey ID",
-    "alidocmindAccessKeySecret": "AccessKey Secret"
+    "alidocmindAccessKeySecret": "AccessKey Secret",
+    "codexOAuth": {
+      "experimental": "실험적인 타사 Codex 연동이며 ChatGPT 요금제 한도를 사용합니다.",
+      "unavailableTitle": "Codex 로그인을 사용할 수 없습니다",
+      "unavailable": {
+        "FEATURE_DISABLED": "서버에서 Codex OAuth를 활성화해 주세요.",
+        "SERVERLESS_UNSUPPORTED": "Codex OAuth에는 영구 저장소가 있는 자체 호스팅 Node 서버가 필요합니다.",
+        "ACCESS_CODE_REQUIRED": "프로덕션에서 Codex OAuth를 활성화하기 전에 ACCESS_CODE를 설정하세요.",
+        "DATA_DIR_UNWRITABLE": "서버가 데이터 디렉터리에 쓸 수 없습니다. /app/data 권한을 확인하세요."
+      },
+      "connectedAs": "{email}(으)로 연결됨",
+      "connected": "ChatGPT에 연결됨",
+      "signInBrowser": "ChatGPT로 로그인",
+      "signInDevice": "기기 코드 사용",
+      "waiting": "인증 대기 중…",
+      "deviceInstructions": "확인 페이지를 열고 이 일회용 코드를 입력하세요.",
+      "openVerification": "확인 페이지 열기",
+      "copyCode": "코드 복사",
+      "copied": "복사됨",
+      "cancel": "로그인 취소",
+      "signOut": "로그아웃",
+      "models": "사용 가능한 모델",
+      "fastMode": "Fast 모드",
+      "fastModeDescription": "지원 모델에만 적용됩니다. 약 1.5배 더 빠르지만 ChatGPT 요금제 사용량을 더 많이 소모합니다.",
+      "testConnection": "연결 테스트",
+      "testSuccess": "Codex 연결에 성공했습니다.",
+      "testUnauthorized": "ChatGPT로 다시 로그인하세요.",
+      "testForbidden": "이 ChatGPT 워크스페이스에는 Codex 권한이 없습니다.",
+      "testRateLimited": "ChatGPT 요금제 한도 또는 요청 한도에 도달했습니다.",
+      "testFailed": "Codex 연결에 실패했습니다.",
+      "loginFailed": "로그인에 실패했습니다. 다시 시도하거나 기기 코드를 사용하세요.",
+      "loginExpired": "로그인 시도가 만료되었습니다. 다시 시작하세요."
+    },
+    "connected": "연결됨"
   },
   "profile": {
     "title": "프로필",
@@ -1740,8 +1793,8 @@
       "assistant": "AI assistant",
       "emptyTranscript": "Start teaching this page when you are ready.",
       "thinking": "Student is thinking...",
-      "teachThisPage": "Teach this page to your students.",
-      "assistantOpening": "This challenge is about \"{{stage}}\". The first page is \"{{page}}\". I will keep the class on track from the side; when you are ready, teach this page to your students.",
+      "teachThisPage": "Teach this page.",
+      "assistantOpening": "{{overview}} This challenge will revisit and apply that progression. Start with \"{{page}}\" and teach this page in your own words.",
       "teacherPlaceholder": "Teach this page in your own words...",
       "send": "Send",
       "finish": "Dismiss class",
@@ -1768,7 +1821,305 @@
         "rescue": "Assistant",
         "fail": "Retry"
       },
-      "open": "Review challenge"
+      "open": "Review challenge",
+      "studentStatus": {
+        "listening": "Listening to the teacher",
+        "thinking": "Thinking, waiting for the check",
+        "questioning": "Has an unresolved question",
+        "uncertain": "Still uncertain; needs more",
+        "satisfied": "Understands and agrees",
+        "rescue": "Assistant rescue in progress"
+      },
+      "assistantOpeningFallback": "The completed lesson on \"{{stage}}\" covered {{topics}} in sequence.",
+      "complete": "Complete challenge",
+      "readyToComplete": "All challenge pages passed",
+      "completeDescription": "Complete the challenge to generate your report and update the learning record.",
+      "generatingReport": "Generating challenge report",
+      "generatingReportDescription": "Evaluating clarity, doubt resolution, transfer, and error correction.",
+      "retryReport": "Generate report again",
+      "reportReady": "Challenge report is ready",
+      "replayComplete": "다시 도전 완료",
+      "replayNotCounted": "이번 다시 도전은 기록에 반영되지 않습니다"
+    },
+    "panel": {
+      "title": "복습 패널",
+      "loading": "이 수업의 복습 상태를 불러오는 중...",
+      "memoryStatus": "기억 상태",
+      "suggestedReview": "권장 복습",
+      "createdAt": "수업 생성",
+      "completedAt": "수업 완료",
+      "notRecorded": "기록 없음",
+      "quizAccuracy": "수업 정답률",
+      "noQuiz": "퀴즈 없음",
+      "latestChallenge": "최근 챌린지",
+      "currentMemory": "현재 기억",
+      "pendingAssessment": "평가 대기 개념",
+      "openCourse": "본 수업 열기",
+      "completeCourseFirst": "먼저 본 수업 완료",
+      "none": "아직 없음",
+      "now": "지금"
+    },
+    "tabs": {
+      "challenge": "Reverse Challenge",
+      "materials": "복습 자료",
+      "demo": "Demo 임시함"
+    },
+    "history": {
+      "title": "챌린지 기록",
+      "empty": "아직 Reverse Challenge가 없습니다",
+      "completed": "완료",
+      "unfinished": "미완료",
+      "reportOnly": "보고서만 있음",
+      "preparationFailed": "준비 실패",
+      "preparing": "준비 미완료",
+      "ready": "입장 가능",
+      "replayable": "다시 도전 가능",
+      "awaitingCompletion": "완료하면 전체 보고서가 표시됩니다.",
+      "generateNew": "새 챌린지 생성",
+      "actions": {
+        "prepare": "다시 준비",
+        "enter": "챌린지 입장",
+        "replay": "다시 도전",
+        "none": ""
+      }
+    },
+    "lowBenefit": {
+      "title": "지금은 새 챌린지의 효과가 낮을 수 있습니다",
+      "description": "현재 기억 유지율은 {{percent}}%이며 권장 복습 시점은 {{date}}입니다.",
+      "later": "나중에",
+      "generateAnyway": "그래도 생성"
+    },
+    "report": {
+      "summary": "챌린지 요약",
+      "errors": "사실 오류",
+      "noErrors": "기록된 사실 오류가 없습니다.",
+      "corrected": "수정됨",
+      "uncorrected": "미수정",
+      "pages": "페이지별 결과",
+      "passed": "통과",
+      "notPassed": "미통과",
+      "probes": "탐색 {{count}}회",
+      "unavailable": "이 이전 기록에는 보고서만 있어 다시 입장할 수 없습니다.",
+      "dimensions": {
+        "clarity": "설명 명확성",
+        "doubtResolution": "의문 해결",
+        "transfer": "전이 적용",
+        "errorCorrection": "오류 수정"
+      }
+    },
+    "demo": {
+      "title": "Demo 임시함",
+      "subtitle": "독립 저장된 가상 시간 배치를 확인합니다.",
+      "batches": "데모 배치",
+      "isolated": "각 배치는 독립 데이터 사본을 사용하며 정식 학습 기록에 쓰지 않습니다.",
+      "empty": "데모 데이터가 없습니다",
+      "active": "사용 중",
+      "archived": "보관됨",
+      "batchName": "Demo · {{date}}",
+      "counts": "Reverse {{attempts}} · 보고서 {{reports}} · 자료 {{artifacts}} · 연습 {{practice}}",
+      "clear": "Demo 데이터 지우기",
+      "clearTitle": "모든 Demo 데이터를 지울까요?",
+      "clearDescription": "모든 데모 배치와 챌린지, 보고서, 자료, 연습 기록이 영구 삭제됩니다."
+    },
+    "studio": {
+      "title": "학습 자료 스튜디오",
+      "subtitle": "복습 작품을 종류별로 만들고 저장해 활용하세요.",
+      "createTitle": "학습 자료 만들기",
+      "createDescription": "한 번에 한 종류만 생성하며 다른 자료는 계속 볼 수 있습니다.",
+      "queueActive": "대기 중인 작업이 있습니다",
+      "libraryTitle": "내 학습 자료",
+      "emptyTitle": "아직 학습 작품이 없습니다",
+      "emptyDescription": "위에서 자료를 선택하세요. 완성된 작품은 여기에 저장됩니다.",
+      "latestVersion": "최신 v{{version}}",
+      "generate": "생성",
+      "regenerate": "새 버전",
+      "retry": "다시 시도",
+      "openCourse": "수업 열기",
+      "customizeButton": "맞춤 설정",
+      "cancelGeneration": "생성 취소",
+      "open": "열기",
+      "moreActions": "추가 작업",
+      "regenerateSame": "같은 설정으로 다시 생성",
+      "rename": "이름 바꾸기",
+      "renameTitle": "작품 이름 바꾸기",
+      "renameDescription": "이 버전의 라이브러리 표시 이름만 변경합니다.",
+      "renamed": "작품 이름을 변경했습니다",
+      "deleteTitle": "이 작품을 삭제할까요?",
+      "deleteDescription": "이 버전과 플래시카드 또는 퀴즈 진행 상황이 영구 삭제됩니다.",
+      "deleted": "작품을 삭제했습니다",
+      "save": "저장",
+      "deleteAction": "삭제",
+      "kinds": {
+        "briefing": {
+          "title": "비주얼 브리핑",
+          "description": "핵심, 비교, 흐름을 인쇄 가능한 한 페이지로 정리합니다."
+        },
+        "mindMap": {
+          "title": "마인드맵",
+          "description": "개념 관계, 예시, 기억 상태를 지식 지도에서 탐색합니다."
+        },
+        "studyGuide": {
+          "title": "학습 가이드",
+          "description": "핵심, 정의, 예시, 오해, 연습 힌트를 단원별로 정리합니다."
+        },
+        "faq": {
+          "title": "FAQ",
+          "description": "자주 묻는 질문과 명확한 답으로 헷갈리는 개념을 확인합니다."
+        },
+        "flashcards": {
+          "title": "플래시카드",
+          "description": "카드를 뒤집고 익힘/어려움 표시로 능동 회상 연습을 합니다."
+        },
+        "quiz": {
+          "title": "퀴즈",
+          "description": "한 문제씩 답하고 해설을 확인하며 틀린 문제만 다시 풉니다."
+        }
+      },
+      "status": {
+        "generating": "생성 중",
+        "queued": "대기 중",
+        "failed": "실패",
+        "interrupted": "중단됨",
+        "ready": "완료",
+        "empty": "미생성",
+        "stale": "수업 내용 업데이트됨"
+      },
+      "groups": {
+        "understanding": {
+          "title": "이해와 요약",
+          "description": "핵심을 정리하고 모호함 해소"
+        },
+        "structure": {
+          "title": "지식 구조",
+          "description": "개념 사이의 연결 파악"
+        },
+        "practice": {
+          "title": "능동 연습",
+          "description": "회상과 답변으로 기억 강화"
+        }
+      },
+      "customize": {
+        "title": "생성 맞춤 설정",
+        "description": "작품의 범위, 강조점, 형식을 설정합니다.",
+        "focus": "내용 범위",
+        "focusDescription": "수업의 어느 부분을 우선할지 선택하세요.",
+        "focusModes": {
+          "balanced": {
+            "title": "전체 수업과 약점",
+            "description": "전체를 다루면서 약한 개념을 강조"
+          },
+          "weak-points": {
+            "title": "약점만",
+            "description": "기억 상태와 최근 챌린지의 부족한 부분에 집중"
+          },
+          "selected-scenes": {
+            "title": "수업 페이지 선택",
+            "description": "선택한 페이지만 주요 출처로 사용"
+          }
+        },
+        "selectScenes": "페이지 선택",
+        "selectScenesRequired": "수업 페이지를 하나 이상 선택하세요.",
+        "customInstructions": "추가 요청",
+        "customInstructionsPlaceholder": "예: 생활 속 전이 사례를 더 많이 사용하고 전문 용어는 줄이기…",
+        "orientation": "레이아웃",
+        "detail": "상세 수준",
+        "depth": "맵 깊이",
+        "includeExamples": "맵 노드에 예시 포함",
+        "itemCount": "항목 수",
+        "difficulty": "난이도"
+      },
+      "options": {
+        "portrait": "세로",
+        "landscape": "가로",
+        "square": "정사각형",
+        "compact": "간단",
+        "standard": "표준",
+        "detailed": "상세",
+        "easy": "쉬움",
+        "medium": "보통",
+        "hard": "어려움"
+      }
+    },
+    "viewer": {
+      "tableOfContents": "목차",
+      "noSections": "이 가이드에는 별도 단원이 없습니다",
+      "overview": "개요",
+      "sections": "섹션",
+      "concepts": "개념",
+      "sourcePages": "출처 페이지",
+      "version": "버전 {{version}}",
+      "questionCount": "질문 {{count}}개",
+      "searchFaq": "질문과 답변 검색",
+      "clearSearch": "검색 지우기",
+      "allTopics": "모든 주제",
+      "faqResults": "일치하는 질문 {{count}}개",
+      "noFaqMatches": "일치하는 질문이 없습니다",
+      "collapseAll": "모두 접기",
+      "expandAll": "모두 펼치기",
+      "flashcardsProgress": "{{mastered}} / {{total}}개 익힘",
+      "shuffle": "섞기",
+      "onlyDifficult": "어려운 카드만",
+      "needsPractice": "연습 필요",
+      "mastered": "익힘",
+      "unseen": "미표시",
+      "showFront": "카드 앞면 보기",
+      "showBack": "카드 답 보기",
+      "answer": "답",
+      "prompt": "문제",
+      "tapForFront": "눌러서 앞면 보기",
+      "tapToReveal": "눌러서 답 보기",
+      "previous": "이전",
+      "next": "다음",
+      "notYet": "아직",
+      "gotIt": "알겠어요",
+      "noDifficultCards": "현재 어려운 카드가 없습니다",
+      "backToAllCards": "전체 카드로 돌아가기",
+      "quizResult": "퀴즈 결과",
+      "correctCount": "{{correct}} / {{total}}개 정답",
+      "retryWrong": "틀린 문제만 다시 풀기",
+      "questionProgress": "{{current}} / {{total}}번 문제",
+      "hint": "힌트 보기",
+      "submitQuiz": "퀴즈 제출",
+      "answerKey": "정답과 해설",
+      "searchMindMap": "노드 검색",
+      "expandNode": "노드 펼치기",
+      "collapseNode": "노드 접기",
+      "nodeDetails": "노드 상세",
+      "noCourseMemoryEvidence": "기록에 반영되는 Reverse Challenge를 한 번 완료하면 여기에 기억 유지율이 표시됩니다.",
+      "nodeMemoryUnlinked": "이 노드는 아직 평가된 개념과 연결되지 않았습니다.",
+      "memoryPercent": "현재 기억 {{percent}}%",
+      "examples": "예시",
+      "sources": "출처 페이지",
+      "sourcePageLabel": "{{page}}페이지 · {{title}}",
+      "sourcePageRemoved": "원본 페이지가 삭제됨",
+      "notFound": "이 학습 자료를 찾을 수 없습니다.",
+      "courseUnavailable": "원본 수업을 사용할 수 없습니다.",
+      "loadFailed": "학습 자료를 열 수 없습니다",
+      "exportPdf": "PDF 내보내기",
+      "exportPng": "PNG 내보내기",
+      "exportSvg": "SVG 내보내기",
+      "exportComplete": "시각 자료를 내보냈습니다",
+      "exportFailed": "내보내기에 실패했습니다"
+    }
+  },
+  "overtime": {
+    "retry": "학습 페이지 다시 준비",
+    "status": {
+      "failed": "페이지 준비에 실패했습니다",
+      "interrupted": "페이지 준비가 중단되었습니다"
+    },
+    "phase": {
+      "outline": "추가 학습 페이지를 계획하는 중...",
+      "content": "페이지 내용을 생성하는 중...",
+      "actions": "설명을 구성하는 중...",
+      "tts": "음성을 준비하는 중...",
+      "commit": "과정에 페이지를 추가하는 중..."
+    },
+    "newCourse": {
+      "title": "이 주제는 별도 과정에 더 적합합니다",
+      "description": "현재 과정에 한 페이지로 정리하거나, 주제를 위한 완전한 새 과정을 만들 수 있습니다.",
+      "stay": "현재 과정에 남기기",
+      "create": "새 과정 만들기"
     }
   }
 }

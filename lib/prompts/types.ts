@@ -29,6 +29,13 @@ export type PromptId =
   | 'director'
   | 'revisit-exam-blueprint'
   | 'revisit-judge'
+  | 'revisit-study-artifact-briefing'
+  | 'revisit-study-artifact-mind-map'
+  | 'revisit-study-artifact-study-guide'
+  | 'revisit-study-artifact-faq'
+  | 'revisit-study-artifact-flashcards'
+  | 'revisit-study-artifact-quiz'
+  | 'overtime-extension-outline'
   | 'pbl-design';
 
 /**

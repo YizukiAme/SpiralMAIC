@@ -6,10 +6,18 @@ import type {
   ChatSession,
   SessionStatus,
   StatelessChatRequest,
-  StatelessEvent,
 } from '@/lib/types/chat';
 import type { Scene, Stage } from '@/lib/types/stage';
-import type { RevisitExamBlueprint, RevisitGateDecision, RevisitProbe } from '@/lib/revisit/types';
+import type { ModelServiceTier } from '@/lib/types/provider';
+import { createLogger } from '@/lib/logger';
+import type {
+  RevisitExamBlueprint,
+  RevisitGateDecision,
+  RevisitProbe,
+  RevisitStudentStateMap,
+} from '@/lib/revisit/types';
+
+const log = createLogger('RevisitSession');
 
 export const REVISIT_STUDENT_AGENT_ID = 'default-4';
 export const REVISIT_DEFAULT_STUDENT_AGENT_IDS = [
@@ -49,13 +57,36 @@ export interface RevisitSessionPageState {
   additionalProbeCount: number;
   rescued: boolean;
   passed: boolean;
+  studentStates?: RevisitStudentStateMap;
 }
 
-export interface RevisitParsedSse {
-  messages: RevisitMessage[];
-  gate: RevisitGateDecision | null;
-  directorState?: DirectorState;
-  errorMessage: string | null;
+export function buildRevisitOpeningContext(args: {
+  blueprint: RevisitExamBlueprint;
+  sourceScenes: Scene[];
+  locale: string;
+}): { brief: string | null; topics: string } {
+  const brief = args.blueprint.openingBrief?.replace(/\s+/g, ' ').trim() || null;
+  const orderedSceneTitles = [...args.sourceScenes]
+    .sort((left, right) => left.order - right.order)
+    .map((scene) => scene.title.trim())
+    .filter(Boolean);
+  const candidates =
+    orderedSceneTitles.length > 0
+      ? orderedSceneTitles
+      : args.blueprint.concepts.map((concept) => concept.label.trim()).filter(Boolean);
+  const topics = Array.from(new Set(candidates)).slice(0, 5);
+
+  try {
+    return {
+      brief,
+      topics: new Intl.ListFormat(args.locale, {
+        style: 'long',
+        type: 'conjunction',
+      }).format(topics),
+    };
+  } catch {
+    return { brief, topics: topics.join(', ') };
+  }
 }
 
 export function createTeacherRevisitMessage(text: string, now = Date.now()): RevisitMessage {
@@ -176,6 +207,7 @@ export function buildRevisitGateContext(args: {
   pageState: RevisitSessionPageState;
   latestTeacherText: string;
   elapsedMinutes: number;
+  activeStudentAgentIds?: string[];
 }): string {
   const page = args.blueprint.skeleton.pages[args.pageState.pageIndex];
   if (!page) return '';
@@ -195,6 +227,8 @@ export function buildRevisitGateContext(args: {
     `additional_probe_count: ${args.pageState.additionalProbeCount}`,
     `additional_probe_cap: ${REVISIT_PAGE_PROBE_CAP}`,
     `rescued: ${args.pageState.rescued}`,
+    `active_student_ids: ${args.activeStudentAgentIds?.join(', ') || 'none'}`,
+    `current_student_states: ${formatStudentStates(args.pageState.studentStates)}`,
     `elapsed_minutes: ${Math.round(args.elapsedMinutes)}`,
     `soft_limit_minutes: ${REVISIT_SOFT_LIMIT_MINUTES}`,
     `latest_teacher_turn: ${args.latestTeacherText}`,
@@ -214,6 +248,7 @@ export function createRevisitChatRequest(args: {
   apiKey: string;
   baseUrl?: string;
   providerType?: string;
+  serviceTier?: ModelServiceTier;
   agentIds?: RevisitAgentIds;
   agentConfigs?: NonNullable<StatelessChatRequest['config']['agentConfigs']>;
 }): StatelessChatRequest {
@@ -250,13 +285,17 @@ export function createRevisitChatRequest(args: {
         pageState: args.pageState,
         latestTeacherText: args.latestTeacherText,
         elapsedMinutes: args.elapsedMinutes,
+        activeStudentAgentIds: studentAgentIds,
       }),
+      revisitFallbackDirective:
+        args.pageState.additionalProbeCount >= REVISIT_PAGE_PROBE_CAP ? 'rescue' : 'probe',
     },
     directorState: args.directorState,
     apiKey: args.apiKey,
     model: args.model,
     ...(args.baseUrl ? { baseUrl: args.baseUrl } : {}),
     ...(args.providerType ? { providerType: args.providerType } : {}),
+    ...(args.serviceTier ? { serviceTier: args.serviceTier } : {}),
   };
 }
 
@@ -297,14 +336,31 @@ export function canNavigateRevisitPage(
   currentPageIndex: number,
   targetPageIndex: number,
   gateSkipEnabled = false,
+  failedPageIndex?: number | null,
 ): boolean {
   if (targetPageIndex < 0 || targetPageIndex >= pageStates.length) return false;
+  if (failedPageIndex != null && targetPageIndex === failedPageIndex) return true;
   if (targetPageIndex <= currentPageIndex) return true;
   if (gateSkipEnabled) return true;
 
   return pageStates
     .slice(currentPageIndex, targetPageIndex)
     .every((state) => Boolean(state.passed));
+}
+
+export function getLastUnlockedRevisitPageIndex(
+  pageStates: RevisitSessionPageState[],
+  availablePages: Array<unknown | null | undefined>,
+  gateSkipEnabled = false,
+): number {
+  let lastUnlockedIndex = 0;
+  for (let index = 0; index < pageStates.length; index += 1) {
+    if (!availablePages[index]) continue;
+    const unlocked =
+      gateSkipEnabled || index === 0 || pageStates.slice(0, index).every((state) => state.passed);
+    if (unlocked) lastUnlockedIndex = index;
+  }
+  return lastUnlockedIndex;
 }
 
 export interface RevisitSceneStatus {
@@ -331,16 +387,226 @@ export function buildRevisitSceneStatuses(
   );
 }
 
-export function getRevisitStudentStatusEmoji(
-  pageState: RevisitSessionPageState | undefined,
-  teacherTurnActive: boolean,
-): string {
-  if (teacherTurnActive) return '👂';
-  if (!pageState) return '🤔';
-  if (pageState.passed) return '🤓';
-  if (pageState.rescued || pageState.additionalProbeCount >= REVISIT_PAGE_PROBE_CAP) return '🤔';
-  if (pageState.additionalProbeCount > 0) return '🤨';
-  return '🤔';
+export interface RevisitParticipantStatusBadge {
+  emoji: string;
+  labelKey:
+    | 'revisit.challenge.studentStatus.listening'
+    | 'revisit.challenge.studentStatus.thinking'
+    | 'revisit.challenge.studentStatus.questioning'
+    | 'revisit.challenge.studentStatus.uncertain'
+    | 'revisit.challenge.studentStatus.satisfied'
+    | 'revisit.challenge.studentStatus.rescue';
+}
+
+export function applyRevisitGateToPageState(args: {
+  pageState: RevisitSessionPageState;
+  gate: RevisitGateDecision | null;
+  activeStudentAgentIds: string[];
+  studentMessagesSinceTeacherTurn?: RevisitMessage[];
+  fallbackNextProbeId?: string;
+}): RevisitSessionPageState {
+  const decision =
+    args.gate ??
+    ({
+      status: args.pageState.additionalProbeCount >= REVISIT_PAGE_PROBE_CAP ? 'rescue' : 'probe',
+      pageIndex: args.pageState.pageIndex,
+      reason: '',
+    } satisfies RevisitGateDecision);
+  const activeStudentAgentIds = Array.from(new Set(args.activeStudentAgentIds));
+  const activeStudentIdSet = new Set(activeStudentAgentIds);
+  const gateStudentStates = decision.studentStates ?? {};
+  const hasCompleteGateStates =
+    args.gate != null &&
+    activeStudentAgentIds.length > 0 &&
+    activeStudentAgentIds.every((agentId) =>
+      Object.prototype.hasOwnProperty.call(gateStudentStates, agentId),
+    );
+  const studentStates: RevisitStudentStateMap = {};
+
+  for (const agentId of activeStudentAgentIds) {
+    const previousState = args.pageState.studentStates?.[agentId];
+    if (previousState) studentStates[agentId] = previousState;
+  }
+  for (const [agentId, state] of Object.entries(gateStudentStates)) {
+    if (!activeStudentIdSet.has(agentId)) {
+      log.warn('[RevisitGate] Ignoring unknown student state id', {
+        agentId,
+        pageIndex: decision.pageIndex,
+        gateStatus: decision.status,
+        activeStudentAgentIds,
+      });
+      continue;
+    }
+    studentStates[agentId] = state;
+  }
+
+  const respondingStudentMessages = (args.studentMessagesSinceTeacherTurn ?? []).filter(
+    (message) =>
+      message.role === 'student' &&
+      Boolean(message.agentId) &&
+      activeStudentIdSet.has(message.agentId as string) &&
+      message.text.trim().length > 0,
+  );
+  if (decision.status === 'pass') {
+    for (const message of respondingStudentMessages) {
+      if (!isRevisitStudentQuestion(message.text)) {
+        studentStates[message.agentId as string] = 'satisfied';
+      }
+    }
+  }
+  const questioningAgentIds = respondingStudentMessages
+    .filter((message) => isRevisitStudentQuestion(message.text))
+    .map((message) => message.agentId as string);
+  for (const agentId of questioningAgentIds) {
+    studentStates[agentId] = 'questioning';
+  }
+
+  const nextState: RevisitSessionPageState = {
+    ...args.pageState,
+    studentStates,
+  };
+
+  if (decision.status === 'rescue') {
+    return {
+      ...nextState,
+      rescued: true,
+      passed: false,
+    };
+  }
+
+  const respondingStudentAskedNewQuestion = questioningAgentIds.length > 0;
+  const shouldConsumeProbe =
+    decision.status === 'probe' ||
+    decision.status === 'fail' ||
+    (decision.status === 'pass' && respondingStudentAskedNewQuestion);
+  if (shouldConsumeProbe) {
+    return consumeRevisitProbeTurn(nextState, args.fallbackNextProbeId);
+  }
+
+  if (decision.status === 'pass') {
+    const allSatisfied = activeStudentAgentIds.every(
+      (agentId) => studentStates[agentId] === 'satisfied',
+    );
+    return {
+      ...nextState,
+      studentStates,
+      passed: hasCompleteGateStates && allSatisfied,
+    };
+  }
+
+  return { ...nextState, passed: false };
+}
+
+export function applyRevisitGateToPageStates(args: {
+  pageStates: RevisitSessionPageState[];
+  pageIndex: number;
+  gate: RevisitGateDecision | null;
+  activeStudentAgentIds: string[];
+  studentMessagesSinceTeacherTurn?: RevisitMessage[];
+  candidateProbeIds?: string[];
+}): RevisitSessionPageState[] {
+  const pageState = args.pageStates[args.pageIndex];
+  if (!pageState) return args.pageStates;
+
+  const fallbackNextProbeId =
+    args.gate?.nextProbeId ??
+    args.candidateProbeIds?.find((probeId) => !pageState.askedProbeIds.includes(probeId));
+  const nextState = applyRevisitGateToPageState({
+    pageState,
+    gate: args.gate,
+    activeStudentAgentIds: args.activeStudentAgentIds,
+    studentMessagesSinceTeacherTurn: args.studentMessagesSinceTeacherTurn,
+    fallbackNextProbeId,
+  });
+
+  return args.pageStates.map((state, index) => (index === args.pageIndex ? nextState : state));
+}
+
+export function isRevisitStudentQuestion(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (/[?？]/.test(trimmed)) return true;
+  const explicitlyUnresolved =
+    /(不明白|不懂|不知道|不理解|不清楚|不会|没(?:有)?(?:懂|学会|搞懂)|还没(?:有)?弄懂|搞不懂|想不通)/.test(
+      trimmed,
+    );
+  const explicitlyUnresolvedEnglish =
+    /\b(?:(?:i\s+)?(?:still\s+)?(?:do(?:n't| not)|cannot|can't)\s+(?:understand|follow|know)|(?:i(?:'m| am)\s+)?(?:still\s+)?(?:confused|lost|uncertain)|(?:this|that|it)\s+(?:still\s+)?(?:does(?:n't| not)|is(?:n't| not))\s+(?:make\s+sense|clear))\b/i.test(
+      trimmed,
+    );
+  if (explicitlyUnresolved || explicitlyUnresolvedEnglish) return true;
+  const resolvedAcknowledgement =
+    /我(?:现在|已经|终于|这下)?(?:明白|懂|理解|知道|清楚)|(?:明白|懂|理解|知道|清楚)了/.test(
+      trimmed,
+    );
+  if (resolvedAcknowledgement && !/[吗呢][。！!\s]*$/.test(trimmed)) {
+    return false;
+  }
+  return /(为什么|怎么|如何|什么|哪里|哪[个里]?|谁|是否|是不是|能不能|可不可以|算不算|吗[。！!\s]*$|呢[。！!\s]*$)/.test(
+    trimmed,
+  );
+}
+
+export function compactRevisitDirectorState(state: DirectorState): DirectorState {
+  return {
+    turnCount: state.turnCount,
+    agentResponses: state.agentResponses.slice(-6),
+    whiteboardLedger: state.whiteboardLedger.slice(-24),
+  };
+}
+
+export function getRevisitParticipantStatusBadge(args: {
+  pageState: RevisitSessionPageState | undefined;
+  agentId: string;
+  assistant?: boolean;
+  teacherSpeaking?: boolean;
+  awaitingStudentStatusUpdate?: boolean;
+}): RevisitParticipantStatusBadge | undefined {
+  if (args.assistant) {
+    return args.pageState?.rescued
+      ? { emoji: '🛟', labelKey: 'revisit.challenge.studentStatus.rescue' }
+      : undefined;
+  }
+  if (args.teacherSpeaking) {
+    return { emoji: '👂', labelKey: 'revisit.challenge.studentStatus.listening' };
+  }
+  if (args.awaitingStudentStatusUpdate) {
+    return { emoji: '🤔', labelKey: 'revisit.challenge.studentStatus.thinking' };
+  }
+
+  const state = args.pageState?.studentStates?.[args.agentId];
+  if (state === 'questioning') {
+    return { emoji: '❓', labelKey: 'revisit.challenge.studentStatus.questioning' };
+  }
+  if (state === 'uncertain') {
+    return { emoji: '🤨', labelKey: 'revisit.challenge.studentStatus.uncertain' };
+  }
+  if (state === 'satisfied' || args.pageState?.passed) {
+    return { emoji: '🤓', labelKey: 'revisit.challenge.studentStatus.satisfied' };
+  }
+
+  return { emoji: '🤔', labelKey: 'revisit.challenge.studentStatus.thinking' };
+}
+
+function formatStudentStates(studentStates: RevisitStudentStateMap | undefined): string {
+  if (!studentStates || Object.keys(studentStates).length === 0) return 'none';
+  return Object.entries(studentStates)
+    .map(([agentId, state]) => `${agentId}=${state}`)
+    .join(', ');
+}
+
+function consumeRevisitProbeTurn(
+  pageState: RevisitSessionPageState,
+  nextProbeId: string | undefined,
+): RevisitSessionPageState {
+  return {
+    ...pageState,
+    passed: false,
+    additionalProbeCount: Math.min(REVISIT_PAGE_PROBE_CAP, pageState.additionalProbeCount + 1),
+    askedProbeIds: nextProbeId
+      ? Array.from(new Set([...pageState.askedProbeIds, nextProbeId]))
+      : pageState.askedProbeIds,
+  };
 }
 
 export type RevisitCueUserPrompt = 'teach-page' | 'default';
@@ -357,67 +623,4 @@ export function getRevisitCueUserLabelKey(
   prompt: RevisitCueUserPrompt,
 ): 'revisit.challenge.teachThisPage' | undefined {
   return prompt === 'teach-page' ? 'revisit.challenge.teachThisPage' : undefined;
-}
-
-export function parseRevisitChatSse(
-  input: string,
-  agentIds?: RevisitAgentIds,
-): {
-  events: RevisitParsedSse;
-  remaining: string;
-} {
-  const normalized = input.replace(/\r\n/g, '\n');
-  const blocks = normalized.split('\n\n');
-  const remaining = blocks.pop() ?? '';
-  const messages: RevisitMessage[] = [];
-  let activeMessage: RevisitMessage | null = null;
-  let gate: RevisitGateDecision | null = null;
-  let directorState: DirectorState | undefined;
-  let errorMessage: string | null = null;
-
-  for (const block of blocks) {
-    const data = block
-      .split('\n')
-      .filter((line) => line.startsWith('data:'))
-      .map((line) => line.slice('data:'.length).trimStart())
-      .join('\n');
-
-    if (!data) continue;
-
-    try {
-      const event = JSON.parse(data) as StatelessEvent;
-      if (event.type === 'agent_start') {
-        activeMessage = {
-          id: event.data.messageId,
-          role: roleForRevisitAgent(event.data.agentId, agentIds),
-          agentId: event.data.agentId,
-          agentName: event.data.agentName,
-          agentAvatar: event.data.agentAvatar,
-          text: '',
-          createdAt: Date.now(),
-        };
-        messages.push(activeMessage);
-      } else if (event.type === 'text_delta' && activeMessage) {
-        activeMessage.text += event.data.content;
-      } else if (event.type === 'revisit_gate') {
-        gate = event.data;
-      } else if (event.type === 'done') {
-        directorState = event.data.directorState;
-      } else if (event.type === 'error') {
-        errorMessage = event.data.message;
-      }
-    } catch {
-      // Ignore malformed complete blocks; incomplete blocks stay in `remaining`.
-    }
-  }
-
-  return {
-    events: {
-      messages: messages.filter((message) => message.text.trim().length > 0),
-      gate,
-      directorState,
-      errorMessage,
-    },
-    remaining,
-  };
 }

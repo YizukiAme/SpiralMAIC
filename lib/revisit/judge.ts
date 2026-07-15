@@ -82,6 +82,30 @@ interface RawJudgeReport {
   pageReports?: Array<Partial<RevisitPageReport>>;
 }
 
+interface NormalizeJudgeReportOptions {
+  expectedConceptIds?: string[];
+}
+
+const REQUIRED_DIMENSIONS: RevisitDimension[] = [
+  'clarity',
+  'doubtResolution',
+  'transfer',
+  'errorCorrection',
+];
+
+function assertDimensionScores(
+  raw: Partial<Record<RevisitDimension, unknown>> | undefined,
+  label: string,
+): void {
+  if (!raw || typeof raw !== 'object') throw new Error(`${label} is missing dimension scores`);
+  for (const dimension of REQUIRED_DIMENSIONS) {
+    const value = raw[dimension];
+    if (value === null || value === '' || !Number.isFinite(Number(value))) {
+      throw new Error(`${label} is missing ${dimension}`);
+    }
+  }
+}
+
 function stableId(prefix: string, index: number): string {
   return `${prefix}-${String(index + 1).padStart(2, '0')}`;
 }
@@ -105,7 +129,45 @@ function polarityForQ(q: number): ConceptEvidence['polarity'] {
   return 'mixed';
 }
 
-export function normalizeJudgeReport(raw: RawJudgeReport): RevisitJudgeReport {
+export function normalizeJudgeReport(
+  raw: RawJudgeReport,
+  options: NormalizeJudgeReportOptions = {},
+): RevisitJudgeReport {
+  if (!String(raw.summary || '').trim()) throw new Error('Judge report is missing summary');
+  assertDimensionScores(raw.dimensions, 'Judge report');
+  if (!Array.isArray(raw.conceptScores) || raw.conceptScores.length === 0) {
+    throw new Error('Judge report is missing concept scores');
+  }
+
+  const expectedConceptIds = new Set(options.expectedConceptIds ?? []);
+  const seenConceptIds = new Set<string>();
+  for (const [index, score] of raw.conceptScores.entries()) {
+    const conceptId = typeof score.conceptId === 'string' ? score.conceptId.trim() : '';
+    if (!conceptId) throw new Error(`Judge concept score ${index + 1} is missing concept id`);
+    if (seenConceptIds.has(conceptId)) {
+      throw new Error(`Judge report has duplicate concept evidence for ${conceptId}`);
+    }
+    if (expectedConceptIds.size > 0 && !expectedConceptIds.has(conceptId)) {
+      throw new Error(`Judge report references unknown concept ${conceptId}`);
+    }
+    assertDimensionScores(score.scores, `Judge concept score ${conceptId}`);
+    seenConceptIds.add(conceptId);
+  }
+  for (const expectedConceptId of expectedConceptIds) {
+    if (!seenConceptIds.has(expectedConceptId)) {
+      throw new Error(`Judge report is missing concept evidence for ${expectedConceptId}`);
+    }
+  }
+  for (const error of raw.errors ?? []) {
+    if (
+      typeof error.conceptId === 'string' &&
+      expectedConceptIds.size > 0 &&
+      !expectedConceptIds.has(error.conceptId)
+    ) {
+      throw new Error(`Judge report error references unknown concept ${error.conceptId}`);
+    }
+  }
+
   const attemptId = String(raw.attemptId || `attempt-${Date.now()}`);
   const stageId = String(raw.stageId || '');
   const completedAt =
@@ -122,7 +184,7 @@ export function normalizeJudgeReport(raw: RawJudgeReport): RevisitJudgeReport {
       const conceptErrors = errors.filter((error) => error.conceptId === score.conceptId);
       const conceptQ = computeJudgeQ(score.scores || {}, conceptErrors);
       return {
-        id: stableId('evidence', index),
+        id: stableId(`${attemptId}:evidence`, index),
         attemptId,
         stageId,
         conceptId: score.conceptId as string,

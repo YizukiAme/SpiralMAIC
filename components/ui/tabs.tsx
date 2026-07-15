@@ -15,6 +15,11 @@ function Tabs({
     <TabsPrimitive.Root
       data-slot="tabs"
       data-orientation={orientation}
+      // NOTE: `data-[orientation=horizontal]:flex-col` compiles to a selector with
+      // (0,2,0) specificity, so caller overrides like `md:flex-row` silently LOSE
+      // to it. To lay a Tabs root out as a row, callers must use the important
+      // flag, e.g. `md:flex-row!`. This has broken the revisit review panel's
+      // sidebar layout twice — see components/revisit/review-panel.tsx.
       className={cn('gap-2 group/tabs flex data-[orientation=horizontal]:flex-col', className)}
       {...props}
     />

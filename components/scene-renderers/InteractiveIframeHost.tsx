@@ -7,6 +7,7 @@ import {
   useInteractiveIframePool,
   type IframePoolEntry,
 } from '@/lib/store/interactive-iframe-pool';
+import { emitOvertimeLearningSignal } from '@/lib/overtime/learning';
 import { useSceneRuntimeErrors } from '@/lib/store/scene-runtime-errors';
 
 /**
@@ -128,7 +129,12 @@ function PooledIframe({ sceneId, entry, visible }: PooledIframeProps) {
       const d = e.data as
         | { __maicInteractive?: boolean; kind?: string; errorKind?: string; message?: unknown }
         | undefined;
-      if (!d || d.__maicInteractive !== true || d.kind !== 'runtime-error') return;
+      if (!d || d.__maicInteractive !== true) return;
+      if (d.kind === 'learner-interaction') {
+        emitOvertimeLearningSignal(sceneId, 'interactive_activity');
+        return;
+      }
+      if (d.kind !== 'runtime-error') return;
       const kind = typeof d.errorKind === 'string' ? d.errorKind : 'error';
       const msg = typeof d.message === 'string' ? d.message : String(d.message ?? '');
       useSceneRuntimeErrors.getState().addError(sceneId, `[${kind}] ${msg}`);

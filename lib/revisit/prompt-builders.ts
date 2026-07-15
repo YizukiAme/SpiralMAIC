@@ -3,48 +3,74 @@ import { jsonrepair } from 'jsonrepair';
 import { buildPrompt, PROMPT_IDS } from '@/lib/prompts';
 import type { Scene, Stage } from '@/lib/types/stage';
 import { normalizeBlueprint, simpleSourceHash } from '@/lib/revisit/blueprint';
+import { buildSceneDigest } from '@/lib/revisit/source';
 import { normalizeJudgeReport } from '@/lib/revisit/judge';
-import type { RevisitExamBlueprint, RevisitJudgeReport } from '@/lib/revisit/types';
+import type {
+  RevisitAdaptiveContext,
+  RevisitExamBlueprint,
+  RevisitJudgeReport,
+} from '@/lib/revisit/types';
 
-function extractTextFromSlide(scene: Scene): string {
-  if (scene.content.type !== 'slide') return '';
-  const elements = scene.content.canvas.elements as Array<{ type?: string; content?: unknown }>;
-  return elements
-    .filter((element) => element.type === 'text')
-    .map((element) => String(element.content || '').trim())
-    .filter(Boolean)
-    .join(' ');
+interface RevisitChallengeProfile {
+  challengeNumber: number;
+  maxCuesPerPage: number;
+  scaffoldingLevel: 'guided' | 'reduced' | 'sparse' | 'minimal';
+  focus: string;
 }
 
-function summarizeScene(scene: Scene): string {
-  if (scene.content.type === 'slide') {
-    const text = extractTextFromSlide(scene).slice(0, 700);
-    return `- Slide ${scene.order + 1}: ${scene.title}\n  ${text}`;
+function getRevisitChallengeProfile(completedChallengeCount: number): RevisitChallengeProfile {
+  const completed = Math.max(0, Math.floor(completedChallengeCount));
+  const challengeNumber = completed + 1;
+
+  if (challengeNumber === 1) {
+    return {
+      challengeNumber,
+      maxCuesPerPage: 4,
+      scaffoldingLevel: 'guided',
+      focus: 'Accurate recall and clear organization, with one light transfer opportunity.',
+    };
   }
-  if (scene.content.type === 'quiz') {
-    const questions = scene.content.questions
-      .map((question, index) => `${index + 1}. ${question.question}`)
-      .join(' | ');
-    return `- Quiz ${scene.order + 1}: ${scene.title}\n  ${questions}`;
+  if (challengeNumber === 2) {
+    return {
+      challengeNumber,
+      maxCuesPerPage: 3,
+      scaffoldingLevel: 'reduced',
+      focus: 'Less recall support, with more transfer and plausible misconception probes.',
+    };
   }
-  return `- ${scene.type} ${scene.order + 1}: ${scene.title}`;
+  if (challengeNumber === 3) {
+    return {
+      challengeNumber,
+      maxCuesPerPage: 2,
+      scaffoldingLevel: 'sparse',
+      focus: 'Independent retrieval, transfer, and error correction on weak concepts.',
+    };
+  }
+  return {
+    challengeNumber,
+    maxCuesPerPage: 1,
+    scaffoldingLevel: 'minimal',
+    focus: 'Independent teach-back through novel applications, edge cases, and deeper reasoning.',
+  };
 }
 
-export function buildSceneDigest(scenes: Scene[]): string {
-  return scenes.map(summarizeScene).join('\n');
-}
+export { buildSceneDigest } from '@/lib/revisit/source';
 
 export function buildBlueprintPrompt(args: {
   stage: Stage;
   scenes: Scene[];
   targetProbeCount?: number;
-}): { system: string; user: string; sourceHash: string } {
+  adaptiveContext?: RevisitAdaptiveContext;
+}): { system: string; user: string; sourceHash: string; maxCuesPerPage: number } {
   const sceneDigest = buildSceneDigest(args.scenes);
+  const completedChallengeCount = args.adaptiveContext?.completedChallengeCount ?? 0;
+  const challengeProfile = getRevisitChallengeProfile(completedChallengeCount);
   const sourceHash = simpleSourceHash(
     JSON.stringify({
       stageId: args.stage.id,
       stageUpdatedAt: args.stage.updatedAt,
       sceneDigest,
+      completedChallengeCount,
     }),
   );
   const prompt = buildPrompt(PROMPT_IDS.REVISIT_EXAM_BLUEPRINT, {
@@ -53,10 +79,20 @@ export function buildBlueprintPrompt(args: {
     stageSummary: args.stage.description || '',
     sceneDigest,
     targetProbeCount: args.targetProbeCount ?? 4,
+    completedChallengeCount,
+    challengeNumber: challengeProfile.challengeNumber,
+    scaffoldingLevel: challengeProfile.scaffoldingLevel,
+    maxCuesPerPage: challengeProfile.maxCuesPerPage,
+    challengeFocus: challengeProfile.focus,
+    adaptiveContextJson: JSON.stringify(
+      args.adaptiveContext ?? { completedChallengeCount },
+      null,
+      2,
+    ),
   });
 
   if (!prompt) throw new Error('revisit-exam-blueprint template not found');
-  return { ...prompt, sourceHash };
+  return { ...prompt, sourceHash, maxCuesPerPage: challengeProfile.maxCuesPerPage };
 }
 
 export function parseBlueprintResponse(args: {
@@ -64,11 +100,17 @@ export function parseBlueprintResponse(args: {
   stageId: string;
   generatedAt?: number;
   sourceHash: string;
+  maxCuesPerPage?: number;
+  canonicalConcepts?: Array<{ id: string; label: string }>;
+  requiredConceptIds?: string[];
 }): RevisitExamBlueprint {
   return normalizeBlueprint(extractJsonObject(args.text), {
     stageId: args.stageId,
     generatedAt: args.generatedAt ?? Date.now(),
     sourceHash: args.sourceHash,
+    maxCuesPerPage: args.maxCuesPerPage,
+    canonicalConcepts: args.canonicalConcepts,
+    requiredConceptIds: args.requiredConceptIds,
   });
 }
 
@@ -93,15 +135,19 @@ export function parseJudgeResponse(args: {
   text: string;
   attemptId: string;
   stageId: string;
+  blueprint: RevisitExamBlueprint;
   completedAt?: number;
 }): RevisitJudgeReport {
   const raw = extractJsonObject(args.text) as Record<string, unknown>;
-  return normalizeJudgeReport({
-    ...raw,
-    attemptId: args.attemptId,
-    stageId: args.stageId,
-    completedAt: args.completedAt ?? Date.now(),
-  });
+  return normalizeJudgeReport(
+    {
+      ...raw,
+      attemptId: args.attemptId,
+      stageId: args.stageId,
+      completedAt: args.completedAt ?? Date.now(),
+    },
+    { expectedConceptIds: args.blueprint.concepts.map((concept) => concept.id) },
+  );
 }
 
 export function extractJsonObject(text: string): unknown {

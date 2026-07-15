@@ -93,37 +93,41 @@
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
+  /* Keep semantic surfaces in the same low-chroma slate family as the
+     homepage shell. Lightness and alpha remain unchanged so hierarchy and
+     contrast remain stable while settings/classroom/dialogs lose the neutral
+     gray hue jump described in THU-MAIC/OpenMAIC#915. */
+  --background: oklch(0.145 0.03 265);
   --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
+  --card: oklch(0.205 0.035 265);
   --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
+  --popover: oklch(0.205 0.035 265);
   --popover-foreground: oklch(0.985 0 0);
   --primary: #8b47ea;
   --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
+  --secondary: oklch(0.269 0.03 265);
   --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
+  --muted: oklch(0.269 0.025 265);
   --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.371 0 0);
+  --accent: oklch(0.371 0.035 265);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --border: oklch(1 0.03 265 / 10%);
+  --input: oklch(1 0.03 265 / 15%);
+  --ring: oklch(0.556 0.035 265);
   --chart-1: oklch(0.809 0.105 251.813);
   --chart-2: oklch(0.623 0.214 259.815);
   --chart-3: oklch(0.546 0.245 262.881);
   --chart-4: oklch(0.488 0.243 264.376);
   --chart-5: oklch(0.424 0.199 265.638);
-  --sidebar: oklch(0.205 0 0);
+  --sidebar: oklch(0.205 0.035 265);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent: oklch(0.269 0.03 265);
   --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar-border: oklch(1 0.03 265 / 10%);
+  --sidebar-ring: oklch(0.556 0.035 265);
 }
 
 @layer base {
@@ -198,6 +202,80 @@ body[data-maic-editor='true'] .editable-element-text ol,
 body[data-maic-editor='true'] .editable-element-text li,
 .prosemirror-editor li {
   display: list-item !important;
+}
+
+/* Spiral Study Studio uses the same controlled HTML for screen and print.
+   The route injects only the page size because @page cannot react to data
+   attributes; all content and pagination rules remain here. */
+@media print {
+  html,
+  body {
+    overflow: visible !important;
+    background: #fff !important;
+  }
+
+  .study-artifact-viewer,
+  .study-artifact-viewer * {
+    print-color-adjust: exact !important;
+    -webkit-print-color-adjust: exact !important;
+  }
+
+  .study-artifact-viewer {
+    color: #111 !important;
+  }
+
+  .study-rich-document > *,
+  .study-artifact-viewer li,
+  .study-artifact-viewer figure,
+  .study-artifact-viewer aside,
+  .study-artifact-viewer table,
+  .study-artifact-viewer tr {
+    break-inside: avoid;
+  }
+
+  html[data-study-print-kind='briefing'] .briefing-artboard {
+    min-height: 0 !important;
+    max-width: none !important;
+    aspect-ratio: auto !important;
+    overflow: hidden !important;
+  }
+
+  html[data-study-print-kind='briefing'][data-study-print-orientation='portrait']
+    .briefing-artboard {
+    width: 210mm !important;
+    height: 297mm !important;
+  }
+
+  html[data-study-print-kind='briefing'][data-study-print-orientation='landscape']
+    .briefing-artboard {
+    width: 297mm !important;
+    height: 210mm !important;
+  }
+
+  html[data-study-print-kind='briefing'][data-study-print-orientation='square'] .briefing-artboard {
+    width: 210mm !important;
+    height: 210mm !important;
+  }
+
+  html[data-study-print-kind='mindMap'] .artifact-mind-map-canvas {
+    display: none !important;
+  }
+
+  html[data-study-print-kind='mindMap'] .mind-map-export-surface {
+    position: static !important;
+    display: block !important;
+    zoom: var(--mind-map-print-scale, 1);
+    box-shadow: none !important;
+  }
+
+  html[data-study-print-kind='studyGuide'] .study-document h2,
+  html[data-study-print-kind='studyGuide'] .study-document h3 {
+    break-after: avoid;
+  }
+
+  html[data-study-print-kind='faq'] .faq-print-answer {
+    display: block !important;
+  }
 }
 
 /* Compact react-colorful for the slide editor's color popover. Defaults are
@@ -566,5 +644,15 @@ body[data-maic-editor='true'] .editable-element-text li,
     animation: none;
     color: var(--muted-foreground);
     -webkit-text-fill-color: var(--muted-foreground);
+  }
+}
+
+.artifact-mind-map-canvas .react-flow__node {
+  transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .artifact-mind-map-canvas .react-flow__node {
+    transition: none;
   }
 }

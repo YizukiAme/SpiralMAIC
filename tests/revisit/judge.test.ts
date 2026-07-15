@@ -93,4 +93,66 @@ describe('SpiralMAIC revisit judge scoring', () => {
     });
     expect(report.errors[0]).toMatchObject({ id: expect.any(String), corrected: true });
   });
+
+  it('names evidence uniquely per attempt so Dexie history cannot be overwritten', () => {
+    const dimensions = {
+      clarity: 0.5,
+      doubtResolution: 0.5,
+      transfer: 0.5,
+      errorCorrection: 0.5,
+    };
+    const makeReport = (attemptId: string) =>
+      normalizeJudgeReport({
+        attemptId,
+        stageId: 'stage-1',
+        summary: 'A valid report.',
+        dimensions,
+        conceptScores: [{ conceptId: 'concept-1', scores: dimensions }],
+      });
+
+    const firstId = makeReport('attempt-1').evidence[0]?.id;
+    const secondId = makeReport('attempt-2').evidence[0]?.id;
+
+    expect(firstId).toContain('attempt-1');
+    expect(secondId).toContain('attempt-2');
+    expect(firstId).not.toBe(secondId);
+  });
+
+  it('rejects structurally empty judge output instead of counting a failed judgment', () => {
+    expect(() => normalizeJudgeReport({})).toThrow(/missing/i);
+  });
+
+  it('rejects judge evidence for unknown or missing blueprint concepts', () => {
+    const base = {
+      attemptId: 'attempt-1',
+      stageId: 'stage-1',
+      summary: 'Evidence-backed result.',
+      dimensions: {
+        clarity: 0.8,
+        doubtResolution: 0.8,
+        transfer: 0.8,
+        errorCorrection: 0.8,
+      },
+    };
+
+    expect(() =>
+      normalizeJudgeReport(
+        {
+          ...base,
+          conceptScores: [{ conceptId: 'model-typo', scores: base.dimensions }],
+        },
+        { expectedConceptIds: ['concept-1'] },
+      ),
+    ).toThrow(/unknown concept/i);
+
+    expect(() =>
+      normalizeJudgeReport(
+        {
+          ...base,
+          conceptScores: [],
+        },
+        { expectedConceptIds: ['concept-1'] },
+      ),
+    ).toThrow(/missing concept/i);
+  });
 });

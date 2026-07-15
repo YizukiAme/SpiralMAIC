@@ -58,6 +58,8 @@ export function getActionDescriptions(allowedActions: string[]): string {
       'Close the whiteboard and return to the slide view. Always close after you finish drawing. Parameters: {}',
     play_video:
       'Start playback of a video element on the current slide. Synchronous — blocks until the video finishes playing. Use a speech action before this to introduce the video. Parameters: { elementId: string }',
+    request_learning_extension:
+      'Submit a request for a durable post-class teaching extension after answering the learner. This only queues planning; it does not mean a page has been generated or is ready. If you call it, say the page is being prepared and never claim it already exists. Use only when the answer is worth preserving as a classroom page or requires a separate course. Parameters: { disposition: "append_page"|"new_course", topic: string, teachingMove: "extend"|"remediate"|"apply"|"trace", reason?: string }',
   };
 
   if (allowedActions.length === 0) {

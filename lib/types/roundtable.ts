@@ -10,6 +10,7 @@ export interface Participant {
   isOnline: boolean;
   isSpeaking?: boolean;
   statusEmoji?: string;
+  statusLabel?: string;
 }
 
 export interface MessageAction {

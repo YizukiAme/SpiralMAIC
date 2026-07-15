@@ -66,4 +66,26 @@ describe('model metadata thinking capabilities', () => {
       getCatalogThinkingCapability('openai', 'gpt-5.6'),
     );
   });
+
+  it('reuses matching OpenAI metadata for native Codex model IDs', () => {
+    expect(getCatalogThinkingCapability('openai-codex', 'gpt-5.4')).toEqual(
+      getCatalogThinkingCapability('openai', 'gpt-5.4'),
+    );
+    expect(getCatalogThinkingCapability('openai-codex', 'unknown-codex-model')).toBeUndefined();
+  });
+
+  it('keeps Codex GPT-5.6 effort bounds distinct from public API metadata', () => {
+    expect(getCatalogThinkingCapability('openai-codex', 'gpt-5.6-sol')).toMatchObject({
+      control: 'effort',
+      requestAdapter: 'openai',
+      effortValues: ['low', 'medium', 'high', 'xhigh', 'max'],
+      defaultEffort: 'low',
+    });
+    expect(getCatalogThinkingCapability('openai-codex', 'gpt-5.6-terra')).toMatchObject({
+      defaultEffort: 'medium',
+    });
+    expect(getCatalogThinkingCapability('openai-codex', 'gpt-5.6-luna')).toMatchObject({
+      defaultEffort: 'medium',
+    });
+  });
 });

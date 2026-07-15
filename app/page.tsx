@@ -30,6 +30,7 @@ import { LanguageSwitcher } from '@/components/language-switcher';
 import { createLogger } from '@/lib/logger';
 import { Button } from '@/components/ui/button';
 import { InputGroup, InputGroupInput, InputGroupButton } from '@/components/ui/input-group';
+import { Switch } from '@/components/ui/switch';
 import { Textarea as UITextarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { SettingsDialog } from '@/components/settings';
@@ -53,6 +54,7 @@ import {
   listStages,
   deleteStageData,
   renameStage,
+  loadStageData,
   getFirstSlideByStages,
   revokeThumbnailSlideMediaUrls,
 } from '@/lib/utils/stage-storage';
@@ -66,12 +68,34 @@ import { SpeechButton } from '@/components/audio/speech-button';
 import { useImportClassroom } from '@/lib/import/use-import-classroom';
 import { shouldShowVocationalTestUi } from '@/lib/config/feature-flags';
 import { useImportPptx } from '@/lib/import/use-import-pptx';
-import {
-  getEffectiveForgettingSpeedMultiplier,
-  loadLessonMemorySummaries,
-} from '@/lib/revisit/client';
+import { loadLessonMemorySummaries } from '@/lib/revisit/client';
 import type { LessonMemorySummary } from '@/lib/revisit/types';
 import { InteractiveModeButton } from '@/components/generation/interactive-mode-button';
+import type { RevisitAttempt } from '@/lib/revisit/types';
+import {
+  getConceptStates,
+  getLatestRevisitReport,
+  getLessonProgress,
+  getPendingAssessmentConcepts,
+  listRevisitReports,
+  listStudyArtifacts,
+} from '@/lib/revisit/db';
+import {
+  clearRevisitPanelReturnParams,
+  isCurrentRevisitPanelRequest,
+  parseRevisitPanelReturn,
+  resolveHomeSurfaceState,
+  shouldLoadRevisitHomeData,
+  type RevisitPanelSection,
+} from '@/lib/revisit/home-surface';
+import { buildRevisitPanelSummary, type RevisitPanelSummary } from '@/lib/revisit/panel-summary';
+import { computeLessonMemory, computeLessonMemoryFromCompletion } from '@/lib/revisit/memory';
+import { readAnswersForSummary } from '@/lib/quiz/persistence';
+import { RevisitReviewPanel as SpiralReviewPanel } from '@/components/revisit/review-panel';
+import { createOrGetRevisitAttempt, listRevisitAttempts } from '@/lib/revisit/attempt-store';
+import { resolveActiveRevisitScope } from '@/lib/revisit/clock';
+import { serializeRevisitScope } from '@/lib/revisit/scope';
+import { RevisitDemoBadge } from '@/components/revisit/demo-badge';
 
 const log = createLogger('Home');
 
@@ -121,9 +145,14 @@ function HomePage() {
   // instead of inspecting modelId directly.
   const providersConfig = useSettingsStore((s) => s.providersConfig);
   const reverseChallengeEnabled = useSettingsStore((s) => s.reverseChallengeEnabled);
+  const setReverseChallengeEnabled = useSettingsStore((s) => s.setReverseChallengeEnabled);
   const stableSuccessesRequired = useSettingsStore((s) => s.stableSuccessesRequired);
-  const forgettingSpeedMultiplier = useSettingsStore((s) => s.forgettingSpeedMultiplier);
-  const demoAcceleratedClockEnabled = useSettingsStore((s) => s.demoAcceleratedClockEnabled);
+  const activeRevisitDemoSessionId = useSettingsStore((s) => s.activeRevisitDemoSessionId);
+  const revisitVirtualClockOffsetHours = useSettingsStore((s) => s.revisitVirtualClockOffsetHours);
+  const setActiveRevisitDemoSession = useSettingsStore((s) => s.setActiveRevisitDemoSession);
+  const setRevisitVirtualClockOffsetHours = useSettingsStore(
+    (s) => s.setRevisitVirtualClockOffsetHours,
+  );
   const hasUsableProvider = hasUsableLLMProvider(providersConfig);
   const [recentOpen, setRecentOpen] = useState(true);
   const persistRecentOpen = (next: boolean) => {
@@ -173,6 +202,12 @@ function HomePage() {
   const [error, setError] = useState<string | null>(null);
   const [classrooms, setClassrooms] = useState<StageListItem[]>([]);
   const [memorySummaries, setMemorySummaries] = useState<Record<string, LessonMemorySummary>>({});
+  const [revisitPanelOpen, setRevisitPanelOpen] = useState(false);
+  const [revisitPanelClassroom, setRevisitPanelClassroom] = useState<StageListItem | null>(null);
+  const [revisitPanelSummary, setRevisitPanelSummary] = useState<RevisitPanelSummary | null>(null);
+  const [revisitPanelLoading, setRevisitPanelLoading] = useState(false);
+  const [revisitPanelError, setRevisitPanelError] = useState<string | null>(null);
+  const [revisitPanelSection, setRevisitPanelSection] = useState<RevisitPanelSection>('challenge');
   const [thumbnails, setThumbnails] = useState<Record<string, Slide>>({});
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -182,13 +217,23 @@ function HomePage() {
   const toolbarRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const thumbnailsRef = useRef<Record<string, Slide>>({});
+  const revisitPanelRequestRef = useRef(0);
 
-  const replaceThumbnails = (slides: Record<string, Slide>) => {
+  const replaceThumbnails = useCallback((slides: Record<string, Slide>) => {
     const previous = thumbnailsRef.current;
     thumbnailsRef.current = slides;
     setThumbnails(slides);
     window.setTimeout(() => revokeThumbnailSlideMediaUrls(previous), 0);
-  };
+  }, []);
+
+  const revisitScope = useMemo(
+    () => resolveActiveRevisitScope(activeRevisitDemoSessionId),
+    [activeRevisitDemoSessionId],
+  );
+  const getCurrentRevisitNow = useCallback(
+    () => Date.now() + revisitVirtualClockOffsetHours * 60 * 60 * 1000,
+    [revisitVirtualClockOffsetHours],
+  );
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -206,17 +251,6 @@ function HomePage() {
     try {
       const list = await listStages();
       setClassrooms(list);
-      const memory = await loadLessonMemorySummaries(
-        list.map((c) => c.id),
-        {
-          forgettingSpeedMultiplier: getEffectiveForgettingSpeedMultiplier({
-            forgettingSpeedMultiplier,
-            demoAcceleratedClockEnabled,
-          }),
-          stableSuccessesRequired,
-        },
-      );
-      setMemorySummaries(memory);
       // Load first slide thumbnails
       if (list.length > 0) {
         const slides = await getFirstSlideByStages(list.map((c) => c.id));
@@ -227,27 +261,55 @@ function HomePage() {
     } catch (err) {
       log.error('Failed to load classrooms:', err);
     }
-  }, [demoAcceleratedClockEnabled, forgettingSpeedMultiplier, stableSuccessesRequired]);
+  }, [replaceThumbnails]);
 
   useEffect(() => {
-    if (classrooms.length === 0) return;
+    if (
+      !shouldLoadRevisitHomeData({
+        reverseChallengeEnabled,
+        stageCount: classrooms.length,
+      })
+    ) {
+      setMemorySummaries({});
+      return;
+    }
     let cancelled = false;
-    loadLessonMemorySummaries(
-      classrooms.map((c) => c.id),
-      {
-        forgettingSpeedMultiplier: getEffectiveForgettingSpeedMultiplier({
-          forgettingSpeedMultiplier,
-          demoAcceleratedClockEnabled,
-        }),
-        stableSuccessesRequired,
-      },
-    ).then((memory) => {
-      if (!cancelled) setMemorySummaries(memory);
-    });
+    let refreshTimer: number | undefined;
+    const refreshMemory = async () => {
+      try {
+        const memory = await loadLessonMemorySummaries(
+          classrooms.map((c) => c.id),
+          {
+            stableSuccessesRequired,
+            scope: revisitScope,
+            now: getCurrentRevisitNow(),
+          },
+        );
+        if (!cancelled) setMemorySummaries(memory);
+      } catch (err) {
+        log.error('Failed to load Spiral memory summaries:', err);
+        if (!cancelled) setMemorySummaries({});
+      }
+    };
+    const scheduleRefresh = () => {
+      if (cancelled) return;
+      refreshTimer = window.setTimeout(async () => {
+        await refreshMemory();
+        scheduleRefresh();
+      }, 60_000);
+    };
+    void refreshMemory().finally(scheduleRefresh);
     return () => {
       cancelled = true;
+      if (refreshTimer != null) window.clearTimeout(refreshTimer);
     };
-  }, [classrooms, demoAcceleratedClockEnabled, forgettingSpeedMultiplier, stableSuccessesRequired]);
+  }, [
+    classrooms,
+    getCurrentRevisitNow,
+    revisitScope,
+    reverseChallengeEnabled,
+    stableSuccessesRequired,
+  ]);
 
   const { importing, fileInputRef, triggerFileSelect, handleFileChange } = useImportClassroom(
     () => {
@@ -277,6 +339,26 @@ function HomePage() {
     };
   }, [loadClassrooms]);
 
+  useEffect(() => {
+    if (classrooms.length === 0) return;
+    const currentUrl = new URL(window.location.href);
+    const panelReturn = parseRevisitPanelReturn(currentUrl.searchParams);
+    if (!panelReturn) return;
+
+    window.history.replaceState(
+      window.history.state,
+      '',
+      clearRevisitPanelReturnParams(currentUrl),
+    );
+    const classroom = classrooms.find((candidate) => candidate.id === panelReturn.stageId);
+    if (!classroom) return;
+
+    setRevisitPanelClassroom(classroom);
+    setRevisitPanelSummary(null);
+    setRevisitPanelSection(panelReturn.section);
+    setRevisitPanelOpen(true);
+  }, [classrooms]);
+
   const handleDelete = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     setPendingDeleteId(id);
@@ -301,6 +383,164 @@ function HomePage() {
       log.error('Failed to rename classroom:', err);
       toast.error(t('classroom.renameFailed'));
     }
+  };
+
+  const loadRevisitPanel = useCallback(
+    async (classroom: StageListItem, options: { silent?: boolean } = {}) => {
+      const requestId = ++revisitPanelRequestRef.current;
+      if (!options.silent) {
+        setRevisitPanelLoading(true);
+        setRevisitPanelError(null);
+      }
+      try {
+        const [
+          stageData,
+          progress,
+          conceptStates,
+          latestReport,
+          reports,
+          attempts,
+          studyArtifacts,
+          pendingConcepts,
+        ] = await Promise.all([
+          loadStageData(classroom.id),
+          getLessonProgress(classroom.id, revisitScope),
+          getConceptStates(classroom.id, revisitScope),
+          getLatestRevisitReport(classroom.id, revisitScope),
+          listRevisitReports(classroom.id, revisitScope),
+          listRevisitAttempts(classroom.id, revisitScope),
+          listStudyArtifacts(classroom.id, undefined, revisitScope),
+          getPendingAssessmentConcepts(classroom.id, revisitScope),
+        ]);
+        const now = getCurrentRevisitNow();
+        const memory =
+          conceptStates.length > 0
+            ? computeLessonMemory(conceptStates, now, {
+                stableSuccessesRequired,
+              })
+            : progress
+              ? computeLessonMemoryFromCompletion(progress.completedAt, now)
+              : computeLessonMemory([], now, {
+                  stableSuccessesRequired,
+                });
+        if (!isCurrentRevisitPanelRequest(requestId, revisitPanelRequestRef.current)) return;
+        setRevisitPanelSummary(
+          buildRevisitPanelSummary({
+            classroom,
+            scenes: stageData?.scenes ?? [],
+            progress,
+            memorySummary: memory,
+            conceptStates,
+            pendingConcepts,
+            latestReport,
+            reports,
+            attempts,
+            studyArtifacts,
+            now,
+            stableSuccessesRequired,
+            readAnswers: readAnswersForSummary,
+          }),
+        );
+      } catch (err) {
+        if (!isCurrentRevisitPanelRequest(requestId, revisitPanelRequestRef.current)) return;
+        log.error('Failed to load revisit panel:', err);
+        if (!options.silent) {
+          setRevisitPanelError(err instanceof Error ? err.message : String(err));
+          setRevisitPanelSummary(null);
+        }
+      } finally {
+        if (isCurrentRevisitPanelRequest(requestId, revisitPanelRequestRef.current)) {
+          setRevisitPanelLoading(false);
+        }
+      }
+    },
+    [getCurrentRevisitNow, revisitScope, stableSuccessesRequired],
+  );
+
+  useEffect(() => {
+    if (!revisitPanelOpen || !revisitPanelClassroom || !reverseChallengeEnabled) return;
+    let cancelled = false;
+    let refreshTimer: number | undefined;
+    const scheduleRefresh = () => {
+      if (cancelled) return;
+      refreshTimer = window.setTimeout(async () => {
+        await loadRevisitPanel(revisitPanelClassroom, { silent: true });
+        scheduleRefresh();
+      }, 60_000);
+    };
+    void loadRevisitPanel(revisitPanelClassroom).finally(scheduleRefresh);
+    return () => {
+      cancelled = true;
+      if (refreshTimer != null) window.clearTimeout(refreshTimer);
+      revisitPanelRequestRef.current += 1;
+    };
+  }, [loadRevisitPanel, revisitPanelClassroom, revisitPanelOpen, reverseChallengeEnabled]);
+
+  const openClassroomCard = (classroom: StageListItem) => {
+    if (!reverseChallengeEnabled) {
+      router.push(`/classroom/${classroom.id}`);
+      return;
+    }
+    setRevisitPanelSection('challenge');
+    setRevisitPanelClassroom(classroom);
+    setRevisitPanelSummary(null);
+    setRevisitPanelOpen(true);
+  };
+
+  const handleRevisitPanelOpenChange = (open: boolean) => {
+    if (!open) {
+      revisitPanelRequestRef.current += 1;
+    }
+    setRevisitPanelOpen(open);
+  };
+
+  const startReverseChallenge = async (classroom: StageListItem) => {
+    try {
+      if (!(await getLessonProgress(classroom.id, revisitScope))) {
+        toast.info(t('revisit.panel.completeCourseFirst'));
+        return;
+      }
+    } catch (err) {
+      log.error('Failed to verify lesson completion:', err);
+      toast.error(t('revisit.panel.completeCourseFirst'));
+      return;
+    }
+    if (!hasUsableProvider) {
+      setSettingsSection('providers');
+      setSettingsOpen(true);
+      return;
+    }
+    const stageData = await loadStageData(classroom.id);
+    if (!stageData) {
+      toast.error(t('revisit.challenge.loadFailed'));
+      return;
+    }
+    const attempt = await createOrGetRevisitAttempt({
+      attemptId: nanoid(),
+      stage: stageData.stage,
+      sourceScenes: stageData.scenes,
+      scope: revisitScope,
+      now: getCurrentRevisitNow(),
+    });
+    const scope = encodeURIComponent(serializeRevisitScope(revisitScope));
+    if (attempt.status === 'ready') {
+      router.push(
+        `/classroom/${encodeURIComponent(classroom.id)}/revisit?attempt=${encodeURIComponent(attempt.attemptId)}&scope=${scope}`,
+      );
+      return;
+    }
+    router.push(
+      `/generation-preview?attempt=${encodeURIComponent(attempt.attemptId)}&scope=${scope}&run=1`,
+    );
+  };
+
+  const openReverseAttempt = (attempt: RevisitAttempt, scope = revisitScope) => {
+    const serializedScope = encodeURIComponent(serializeRevisitScope(scope));
+    const target =
+      attempt.status === 'preparing' || !attempt.scenes[0]
+        ? `/generation-preview?attempt=${encodeURIComponent(attempt.attemptId)}&scope=${serializedScope}&run=1`
+        : `/classroom/${encodeURIComponent(attempt.stageId)}/revisit?attempt=${encodeURIComponent(attempt.attemptId)}&scope=${serializedScope}`;
+    router.push(target);
   };
 
   const deferredSearchQuery = useDeferredValue(searchQuery);
@@ -461,7 +701,23 @@ function HomePage() {
     return date.toLocaleDateString();
   };
 
+  const formatDateTime = (timestamp: number) =>
+    new Date(timestamp).toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+  const formatSuggestedReview = (timestamp: number | null) => {
+    if (!timestamp) return t('revisit.panel.none');
+    const now = getCurrentRevisitNow();
+    if (timestamp <= now + 60_000) return t('revisit.panel.now');
+    return formatDateTime(timestamp);
+  };
+
   const canGenerate = !!form.requirement.trim() && hasUsableProvider;
+  const homeSurface = resolveHomeSurfaceState({ reverseChallengeEnabled });
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
@@ -488,86 +744,97 @@ function HomePage() {
           className="hidden"
         />
       )}
-      {/* ═══ Top-right pill (unchanged) ═══ */}
-      <div
-        ref={toolbarRef}
-        className="fixed top-4 right-4 z-50 flex items-center gap-1 bg-white/60 dark:bg-gray-800/60 backdrop-blur-md px-2 py-1.5 rounded-full border border-gray-100/50 dark:border-gray-700/50 shadow-sm"
-      >
-        {/* Language Selector */}
-        <LanguageSwitcher onOpen={() => setThemeOpen(false)} />
+      {/* ═══ Top-right controls ═══ */}
+      <div ref={toolbarRef} className="fixed top-4 right-4 z-50 flex items-center gap-2">
+        <RevisitDemoBadge scope={revisitScope} offsetHours={revisitVirtualClockOffsetHours} />
+        <SpiralModeBar
+          enabled={reverseChallengeEnabled}
+          onChange={(enabled) => {
+            setReverseChallengeEnabled(enabled);
+            if (!enabled) {
+              revisitPanelRequestRef.current += 1;
+              setRevisitPanelOpen(false);
+            }
+          }}
+        />
 
-        <div className="w-[1px] h-4 bg-gray-200 dark:bg-gray-700" />
+        <div className="flex items-center gap-1 bg-white/60 dark:bg-gray-800/60 backdrop-blur-md px-2 py-1.5 rounded-full border border-gray-100/50 dark:border-gray-700/50 shadow-sm">
+          {/* Language Selector */}
+          <LanguageSwitcher onOpen={() => setThemeOpen(false)} />
 
-        {/* Theme Selector */}
-        <div className="relative">
-          <button
-            onClick={() => {
-              setThemeOpen(!themeOpen);
-            }}
-            className="p-2 rounded-full text-gray-400 dark:text-gray-500 hover:bg-white dark:hover:bg-gray-700 hover:text-gray-800 dark:hover:text-gray-200 hover:shadow-sm transition-all"
-          >
-            {theme === 'light' && <Sun className="w-4 h-4" />}
-            {theme === 'dark' && <Moon className="w-4 h-4" />}
-            {theme === 'system' && <Monitor className="w-4 h-4" />}
-          </button>
-          {themeOpen && (
-            <div className="absolute top-full mt-2 right-0 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg overflow-hidden z-50 min-w-[140px]">
-              <button
-                onClick={() => {
-                  setTheme('light');
-                  setThemeOpen(false);
-                }}
-                className={cn(
-                  'w-full px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-2',
-                  theme === 'light' &&
-                    'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400',
-                )}
-              >
-                <Sun className="w-4 h-4" />
-                {t('settings.themeOptions.light')}
-              </button>
-              <button
-                onClick={() => {
-                  setTheme('dark');
-                  setThemeOpen(false);
-                }}
-                className={cn(
-                  'w-full px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-2',
-                  theme === 'dark' &&
-                    'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400',
-                )}
-              >
-                <Moon className="w-4 h-4" />
-                {t('settings.themeOptions.dark')}
-              </button>
-              <button
-                onClick={() => {
-                  setTheme('system');
-                  setThemeOpen(false);
-                }}
-                className={cn(
-                  'w-full px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-2',
-                  theme === 'system' &&
-                    'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400',
-                )}
-              >
-                <Monitor className="w-4 h-4" />
-                {t('settings.themeOptions.system')}
-              </button>
-            </div>
-          )}
-        </div>
+          <div className="w-[1px] h-4 bg-gray-200 dark:bg-gray-700" />
 
-        <div className="w-[1px] h-4 bg-gray-200 dark:bg-gray-700" />
+          {/* Theme Selector */}
+          <div className="relative">
+            <button
+              onClick={() => {
+                setThemeOpen(!themeOpen);
+              }}
+              className="p-2 rounded-full text-gray-400 dark:text-gray-500 hover:bg-white dark:hover:bg-gray-700 hover:text-gray-800 dark:hover:text-gray-200 hover:shadow-sm transition-all"
+            >
+              {theme === 'light' && <Sun className="w-4 h-4" />}
+              {theme === 'dark' && <Moon className="w-4 h-4" />}
+              {theme === 'system' && <Monitor className="w-4 h-4" />}
+            </button>
+            {themeOpen && (
+              <div className="absolute top-full mt-2 right-0 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg overflow-hidden z-50 min-w-[140px]">
+                <button
+                  onClick={() => {
+                    setTheme('light');
+                    setThemeOpen(false);
+                  }}
+                  className={cn(
+                    'w-full px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-2',
+                    theme === 'light' &&
+                      'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400',
+                  )}
+                >
+                  <Sun className="w-4 h-4" />
+                  {t('settings.themeOptions.light')}
+                </button>
+                <button
+                  onClick={() => {
+                    setTheme('dark');
+                    setThemeOpen(false);
+                  }}
+                  className={cn(
+                    'w-full px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-2',
+                    theme === 'dark' &&
+                      'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400',
+                  )}
+                >
+                  <Moon className="w-4 h-4" />
+                  {t('settings.themeOptions.dark')}
+                </button>
+                <button
+                  onClick={() => {
+                    setTheme('system');
+                    setThemeOpen(false);
+                  }}
+                  className={cn(
+                    'w-full px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-2',
+                    theme === 'system' &&
+                      'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400',
+                  )}
+                >
+                  <Monitor className="w-4 h-4" />
+                  {t('settings.themeOptions.system')}
+                </button>
+              </div>
+            )}
+          </div>
 
-        {/* Settings Button */}
-        <div className="relative">
-          <button
-            onClick={() => setSettingsOpen(true)}
-            className="p-2 rounded-full text-gray-400 dark:text-gray-500 hover:bg-white dark:hover:bg-gray-700 hover:text-gray-800 dark:hover:text-gray-200 hover:shadow-sm transition-all group"
-          >
-            <Settings className="w-4 h-4 group-hover:rotate-90 transition-transform duration-500" />
-          </button>
+          <div className="w-[1px] h-4 bg-gray-200 dark:bg-gray-700" />
+
+          {/* Settings Button */}
+          <div className="relative">
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="p-2 rounded-full text-gray-400 dark:text-gray-500 hover:bg-white dark:hover:bg-gray-700 hover:text-gray-800 dark:hover:text-gray-200 hover:shadow-sm transition-all group"
+            >
+              <Settings className="w-4 h-4 group-hover:rotate-90 transition-transform duration-500" />
+            </button>
+          </div>
         </div>
       </div>
       <SettingsDialog
@@ -598,13 +865,17 @@ function HomePage() {
         transition={{ duration: 0.6, ease: 'easeOut' }}
         className={cn(
           'relative z-20 w-full max-w-[800px] flex flex-col items-center',
-          classrooms.length === 0 ? 'justify-center min-h-[calc(100dvh-8rem)]' : 'mt-[10vh]',
+          classrooms.length === 0
+            ? 'justify-center min-h-[calc(100dvh-8rem)]'
+            : homeSurface.showPromptComposer
+              ? 'mt-[10vh]'
+              : 'mt-[6vh]',
         )}
       >
         {/* ── Logo ── */}
-        <motion.img
-          src="/logo-horizontal.png"
-          alt="OpenMAIC"
+        <motion.div
+          role="img"
+          aria-label={homeSurface.showSpiralLogo ? 'SpiralMAIC' : 'OpenMAIC'}
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{
@@ -613,8 +884,27 @@ function HomePage() {
             stiffness: 200,
             damping: 20,
           }}
-          className="h-12 md:h-16 mb-2 -ml-2 md:-ml-3"
-        />
+          className="relative h-12 md:h-16 aspect-[1232/269] mb-2 -ml-2 md:-ml-3"
+        >
+          <motion.img
+            src="/logo-horizontal.png"
+            alt=""
+            aria-hidden="true"
+            initial={false}
+            animate={{ opacity: homeSurface.showSpiralLogo ? 0 : 1 }}
+            transition={{ duration: 0.45, ease: 'easeInOut' }}
+            className="absolute inset-0 size-full object-contain"
+          />
+          <motion.img
+            src="/spiralmaic-logo-horizontal.png"
+            alt=""
+            aria-hidden="true"
+            initial={false}
+            animate={{ opacity: homeSurface.showSpiralLogo ? 1 : 0 }}
+            transition={{ duration: 0.45, ease: 'easeInOut' }}
+            className="absolute inset-0 size-full object-contain"
+          />
+        </motion.div>
 
         {/* ── Slogan ── */}
         <motion.p
@@ -626,95 +916,100 @@ function HomePage() {
           {t('home.slogan')}
         </motion.p>
 
-        {/* ── Unified input area ── */}
-        <motion.div
-          initial={{ opacity: 0, scale: 0.97 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 0.35 }}
-          className="w-full"
-        >
-          <div className="w-full rounded-2xl border border-border/60 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl shadow-xl shadow-black/[0.03] dark:shadow-black/20 transition-shadow focus-within:shadow-2xl focus-within:shadow-violet-500/[0.06]">
-            {/* ── Greeting + Profile + Agents ── */}
-            <div className="relative z-20 flex items-start justify-between">
-              <GreetingBar />
-              <div className="pr-3 pt-3.5 shrink-0">
-                <AgentBar />
-              </div>
-            </div>
+        <AnimatePresence initial={false}>
+          {homeSurface.showPromptComposer ? (
+            <motion.div
+              key="prompt-composer"
+              initial={{ opacity: 0, scale: 0.97, height: 0 }}
+              animate={{ opacity: 1, scale: 1, height: 'auto' }}
+              exit={{ opacity: 0, scale: 0.97, height: 0 }}
+              transition={{ delay: 0.05, duration: 0.28, ease: [0.25, 0.1, 0.25, 1] }}
+              className="w-full overflow-hidden"
+            >
+              <div className="w-full rounded-2xl border border-border/60 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl shadow-xl shadow-black/[0.03] dark:shadow-black/20 transition-shadow focus-within:shadow-2xl focus-within:shadow-violet-500/[0.06]">
+                {/* ── Greeting + Profile + Agents ── */}
+                <div className="relative z-20 flex items-start justify-between">
+                  <GreetingBar />
+                  <div className="pr-3 pt-3.5 shrink-0">
+                    <AgentBar />
+                  </div>
+                </div>
 
-            {/* Textarea */}
-            <textarea
-              ref={textareaRef}
-              placeholder={t('upload.requirementPlaceholder')}
-              className="w-full resize-none border-0 bg-transparent px-4 pt-1 pb-2 text-[13px] leading-relaxed placeholder:text-muted-foreground/40 focus:outline-none min-h-[140px] max-h-[300px]"
-              value={form.requirement}
-              onChange={(e) => updateForm('requirement', e.target.value)}
-              onKeyDown={handleKeyDown}
-              rows={4}
-            />
-
-            {/* Toolbar row */}
-            <div className="px-3 pb-3 flex items-end gap-2">
-              <div className="flex-1 min-w-0">
-                <GenerationToolbar
-                  webSearch={form.webSearch}
-                  onWebSearchChange={(v) => updateForm('webSearch', v)}
-                  onSettingsOpen={(section) => {
-                    setSettingsSection(section);
-                    setSettingsOpen(true);
-                  }}
-                  courseMaterials={form.courseMaterials}
-                  onCourseMaterialsAdd={addCourseMaterials}
-                  onCourseMaterialRemove={removeCourseMaterial}
-                  onPdfError={setError}
+                {/* Textarea */}
+                <textarea
+                  ref={textareaRef}
+                  placeholder={t('upload.requirementPlaceholder')}
+                  className="w-full resize-none border-0 bg-transparent px-4 pt-1 pb-2 text-[13px] leading-relaxed placeholder:text-muted-foreground/40 focus:outline-none min-h-[140px] max-h-[300px]"
+                  value={form.requirement}
+                  onChange={(e) => updateForm('requirement', e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  rows={4}
                 />
-              </div>
 
-              {/* Interactive mode toggle */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <InteractiveModeButton
-                    pressed={form.interactiveMode}
-                    label={t('toolbar.interactiveModeLabel')}
-                    onPressedChange={(pressed) => updateForm('interactiveMode', pressed)}
+                {/* Toolbar row */}
+                <div className="px-3 pb-3 flex items-end gap-2">
+                  <div className="flex-1 min-w-0">
+                    <GenerationToolbar
+                      webSearch={form.webSearch}
+                      onWebSearchChange={(v) => updateForm('webSearch', v)}
+                      onSettingsOpen={(section) => {
+                        setSettingsSection(section);
+                        setSettingsOpen(true);
+                      }}
+                      courseMaterials={form.courseMaterials}
+                      onCourseMaterialsAdd={addCourseMaterials}
+                      onCourseMaterialRemove={removeCourseMaterial}
+                      onPdfError={setError}
+                    />
+                  </div>
+
+                  {/* Interactive mode toggle */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <InteractiveModeButton
+                        pressed={form.interactiveMode}
+                        label={t('toolbar.interactiveModeLabel')}
+                        onPressedChange={(pressed) => updateForm('interactiveMode', pressed)}
+                      />
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="text-xs">
+                      {t('toolbar.interactiveModeHint')}
+                    </TooltipContent>
+                  </Tooltip>
+
+                  {/* Voice input */}
+                  <SpeechButton
+                    size="md"
+                    onTranscription={(text) => {
+                      setForm((prev) => {
+                        const next = prev.requirement + (prev.requirement ? ' ' : '') + text;
+                        updateRequirementCache(next);
+                        return { ...prev, requirement: next };
+                      });
+                    }}
                   />
-                </TooltipTrigger>
-                <TooltipContent side="top" className="text-xs">
-                  {t('toolbar.interactiveModeHint')}
-                </TooltipContent>
-              </Tooltip>
 
-              {/* Voice input */}
-              <SpeechButton
-                size="md"
-                onTranscription={(text) => {
-                  setForm((prev) => {
-                    const next = prev.requirement + (prev.requirement ? ' ' : '') + text;
-                    updateRequirementCache(next);
-                    return { ...prev, requirement: next };
-                  });
-                }}
-              />
+                  {/* Send button */}
+                  <button
+                    onClick={handleGenerate}
+                    disabled={!canGenerate}
+                    className={cn(
+                      'shrink-0 h-8 rounded-lg flex items-center justify-center gap-1.5 transition-all px-3',
+                      canGenerate
+                        ? 'bg-primary text-primary-foreground hover:opacity-90 shadow-sm cursor-pointer'
+                        : 'bg-muted text-muted-foreground/40 cursor-not-allowed',
+                    )}
+                  >
+                    <span className="text-xs font-medium">{t('toolbar.enterClassroom')}</span>
+                    <ArrowUp className="size-3.5" />
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          ) : null}
+        </AnimatePresence>
 
-              {/* Send button */}
-              <button
-                onClick={handleGenerate}
-                disabled={!canGenerate}
-                className={cn(
-                  'shrink-0 h-8 rounded-lg flex items-center justify-center gap-1.5 transition-all px-3',
-                  canGenerate
-                    ? 'bg-primary text-primary-foreground hover:opacity-90 shadow-sm cursor-pointer'
-                    : 'bg-muted text-muted-foreground/40 cursor-not-allowed',
-                )}
-              >
-                <span className="text-xs font-medium">{t('toolbar.enterClassroom')}</span>
-                <ArrowUp className="size-3.5" />
-              </button>
-            </div>
-          </div>
-        </motion.div>
-
-        {showVocationalTestUi && (
+        {homeSurface.showPromptComposer && showVocationalTestUi && (
           <motion.div
             initial={{ opacity: 0, y: -4 }}
             animate={{ opacity: 1, y: 0 }}
@@ -764,7 +1059,7 @@ function HomePage() {
 
         {/* ── Error ── */}
         <AnimatePresence>
-          {error && (
+          {homeSurface.showPromptComposer && error && (
             <motion.div
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
@@ -777,7 +1072,7 @@ function HomePage() {
         </AnimatePresence>
 
         {/* ── Import buttons (empty state) ── */}
-        {classrooms.length === 0 && (
+        {homeSurface.showPromptComposer && classrooms.length === 0 && (
           <div className="relative z-10 mt-4 flex items-center gap-4">
             <button
               onClick={triggerFileSelect}
@@ -973,9 +1268,8 @@ function HomePage() {
                           confirmingDelete={pendingDeleteId === classroom.id}
                           onConfirmDelete={() => confirmDelete(classroom.id)}
                           onCancelDelete={() => setPendingDeleteId(null)}
-                          onClick={() => router.push(`/classroom/${classroom.id}`)}
-                          onRevisit={() => router.push(`/classroom/${classroom.id}/revisit`)}
-                          showRevisitAction={reverseChallengeEnabled}
+                          onClick={() => openClassroomCard(classroom)}
+                          spiralMode={reverseChallengeEnabled}
                         />
                       </motion.div>
                     ))}
@@ -987,11 +1281,74 @@ function HomePage() {
         </motion.div>
       )}
 
+      <SpiralReviewPanel
+        open={revisitPanelOpen}
+        activeSection={revisitPanelSection}
+        onActiveSectionChange={setRevisitPanelSection}
+        onOpenChange={handleRevisitPanelOpenChange}
+        classroom={revisitPanelClassroom}
+        summary={revisitPanelSummary}
+        loading={revisitPanelLoading}
+        error={revisitPanelError}
+        canStart={hasUsableProvider}
+        onOpenClassroom={(id) => router.push(`/classroom/${id}`)}
+        onStart={(classroom) => startReverseChallenge(classroom)}
+        onOpenAttempt={openReverseAttempt}
+        onConfigureProvider={() => {
+          setSettingsSection('providers');
+          setSettingsOpen(true);
+        }}
+        onOpenArtifact={(artifact, scope, returnSection) =>
+          router.push(
+            `/classroom/${artifact.stageId}/study/${encodeURIComponent(artifact.id)}?scope=${encodeURIComponent(serializeRevisitScope(scope))}&returnSection=${encodeURIComponent(returnSection)}`,
+          )
+        }
+        onClearDemoData={() => {
+          setActiveRevisitDemoSession(null);
+          setRevisitVirtualClockOffsetHours(0);
+          void (revisitPanelClassroom
+            ? loadRevisitPanel(revisitPanelClassroom, { silent: true })
+            : undefined);
+        }}
+        onRefresh={() =>
+          revisitPanelClassroom
+            ? loadRevisitPanel(revisitPanelClassroom, { silent: true })
+            : undefined
+        }
+        formatDateTime={formatDateTime}
+        formatSuggestedReview={formatSuggestedReview}
+        dataScope={revisitScope}
+      />
+
       {/* Footer — flows with content, at the very end */}
       <div className="mt-auto pt-12 pb-4 text-center text-xs text-muted-foreground/40">
         OpenMAIC Open Source Project
       </div>
     </div>
+  );
+}
+
+function SpiralModeBar({
+  enabled,
+  onChange,
+}: {
+  enabled: boolean;
+  onChange: (enabled: boolean) => void;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: 8 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ delay: 0.2 }}
+    >
+      <div className="flex h-[42px] items-center gap-3 rounded-full border border-gray-100/50 bg-white/60 px-3.5 text-[12px] text-muted-foreground shadow-sm backdrop-blur-md dark:border-gray-700/50 dark:bg-gray-800/60">
+        <BrainCircuit className={cn('size-4', enabled ? 'text-emerald-500' : 'text-gray-400')} />
+        <span className={cn('font-semibold', enabled ? 'text-foreground/80' : 'text-gray-500')}>
+          Spiral
+        </span>
+        <Switch checked={enabled} onCheckedChange={onChange} aria-label="Spiral mode" />
+      </div>
+    </motion.div>
   );
 }
 
@@ -1292,8 +1649,7 @@ function ClassroomCard({
   onConfirmDelete,
   onCancelDelete,
   onClick,
-  onRevisit,
-  showRevisitAction,
+  spiralMode,
 }: {
   classroom: StageListItem;
   slide?: Slide;
@@ -1305,8 +1661,7 @@ function ClassroomCard({
   onConfirmDelete: () => void;
   onCancelDelete: () => void;
   onClick: () => void;
-  onRevisit: () => void;
-  showRevisitAction: boolean;
+  spiralMode: boolean;
 }) {
   const { t } = useI18n();
   const thumbRef = useRef<HTMLDivElement>(null);
@@ -1333,9 +1688,12 @@ function ClassroomCard({
   const showModeBadge = classroom.interactiveMode || isTaskEngineMode;
   const ModeBadgeIcon = isTaskEngineMode ? Sparkles : Atom;
   const modeBadgeLabel = isTaskEngineMode ? 'Vocational Mode' : t('toolbar.interactiveModeLabel');
-  const memoryLabel = memorySummary ? t(`revisit.memory.${memorySummary.status}`) : null;
-  const memoryTooltip = memorySummary?.recall
-    ? t('revisit.memory.recallPercent', { percent: Math.round(memorySummary.recall * 100) })
+  const visibleMemorySummary = spiralMode ? memorySummary : undefined;
+  const memoryLabel = visibleMemorySummary
+    ? t(`revisit.memory.${visibleMemorySummary.status}`)
+    : null;
+  const memoryTooltip = visibleMemorySummary?.recall
+    ? t('revisit.memory.recallPercent', { percent: Math.round(visibleMemorySummary.recall * 100) })
     : memoryLabel;
 
   const startRename = (e: React.MouseEvent) => {
@@ -1354,7 +1712,20 @@ function ClassroomCard({
   };
 
   return (
-    <div className="group cursor-pointer" onClick={confirmingDelete ? undefined : onClick}>
+    <div
+      className="group cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      onClick={confirmingDelete ? undefined : onClick}
+      onKeyDown={(event) => {
+        if (confirmingDelete || event.target !== event.currentTarget) return;
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onClick();
+        }
+      }}
+      role="button"
+      tabIndex={confirmingDelete ? -1 : 0}
+      aria-label={classroom.name}
+    >
       {/* Thumbnail — large radius, no border, subtle bg */}
       <div
         ref={thumbRef}
@@ -1405,29 +1776,7 @@ function ClassroomCard({
           </Tooltip>
         )}
 
-        {showRevisitAction && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="absolute top-2 left-2 z-10 size-7 bg-black/30 text-white opacity-0 backdrop-blur-sm transition-opacity hover:bg-black/50 hover:text-white group-hover:opacity-100"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRevisit();
-                }}
-                aria-label={t('revisit.challenge.open')}
-              >
-                <BrainCircuit className="size-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="top" align="start" sideOffset={-4} className="text-xs">
-              {t('revisit.challenge.open')}
-            </TooltipContent>
-          </Tooltip>
-        )}
-
-        {memorySummary && memoryLabel && (
+        {visibleMemorySummary && memoryLabel && (
           <Tooltip>
             <TooltipTrigger asChild>
               <span
@@ -1435,9 +1784,9 @@ function ClassroomCard({
                 onClick={(e) => e.stopPropagation()}
                 className="absolute bottom-2 right-2 z-10 inline-flex h-5 max-w-[70%] items-center rounded-full border px-2 text-[10px] font-semibold shadow-sm backdrop-blur-sm"
                 style={{
-                  borderColor: memorySummary.color,
-                  color: memorySummary.color,
-                  background: `color-mix(in srgb, ${memorySummary.color} 18%, transparent)`,
+                  borderColor: visibleMemorySummary.color,
+                  color: visibleMemorySummary.color,
+                  background: `color-mix(in srgb, ${visibleMemorySummary.color} 18%, transparent)`,
                 }}
               >
                 <span className="truncate">{memoryLabel}</span>
@@ -1461,7 +1810,8 @@ function ClassroomCard({
               <Button
                 size="icon"
                 variant="ghost"
-                className="absolute top-2 right-2 size-7 opacity-0 group-hover:opacity-100 transition-opacity bg-black/30 hover:bg-destructive/80 text-white hover:text-white backdrop-blur-sm rounded-full"
+                className="absolute top-2 right-2 size-7 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity bg-black/30 hover:bg-destructive/80 text-white hover:text-white backdrop-blur-sm rounded-full"
+                aria-label={t('classroom.delete')}
                 onClick={(e) => {
                   e.stopPropagation();
                   onDelete(classroom.id, e);
@@ -1472,7 +1822,8 @@ function ClassroomCard({
               <Button
                 size="icon"
                 variant="ghost"
-                className="absolute top-2 right-11 size-7 opacity-0 group-hover:opacity-100 transition-opacity bg-black/30 hover:bg-black/50 text-white hover:text-white backdrop-blur-sm rounded-full"
+                className="absolute top-2 right-11 size-7 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity bg-black/30 hover:bg-black/50 text-white hover:text-white backdrop-blur-sm rounded-full"
+                aria-label={t('classroom.rename')}
                 onClick={startRename}
               >
                 <Pencil className="size-3.5" />

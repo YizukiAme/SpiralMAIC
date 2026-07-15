@@ -12,6 +12,7 @@ import {
   AlertCircle,
   RefreshCw,
   Trophy,
+  FileChartColumn,
   CheckCircle2,
   LockKeyhole,
 } from 'lucide-react';
@@ -22,14 +23,27 @@ import { useStageStore, useCanvasStore } from '@/lib/store';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import type { SceneType, SlideContent, InteractiveContent } from '@/lib/types/stage';
 import { PENDING_SCENE_ID } from '@/lib/store/stage';
+import type { OvertimeExtension } from '@/lib/overtime/types';
+
+export interface SceneSidebarTailPage {
+  readonly id: string;
+  readonly title: string;
+  readonly kind: 'completion' | 'report';
+  readonly locked?: boolean;
+  readonly busy?: boolean;
+}
 
 interface SceneSidebarProps {
   readonly collapsed: boolean;
   readonly onCollapseChange: (collapsed: boolean) => void;
   readonly onSceneSelect?: (sceneId: string) => void;
+  readonly onFailedOutlineSelect?: (outlineId: string) => void;
   readonly onRetryOutline?: (outlineId: string) => Promise<void>;
   readonly isCourseComplete?: boolean;
   readonly sceneStatuses?: Record<string, { passed?: boolean; locked?: boolean }>;
+  readonly overtimeExtensions?: OvertimeExtension[];
+  readonly onRetryOvertime?: (extension: OvertimeExtension) => void | Promise<void>;
+  readonly tailPages?: SceneSidebarTailPage[];
 }
 
 const DEFAULT_WIDTH = 220;
@@ -40,9 +54,13 @@ export function SceneSidebar({
   collapsed,
   onCollapseChange,
   onSceneSelect,
+  onFailedOutlineSelect,
   onRetryOutline,
   isCourseComplete,
   sceneStatuses,
+  overtimeExtensions = [],
+  onRetryOvertime,
+  tailPages,
 }: SceneSidebarProps) {
   const { t } = useI18n();
   const router = useRouter();
@@ -359,27 +377,44 @@ export function SceneSidebar({
               const isRetrying = retryingOutlineId === outline.id;
               const isPaused = generationStatus === 'paused';
               const isActive = currentSceneId === PENDING_SCENE_ID;
+              const canSelect = !isFailed || Boolean(onFailedOutlineSelect);
+              const selectPlaceholder = () => {
+                if (isFailed) {
+                  onFailedOutlineSelect?.(outline.id);
+                  return;
+                }
+                if (onSceneSelect) {
+                  onSceneSelect(PENDING_SCENE_ID);
+                } else {
+                  setCurrentSceneId(PENDING_SCENE_ID);
+                }
+              };
 
               return (
                 <div
                   key={`generating-${outline.id}`}
-                  onClick={() => {
-                    if (isFailed) return;
-                    if (onSceneSelect) {
-                      onSceneSelect(PENDING_SCENE_ID);
-                    } else {
-                      setCurrentSceneId(PENDING_SCENE_ID);
-                    }
+                  role={canSelect ? 'button' : undefined}
+                  tabIndex={canSelect ? 0 : undefined}
+                  onClick={selectPlaceholder}
+                  onKeyDown={(event) => {
+                    if (!canSelect || (event.key !== 'Enter' && event.key !== ' ')) return;
+                    event.preventDefault();
+                    selectPlaceholder();
                   }}
                   className={cn(
                     'group relative rounded-lg flex flex-col gap-1 p-1.5 transition-all duration-200',
                     isFailed
-                      ? 'opacity-100 cursor-default'
+                      ? canSelect
+                        ? 'cursor-pointer opacity-100 hover:bg-red-50/60 dark:hover:bg-red-950/20'
+                        : 'cursor-default opacity-100'
                       : 'cursor-pointer hover:bg-gray-50/80 dark:hover:bg-gray-800/50',
                     !isFailed && !isActive && 'opacity-60',
                     isActive &&
                       !isFailed &&
                       'bg-purple-50 dark:bg-purple-900/20 ring-1 ring-purple-200 dark:ring-purple-700 opacity-100',
+                    isActive &&
+                      isFailed &&
+                      'bg-red-50/60 ring-1 ring-red-200 dark:bg-red-950/20 dark:ring-red-900/50',
                   )}
                 >
                   {/* Scene Header */}
@@ -473,8 +508,131 @@ export function SceneSidebar({
               );
             })()}
 
+          {overtimeExtensions
+            .filter((extension) => extension.status !== 'ready')
+            .map((extension) => {
+              const canRetry = extension.status === 'failed' || extension.status === 'interrupted';
+              return (
+                <div
+                  key={`overtime-${extension.id}`}
+                  className="group relative rounded-lg flex flex-col gap-1 p-1.5 bg-cyan-50/60 dark:bg-cyan-950/15 ring-1 ring-cyan-200/70 dark:ring-cyan-900/50"
+                >
+                  <div className="flex items-center gap-2 px-2 pt-0.5 min-w-0">
+                    <span className="text-[10px] font-black w-4 h-4 rounded-full flex items-center justify-center shrink-0 bg-cyan-600 text-white">
+                      {extension.reservedOrder + 1}
+                    </span>
+                    <span className="text-xs font-bold truncate text-cyan-800 dark:text-cyan-200">
+                      {extension.decision.topic}
+                    </span>
+                  </div>
+                  <div className="relative aspect-video w-full rounded overflow-hidden bg-white/70 dark:bg-slate-900/70 ring-1 ring-cyan-100 dark:ring-cyan-900/30 flex flex-col items-center justify-center gap-2 px-3 text-center">
+                    {canRetry ? (
+                      <>
+                        <AlertCircle className="w-4 h-4 text-amber-500" />
+                        <span className="text-[10px] leading-snug text-gray-500 dark:text-gray-400">
+                          {extension.status === 'failed'
+                            ? t('overtime.status.failed')
+                            : t('overtime.status.interrupted')}
+                        </span>
+                        {onRetryOvertime && (
+                          <button
+                            type="button"
+                            onClick={() => void onRetryOvertime(extension)}
+                            className="inline-flex items-center gap-1 rounded-md bg-cyan-600 px-2 py-1 text-[10px] font-semibold text-white hover:bg-cyan-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400 disabled:opacity-50"
+                          >
+                            <RefreshCw className="w-3 h-3" />
+                            {t('overtime.retry')}
+                          </button>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin text-cyan-600 dark:text-cyan-400" />
+                        <span className="text-[10px] leading-snug text-gray-500 dark:text-gray-400">
+                          {t(`overtime.phase.${extension.phase}`)}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+
+          {tailPages?.map((tailPage, tailIndex) => {
+            const isActive = currentSceneId === tailPage.id;
+            const isReport = tailPage.kind === 'report';
+            const Icon = isReport ? FileChartColumn : Trophy;
+            const selectTailPage = () => {
+              if (tailPage.locked) return;
+              if (onSceneSelect) onSceneSelect(tailPage.id);
+              else setCurrentSceneId(tailPage.id);
+            };
+            return (
+              <div
+                key={tailPage.id}
+                role="button"
+                tabIndex={tailPage.locked ? -1 : 0}
+                aria-disabled={tailPage.locked}
+                onClick={selectTailPage}
+                onKeyDown={(event) => {
+                  if (tailPage.locked || (event.key !== 'Enter' && event.key !== ' ')) return;
+                  event.preventDefault();
+                  selectTailPage();
+                }}
+                className={cn(
+                  'group relative rounded-lg flex flex-col gap-1 p-1.5 transition-all duration-200',
+                  tailPage.locked
+                    ? 'cursor-not-allowed opacity-45'
+                    : 'cursor-pointer hover:bg-gray-50/80 dark:hover:bg-gray-800/50',
+                  isActive &&
+                    (isReport
+                      ? 'bg-cyan-50 dark:bg-cyan-950/25 ring-1 ring-cyan-200 dark:ring-cyan-800 opacity-100'
+                      : 'bg-amber-50 dark:bg-amber-900/20 ring-1 ring-amber-200 dark:ring-amber-700 opacity-100'),
+                )}
+              >
+                <div className="flex items-center justify-between px-2 pt-0.5">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span
+                      className={cn(
+                        'flex size-4 shrink-0 items-center justify-center rounded-full text-[10px] font-black',
+                        isActive
+                          ? isReport
+                            ? 'bg-cyan-600 text-white'
+                            : 'bg-amber-500 text-white'
+                          : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400',
+                      )}
+                    >
+                      {scenes.length + tailIndex + 1}
+                    </span>
+                    <span className="truncate text-xs font-bold text-gray-700 dark:text-gray-200">
+                      {tailPage.title}
+                    </span>
+                  </div>
+                  {tailPage.locked ? (
+                    <LockKeyhole className="size-3.5 shrink-0 text-gray-400" />
+                  ) : tailPage.busy ? (
+                    <RefreshCw className="size-3.5 shrink-0 animate-spin text-primary" />
+                  ) : isReport ? (
+                    <CheckCircle2 className="size-3.5 shrink-0 text-cyan-500" />
+                  ) : null}
+                </div>
+                <div
+                  className={cn(
+                    'relative flex aspect-video w-full items-center justify-center overflow-hidden rounded ring-1',
+                    isReport
+                      ? 'bg-cyan-50/70 text-cyan-600 ring-cyan-100 dark:bg-cyan-950/20 dark:text-cyan-400 dark:ring-cyan-900/50'
+                      : 'bg-amber-50/80 text-amber-500 ring-amber-100 dark:bg-amber-950/20 dark:text-amber-400 dark:ring-amber-900/40',
+                  )}
+                >
+                  <Icon className="size-8" strokeWidth={1.6} />
+                </div>
+              </div>
+            );
+          })}
+
           {/* Course-complete placeholder (shown when outline is exhausted) */}
-          {isCourseComplete &&
+          {tailPages === undefined &&
+            isCourseComplete &&
             generatingOutlines.length === 0 &&
             (() => {
               const isActive = currentSceneId === PENDING_SCENE_ID;

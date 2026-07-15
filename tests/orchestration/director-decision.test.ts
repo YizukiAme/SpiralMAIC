@@ -33,12 +33,20 @@ describe('parseDirectorDecision', () => {
 
   it('parses a decision wrapped in markdown fences and prose', () => {
     const raw =
-      'Here is my decision:\n```json\n{"next_agent":"default-4","revisit_gate":{"status":"pass","page_index":2,"reason":"covered well","confidence":0.9}}\n```\nDone.';
+      'Here is my decision:\n```json\n{"next_agent":"default-4","revisit_gate":{"status":"pass","page_index":2,"reason":"covered well","confidence":0.9,"student_states":{"default-3":"satisfied","default-4":"satisfied"},"studentStates":{"default-5":"uncertain"}}}\n```\nDone.';
 
     const decision = parseDirectorDecision(raw);
 
     expect(decision.nextAgentId).toBe('default-4');
-    expect(decision.revisitGate).toMatchObject({ status: 'pass', pageIndex: 2 });
+    expect(decision.revisitGate).toMatchObject({
+      status: 'pass',
+      pageIndex: 2,
+      studentStates: {
+        'default-3': 'satisfied',
+        'default-4': 'satisfied',
+        'default-5': 'uncertain',
+      },
+    });
   });
 
   it('ends the round when content has no next_agent JSON', () => {

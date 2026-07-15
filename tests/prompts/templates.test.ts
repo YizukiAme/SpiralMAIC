@@ -11,6 +11,7 @@ import { describe, test, expect } from 'vitest';
 import { buildStructuredPrompt } from '@/lib/orchestration/prompt-builder';
 import { buildDirectorPrompt } from '@/lib/orchestration/director-prompt';
 import { buildPBLSystemPrompt } from '@/lib/pbl/pbl-system-prompt';
+import { buildBlueprintPrompt } from '@/lib/revisit/prompt-builders';
 import type { AgentConfig } from '@/lib/orchestration/registry/types';
 import type { StatelessChatRequest } from '@/lib/types/chat';
 
@@ -110,6 +111,84 @@ describe('no surviving placeholders', () => {
   });
 });
 
+describe('revisit blueprint prompt', () => {
+  test('fades scaffolding across challenge attempts, not across pages', () => {
+    const prompt = buildBlueprintPrompt({
+      stage: {
+        id: 'stage-1',
+        name: 'English Grammar',
+        createdAt: 0,
+        updatedAt: 0,
+        languageDirective: 'zh-CN',
+      },
+      scenes: [slideState.scenes[0]],
+      adaptiveContext: {
+        completedChallengeCount: 2,
+        memorySummary: {
+          status: 'review',
+          recall: 0.4,
+          meanRecall: 0.5,
+          minRecall: 0.25,
+          color: 'hsl(10 72% 40%)',
+        },
+        conceptStates: [],
+      },
+    });
+
+    expect(prompt.system).toContain('across completed Reverse Challenge attempts');
+    expect(prompt.system).toContain('same scaffolding density to every page');
+    expect(prompt.system).not.toMatch(/earlier skeleton pages/i);
+    expect(prompt.system).not.toMatch(/later skeleton pages/i);
+    expect(prompt.system).toContain('transfer');
+    expect(prompt.system).toContain('errorCorrection');
+    expect(prompt.user).toContain('Current challenge number: 3');
+    expect(prompt.user).toContain('Maximum cues per page: 2');
+    expect(prompt.user).toContain('"completedChallengeCount": 2');
+  });
+
+  test('reduces the cue budget from the first challenge to later challenges', () => {
+    const baseArgs = {
+      stage: {
+        id: 'stage-1',
+        name: 'English Grammar',
+        createdAt: 0,
+        updatedAt: 0,
+        languageDirective: 'zh-CN',
+      },
+      scenes: [slideState.scenes[0]],
+    };
+    const memorySummary = {
+      status: 'review' as const,
+      recall: 0.4,
+      meanRecall: 0.5,
+      minRecall: 0.25,
+      color: 'hsl(10 72% 40%)',
+    };
+
+    const first = buildBlueprintPrompt({
+      ...baseArgs,
+      adaptiveContext: {
+        completedChallengeCount: 0,
+        memorySummary,
+        conceptStates: [],
+      },
+    });
+    const fourth = buildBlueprintPrompt({
+      ...baseArgs,
+      adaptiveContext: {
+        completedChallengeCount: 3,
+        memorySummary,
+        conceptStates: [],
+      },
+    });
+
+    expect(first.user).toContain('Current challenge number: 1');
+    expect(first.user).toContain('Maximum cues per page: 4');
+    expect(fourth.user).toContain('Current challenge number: 4');
+    expect(fourth.user).toContain('Maximum cues per page: 1');
+  });
+});
+
 describe('role dispatch', () => {
   test('teacher prompt carries LEAD TEACHER guideline', () => {
     const out = buildStructuredPrompt(baseAgent, slideState);
@@ -147,7 +226,7 @@ describe('role dispatch', () => {
     expect(out).toContain('Whiteboard — Student Role');
   });
 
-  test('student prompt can inject reverse-teaching probe context by snippet', () => {
+  test('student prompt can inject reverse-teaching acknowledgment instructions', () => {
     const studentAgent: AgentConfig = { ...baseAgent, role: 'student' };
     const out = buildStructuredPrompt(
       studentAgent,
@@ -156,10 +235,45 @@ describe('role dispatch', () => {
       undefined,
       undefined,
       undefined,
-      'Candidate probes: [p1] Why does this matter?',
+      {
+        pageContext: 'Candidate probes: [p1] Why does this matter?',
+        responseDirective: 'acknowledge',
+      },
     );
     expect(out).toContain('Reverse Teaching Challenge');
     expect(out).toContain('Candidate probes: [p1] Why does this matter?');
+    expect(out).toContain('Do not ask about topics covered by later pages');
+    expect(out).toContain('ACKNOWLEDGE');
+    expect(out).toContain('Do not ask a question');
+    expect(out).toContain('Questions are not required');
+  });
+
+  test('student and assistant prompts receive explicit probe and rescue instructions', () => {
+    const studentAgent: AgentConfig = { ...baseAgent, role: 'student' };
+    const assistantAgent: AgentConfig = { ...baseAgent, role: 'assistant' };
+    const probe = buildStructuredPrompt(
+      studentAgent,
+      slideState,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { pageContext: 'Page 1', responseDirective: 'probe' },
+    );
+    const rescue = buildStructuredPrompt(
+      assistantAgent,
+      slideState,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { pageContext: 'Page 1', responseDirective: 'rescue' },
+    );
+
+    expect(probe).toContain('PROBE');
+    expect(probe).toContain('exactly one short');
+    expect(rescue).toContain('RESCUE');
+    expect(rescue).toContain('Do not create another question');
   });
 });
 
@@ -261,6 +375,12 @@ describe('director routing contract', () => {
     expect(out).toContain('latest human turn is the human teacher');
     expect(out).toContain('Do NOT output an agent whose role is teacher');
     expect(out).toContain('For "pass", choose an AI student');
+    expect(out).toContain('student_states');
+    expect(out).toContain('questioning');
+    expect(out).toContain('all active AI students are satisfied');
+    expect(out).toContain('every id listed in active_student_ids');
+    expect(out).toContain('prefer the most recent student whose question was resolved');
+    expect(out).toContain('Questions are not participation rewards');
     expect(out).not.toContain('role` field is LITERALLY the string `teacher`');
     expect(out).not.toContain('or choose END');
     expect(out).not.toMatch(UNRESOLVED_PLACEHOLDER);

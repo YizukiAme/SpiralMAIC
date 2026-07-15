@@ -164,6 +164,9 @@ importers:
       copilotkit:
         specifier: ^0.0.58
         version: 0.0.58(@types/node@20.19.37)(typescript@5.9.3)
+      dagre-d3-es:
+        specifier: 7.0.14
+        version: 7.0.14
       dexie:
         specifier: ^4.2.1
         version: 4.3.0
@@ -179,6 +182,9 @@ importers:
       geist:
         specifier: ^1.7.0
         version: 1.7.0(next@16.1.2(@babel/core@7.29.0)(@opentelemetry/api@1.9.0)(@playwright/test@1.58.2)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))
+      html-to-image:
+        specifier: 1.11.13
+        version: 1.11.13
       i18next:
         specifier: ^26.0.1
         version: 26.0.1(typescript@5.9.3)
@@ -1977,6 +1983,7 @@ packages:
   '@copilotkitnext/shared@1.53.0':
     resolution: {integrity: sha512-RdhudJUq79RM0zLLzIJDAg//aLc0vW2WocaJmsQzz/awZEbcbo13Ag6jL+oZOOlq++Lu9xWd7SQ83jhoZwCJXg==}
     engines: {node: '>=18'}
+    deprecated: Use @copilotkit/shared instead.
 
   '@csstools/color-helpers@6.1.0':
     resolution: {integrity: sha512-064IFJdjTfUqnjpCVpMOdbr8FLQBhinbZj6yRv2An2E41O/pLEXqfFRWqGq/SxlE5PEUYTlvWsG2r8MswAVvkg==}

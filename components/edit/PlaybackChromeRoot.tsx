@@ -10,12 +10,14 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { useRouter } from 'next/navigation';
 import { useStageStore } from '@/lib/store';
 import { PENDING_SCENE_ID } from '@/lib/store/stage';
+import type { Scene } from '@/lib/types/stage';
 import { useCanvasStore } from '@/lib/store/canvas';
 import { useSettingsStore } from '@/lib/store/settings';
 import { useI18n } from '@/lib/hooks/use-i18n';
-import { SceneSidebar } from '@/components/stage/scene-sidebar';
+import { SceneSidebar, type SceneSidebarTailPage } from '@/components/stage/scene-sidebar';
 import { Header } from '@/components/header';
 import { CanvasArea } from '@/components/canvas/canvas-area';
 import { Roundtable } from '@/components/roundtable';
@@ -55,8 +57,38 @@ import {
   AlertDialogAction,
   AlertDialogCancel,
 } from '@/components/ui/alert-dialog';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, BookOpenCheck, LoaderCircle, RefreshCw } from 'lucide-react';
 import { VisuallyHidden } from 'radix-ui';
+import { recordLessonCompleted } from '@/lib/revisit/db';
+import { shouldRecordLessonPlaybackCompletion } from '@/lib/revisit/progress';
+import { resolveActiveRevisitScope } from '@/lib/revisit/clock';
+import { listLessonConcepts, markLessonConceptsLearned } from '@/lib/revisit/db';
+import {
+  buildOvertimeCourseGenerationSession,
+  mergeReadyOvertimePage,
+} from '@/lib/overtime/classroom';
+import { runOvertimeGeneration } from '@/lib/overtime/generation';
+import {
+  createOrGetOvertimeExtension,
+  listOvertimeExtensions,
+  markActiveOvertimeExtensionsInterrupted,
+} from '@/lib/overtime/store';
+import type { OvertimeExtension, RequestLearningExtensionParams } from '@/lib/overtime/types';
+import {
+  advanceInteractiveEngagement,
+  createInteractiveEngagement,
+  subscribeOvertimeLearningSignals,
+  type InteractiveEngagement,
+} from '@/lib/overtime/learning';
+import { toast } from 'sonner';
+
+function markOvertimeSceneLearned(scene: Scene): void {
+  const conceptIds = scene.overtime?.conceptIds ?? [];
+  if (conceptIds.length === 0 || useSettingsStore.getState().activeRevisitDemoSessionId) return;
+  void markLessonConceptsLearned(scene.stageId, conceptIds, Date.now()).catch((error) => {
+    console.error('[Overtime] Failed to record the page learning completion.', error);
+  });
+}
 
 /**
  * Imperative handle exposed via `ref` so the parent (`Stage`) can tear
@@ -84,14 +116,18 @@ export interface RevisitPlaybackConfig {
   readonly isCueUser?: boolean;
   readonly cueUserLabel?: string;
   readonly onMessageSend: (message: string) => void | Promise<void>;
+  readonly onUserSpeechStateChange?: (active: boolean) => void;
   readonly onPrevScene: () => void;
   readonly onNextScene: () => void;
   readonly onSceneSelect: (sceneId: string) => void;
+  readonly onFailedOutlineSelect?: (outlineId: string) => void;
   readonly canGoPrev: boolean;
   readonly canGoNext: boolean;
   readonly sceneStatuses?: Record<string, { passed?: boolean; locked?: boolean }>;
+  readonly tailPages?: SceneSidebarTailPage[];
   readonly transcriptSession?: ChatSession;
   readonly transcriptActiveBubbleId?: string | null;
+  readonly onExit?: () => void;
 }
 
 interface PlaybackChromeRootProps {
@@ -116,6 +152,7 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
     ref,
   ) {
     const { t } = useI18n();
+    const router = useRouter();
     const {
       mode,
       stage,
@@ -140,6 +177,20 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
     const setChatAreaCollapsed = useSettingsStore((s) => s.setChatAreaCollapsed);
     const setTTSMuted = useSettingsStore((s) => s.setTTSMuted);
     const setTTSVolume = useSettingsStore((s) => s.setTTSVolume);
+    const activeRevisitDemoSessionId = useSettingsStore((s) => s.activeRevisitDemoSessionId);
+    const revisitVirtualClockOffsetHours = useSettingsStore(
+      (s) => s.revisitVirtualClockOffsetHours,
+    );
+    const revisitDataScope = useMemo(
+      () => resolveActiveRevisitScope(activeRevisitDemoSessionId),
+      [activeRevisitDemoSessionId],
+    );
+    const [overtimeExtensions, setOvertimeExtensions] = useState<OvertimeExtension[]>([]);
+    const [pendingNewCourse, setPendingNewCourse] = useState<{
+      request: RequestLearningExtensionParams;
+      userPrompt: string;
+    } | null>(null);
+    const runningOvertimeIdsRef = useRef(new Set<string>());
 
     // PlaybackEngine state
     const [engineMode, setEngineMode] = useState<EngineMode>('idle');
@@ -208,6 +259,193 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
       [agentsRecord, selectedAgentIds],
     );
 
+    const updateOvertimeExtension = useCallback((extension: OvertimeExtension) => {
+      setOvertimeExtensions((current) => {
+        const next = [...current.filter((candidate) => candidate.id !== extension.id), extension];
+        return next.sort((a, b) => a.sequence - b.sequence);
+      });
+    }, []);
+
+    const refreshOvertimeExtensions = useCallback(async (stageId: string) => {
+      const extensions = await listOvertimeExtensions(stageId);
+      if (useStageStore.getState().stage?.id === stageId) setOvertimeExtensions(extensions);
+      return extensions;
+    }, []);
+
+    useEffect(() => {
+      const stageId = stage?.id;
+      if (!stageId || revisitConfig) {
+        setOvertimeExtensions([]);
+        return;
+      }
+      let active = true;
+      void (async () => {
+        await markActiveOvertimeExtensionsInterrupted(stageId);
+        const extensions = await listOvertimeExtensions(stageId);
+        if (active && useStageStore.getState().stage?.id === stageId) {
+          setOvertimeExtensions(extensions);
+        }
+      })().catch((error) => {
+        console.error('[Overtime] Failed to restore extension tasks.', error);
+      });
+      return () => {
+        active = false;
+      };
+    }, [revisitConfig, stage?.id]);
+
+    useEffect(
+      () =>
+        subscribeOvertimeLearningSignals(({ sceneId, signal }) => {
+          if (signal === 'interactive_activity') return;
+          const live = useStageStore.getState();
+          if (live.currentSceneId !== sceneId) return;
+          const scene = live.scenes.find((candidate) => candidate.id === sceneId);
+          if (!scene?.overtime) return;
+          if (signal === 'quiz_reviewed' && scene.type !== 'quiz') return;
+          if (signal === 'pbl_completed' && scene.type !== 'pbl') return;
+          markOvertimeSceneLearned(scene);
+        }),
+      [],
+    );
+
+    useEffect(() => {
+      const scene = useStageStore.getState().scenes.find((item) => item.id === currentSceneId);
+      if (!scene?.overtime || scene.type !== 'interactive' || activeRevisitDemoSessionId) {
+        return;
+      }
+
+      let engagement: InteractiveEngagement = createInteractiveEngagement(
+        Date.now(),
+        document.visibilityState === 'visible',
+      );
+      const advance = (interacted = false) => {
+        const wasCompleted = engagement.completed;
+        engagement = advanceInteractiveEngagement(engagement, {
+          now: Date.now(),
+          visible: document.visibilityState === 'visible',
+          interacted,
+        });
+        if (!wasCompleted && engagement.completed) markOvertimeSceneLearned(scene);
+      };
+      const unsubscribe = subscribeOvertimeLearningSignals((detail) => {
+        if (detail.sceneId === scene.id && detail.signal === 'interactive_activity') advance(true);
+      });
+      const onVisibilityChange = () => advance(false);
+      document.addEventListener('visibilitychange', onVisibilityChange);
+      const timer = window.setInterval(() => advance(false), 1000);
+      return () => {
+        window.clearInterval(timer);
+        document.removeEventListener('visibilitychange', onVisibilityChange);
+        unsubscribe();
+      };
+    }, [activeRevisitDemoSessionId, currentSceneId]);
+
+    const runOvertimeTask = useCallback(
+      async (extension: OvertimeExtension) => {
+        if (runningOvertimeIdsRef.current.has(extension.id)) return;
+        const stageState = useStageStore.getState();
+        const sourceStage = stageState.stage;
+        if (!sourceStage || sourceStage.id !== extension.stageId) return;
+
+        runningOvertimeIdsRef.current.add(extension.id);
+        updateOvertimeExtension(extension);
+        try {
+          const knownConcepts = await listLessonConcepts(sourceStage.id);
+          const agents = selectedAgents.map((agent) => ({
+            id: agent.id,
+            name: agent.name,
+            role: agent.role,
+            persona: agent.persona,
+          }));
+          await runOvertimeGeneration({
+            extensionId: extension.id,
+            stage: sourceStage,
+            scenes: stageState.scenes,
+            existingOutlines: stageState.outlines,
+            knownConcepts,
+            agents,
+            onProgress: updateOvertimeExtension,
+            onReady: (scene, outline) => {
+              const live = useStageStore.getState();
+              if (live.stage?.id !== extension.stageId) return;
+              const merged = mergeReadyOvertimePage({
+                scenes: live.scenes,
+                outlines: live.outlines,
+                scene,
+                outline,
+              });
+              useStageStore.setState({
+                scenes: merged.scenes,
+                outlines: merged.outlines,
+                currentSceneId: scene.id,
+                generationComplete: true,
+                stage: { ...live.stage, updatedAt: scene.updatedAt ?? Date.now() },
+              });
+            },
+          });
+        } catch (error) {
+          console.error('[Overtime] Page generation failed.', error);
+          toast.error(t('overtime.status.failed'), {
+            description: error instanceof Error ? error.message : String(error),
+          });
+        } finally {
+          runningOvertimeIdsRef.current.delete(extension.id);
+          await refreshOvertimeExtensions(extension.stageId).catch(() => undefined);
+        }
+      },
+      [refreshOvertimeExtensions, selectedAgents, t, updateOvertimeExtension],
+    );
+
+    const startOvertimeAppend = useCallback(
+      async (request: RequestLearningExtensionParams, userPrompt: string) => {
+        const live = useStageStore.getState();
+        if (!live.stage?.id || revisitConfig || activeRevisitDemoSessionId) {
+          return;
+        }
+        const requestedId = crypto.randomUUID();
+        const extension = await createOrGetOvertimeExtension({
+          id: requestedId,
+          stageId: live.stage.id,
+          userPrompt: userPrompt || request.topic,
+          decision: { ...request, disposition: 'append_page' },
+        });
+        updateOvertimeExtension(extension);
+
+        if (extension.id !== requestedId) {
+          live.setCurrentSceneId(PENDING_SCENE_ID);
+          return;
+        }
+        void runOvertimeTask(extension);
+      },
+      [activeRevisitDemoSessionId, revisitConfig, runOvertimeTask, updateOvertimeExtension],
+    );
+
+    const handleLearningExtensionRequest = useCallback(
+      (request: RequestLearningExtensionParams, userPrompt: string) => {
+        if (request.disposition === 'new_course') {
+          setPendingNewCourse({ request, userPrompt });
+          return;
+        }
+        void startOvertimeAppend(request, userPrompt);
+      },
+      [startOvertimeAppend],
+    );
+
+    const createOvertimeCourse = useCallback(() => {
+      const live = useStageStore.getState();
+      if (!live.stage || !pendingNewCourse) return;
+      const session = buildOvertimeCourseGenerationSession({
+        sessionId: crypto.randomUUID(),
+        stage: live.stage,
+        scenes: live.scenes,
+        userPrompt: pendingNewCourse.userPrompt,
+        topic: pendingNewCourse.request.topic,
+      });
+      sessionStorage.setItem('generationSession', JSON.stringify(session));
+      setPendingNewCourse(null);
+      router.push('/generation-preview');
+    }, [pendingNewCourse, router]);
+
     // Discussion TTS: audio indicator state
     const [audioIndicatorState, setAudioIndicatorState] = useState<AudioIndicatorState>('idle');
     const [audioAgentId, setAudioAgentId] = useState<string | null>(null);
@@ -250,7 +488,6 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
     const stageRef = useRef<HTMLDivElement>(null);
     // Guard to prevent double flash when manual stop triggers onDiscussionEnd
     const manualStopRef = useRef(false);
-
     const updateCurrentPlaybackActionIndex = useCallback((actionIndex: number | null) => {
       currentPlaybackActionIndexRef.current = actionIndex;
       setCurrentPlaybackActionIndex(actionIndex);
@@ -302,6 +539,14 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
       },
       [actionResumeStorageKey],
     );
+    const lessonPlaybackProgressRef = useRef<{ stageId: string | null; sceneIds: Set<string> }>({
+      stageId: null,
+      sceneIds: new Set(),
+    });
+    useEffect(() => {
+      if (lessonPlaybackProgressRef.current.stageId === stage?.id) return;
+      lessonPlaybackProgressRef.current = { stageId: stage?.id ?? null, sceneIds: new Set() };
+    }, [stage?.id]);
     // Monotonic counter incremented on each scene switch — used to discard stale SSE callbacks
     const sceneEpochRef = useRef(0);
     // When true, the next engine init will auto-start playback (for auto-play scene advance)
@@ -593,6 +838,17 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
         widgetSendMessage,
       );
 
+      const markCurrentScenePlaybackCompleted = () => {
+        const stageState = useStageStore.getState();
+        if (lessonPlaybackProgressRef.current.stageId !== stageState.stage?.id) {
+          lessonPlaybackProgressRef.current = {
+            stageId: stageState.stage?.id ?? null,
+            sceneIds: new Set(),
+          };
+        }
+        lessonPlaybackProgressRef.current.sceneIds.add(currentScene.id);
+      };
+
       // Create new PlaybackEngine
       const engine = new PlaybackEngine([currentScene], actionEngine, audioPlayerRef.current, {
         onModeChange: (mode) => {
@@ -682,6 +938,8 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
           // playback as completed so the bubble shows reset instead of play.
           if (engineRef.current?.isExhausted()) {
             setPlaybackCompleted(true);
+            markCurrentScenePlaybackCompleted();
+            if (currentScene.type === 'slide') markOvertimeSceneLearned(currentScene);
           }
         },
         onUserInterrupt: (text) => {
@@ -701,6 +959,9 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
           clearSceneResumePosition(currentScene.id);
           setPlaybackCompleted(true);
 
+          markCurrentScenePlaybackCompleted();
+          if (currentScene.type === 'slide') markOvertimeSceneLearned(currentScene);
+
           // End lecture session on playback complete
           if (lectureSessionIdRef.current) {
             chatAreaRef.current?.endSession(lectureSessionIdRef.current);
@@ -708,7 +969,7 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
           }
           // Auto-play: advance to next scene after a short pause
           const { autoPlayLecture } = useSettingsStore.getState();
-          if (autoPlayLecture) {
+          if (autoPlayLecture && !revisitConfig) {
             setTimeout(() => {
               const stageState = useStageStore.getState();
               if (!useSettingsStore.getState().autoPlayLecture) return;
@@ -964,6 +1225,7 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
 
     // get scene information
     const isPendingScene = currentSceneId === PENDING_SCENE_ID;
+    const currentTailPage = revisitConfig?.tailPages?.find((page) => page.id === currentSceneId);
     const hasNextPending = generatingOutlines.length > 0;
     // True when every outline has materialized into a scene and nothing is
     // currently generating — signals the classroom has finished and the user
@@ -976,7 +1238,58 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
     const isCourseComplete =
       generationComplete ||
       (outlines.length > 0 && scenes.length === outlines.length && generatingOutlines.length === 0);
+    const activeOvertimeExtension = overtimeExtensions.find(
+      (extension) => extension.status !== 'ready',
+    );
     const canAdvanceToPendingSlot = hasNextPending || isCourseComplete;
+    const completionVisible = !revisitConfig && isPendingScene && isCourseComplete;
+    const playbackSceneIds = useMemo(
+      () =>
+        scenes
+          .filter(
+            (scene) =>
+              Boolean(scene.actions) &&
+              ((scene.actions?.length ?? 0) > 0 || scene.type === 'slide'),
+          )
+          .map((scene) => scene.id),
+      [scenes],
+    );
+
+    useEffect(() => {
+      if (
+        !stage?.id ||
+        !shouldRecordLessonPlaybackCompletion({
+          sceneIds: playbackSceneIds,
+          completedSceneIds: Array.from(lessonPlaybackProgressRef.current.sceneIds),
+          reachedCourseEnd: completionVisible,
+          materializedSceneCount: scenes.length,
+          outlineCount: outlines.length,
+          generatingOutlineCount: generatingOutlines.length,
+          generationComplete,
+          isRevisit: Boolean(revisitConfig),
+        })
+      ) {
+        return;
+      }
+      void recordLessonCompleted(
+        stage.id,
+        Date.now() + revisitVirtualClockOffsetHours * 60 * 60 * 1000,
+        revisitDataScope,
+      ).catch(() => {
+        // Spiral metadata must not disrupt the original playback experience.
+      });
+    }, [
+      completionVisible,
+      generationComplete,
+      generatingOutlines.length,
+      outlines.length,
+      playbackSceneIds,
+      revisitConfig,
+      revisitDataScope,
+      revisitVirtualClockOffsetHours,
+      scenes.length,
+      stage?.id,
+    ]);
 
     // previous scene (gated)
     const handlePreviousScene = useCallback(() => {
@@ -1021,10 +1334,14 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
       setCurrentSceneId,
     ]);
 
-    const currentSceneIndex = isPendingScene
-      ? scenes.length
-      : scenes.findIndex((s) => s.id === currentSceneId);
-    const totalScenesCount = scenes.length + (canAdvanceToPendingSlot ? 1 : 0);
+    const currentSceneIndex = currentTailPage
+      ? scenes.length + (revisitConfig?.tailPages?.indexOf(currentTailPage) ?? 0)
+      : isPendingScene
+        ? scenes.length
+        : scenes.findIndex((s) => s.id === currentSceneId);
+    const totalScenesCount = revisitConfig?.tailPages
+      ? scenes.length + revisitConfig.tailPages.length
+      : scenes.length + (canAdvanceToPendingSlot ? 1 : 0);
 
     // get action information
     const totalActions = currentScene?.actions?.length || 0;
@@ -1230,9 +1547,13 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
           collapsed={sidebarCollapsed}
           onCollapseChange={setSidebarCollapsed}
           onSceneSelect={gatedSceneSwitch}
+          onFailedOutlineSelect={revisitConfig?.onFailedOutlineSelect}
           onRetryOutline={onRetryOutline}
           isCourseComplete={isCourseComplete}
           sceneStatuses={revisitConfig?.sceneStatuses}
+          tailPages={revisitConfig?.tailPages}
+          overtimeExtensions={revisitConfig ? [] : overtimeExtensions}
+          onRetryOvertime={(extension) => runOvertimeTask(extension)}
         />
 
         {/* Main Content Area */}
@@ -1244,6 +1565,7 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
           {!isPresenting && (
             <Header
               currentSceneTitle={
+                currentTailPage?.title ||
                 currentScene?.title ||
                 (isCourseComplete && isPendingScene ? t('stage.courseComplete') : '')
               }
@@ -1251,6 +1573,7 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
               canEdit={!!canEnterProMode && !revisitConfig}
               onToggleEditMode={onEnterProMode}
               rightSlot={revisitConfig?.headerSlot}
+              onBack={revisitConfig?.onExit}
             />
           )}
 
@@ -1315,6 +1638,45 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
             />
           </div>
 
+          {!revisitConfig && isPendingScene && activeOvertimeExtension && (
+            <div
+              className={cn(
+                'absolute left-1/2 z-[130] -translate-x-1/2 max-w-[calc(100%-2rem)] rounded-xl border border-cyan-200/80 dark:border-cyan-800/70 bg-white/90 dark:bg-slate-900/90 px-4 py-3 shadow-xl backdrop-blur-xl flex items-center gap-3',
+                isPresenting ? 'top-6' : 'top-24',
+              )}
+            >
+              {activeOvertimeExtension.status === 'failed' ||
+              activeOvertimeExtension.status === 'interrupted' ? (
+                <AlertTriangle className="w-5 h-5 shrink-0 text-amber-500" />
+              ) : (
+                <LoaderCircle className="w-5 h-5 shrink-0 animate-spin text-cyan-600 dark:text-cyan-400" />
+              )}
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">
+                  {activeOvertimeExtension.decision.topic}
+                </div>
+                <div className="text-xs text-slate-500 dark:text-slate-400">
+                  {activeOvertimeExtension.status === 'failed'
+                    ? t('overtime.status.failed')
+                    : activeOvertimeExtension.status === 'interrupted'
+                      ? t('overtime.status.interrupted')
+                      : t(`overtime.phase.${activeOvertimeExtension.phase}`)}
+                </div>
+              </div>
+              {(activeOvertimeExtension.status === 'failed' ||
+                activeOvertimeExtension.status === 'interrupted') && (
+                <button
+                  type="button"
+                  onClick={() => void runOvertimeTask(activeOvertimeExtension)}
+                  className="shrink-0 inline-flex items-center gap-1.5 rounded-lg bg-cyan-600 px-3 py-2 text-xs font-semibold text-white hover:bg-cyan-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-400"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  {t('overtime.retry')}
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Roundtable Area */}
           {mode === 'playback' && (
             <div
@@ -1354,6 +1716,7 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
                 isCueUser={revisitConfig ? !!revisitConfig.isCueUser : isCueUser}
                 cueUserLabel={revisitConfig?.cueUserLabel}
                 isTopicPending={revisitConfig ? false : isTopicPending}
+                onUserSpeechStateChange={revisitConfig?.onUserSpeechStateChange}
                 onMessageSend={async (msg) => {
                   if (revisitConfig) {
                     await revisitConfig.onMessageSend(msg);
@@ -1499,6 +1862,7 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
               onJumpToAction={(sceneId, actionIndex) => {
                 void handleJumpToAction(sceneId, actionIndex);
               }}
+              onLearningExtensionRequest={handleLearningExtensionRequest}
               onLiveSpeech={(text, agentId) => {
                 // Capture epoch at call time — discard if scene has changed since
                 const epoch = sceneEpochRef.current;
@@ -1587,6 +1951,59 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
                 className="flex-1 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white border-0 shadow-md shadow-amber-200/50 dark:shadow-amber-900/30"
               >
                 {t('common.confirm')}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <AlertDialog
+          open={!!pendingNewCourse}
+          onOpenChange={(open) => {
+            if (!open) setPendingNewCourse(null);
+          }}
+        >
+          <AlertDialogContent
+            container={isPresenting ? stageRef.current : undefined}
+            className="max-w-md rounded-2xl border border-slate-200/80 dark:border-slate-700/80 bg-white/95 dark:bg-slate-900/95 shadow-2xl backdrop-blur-xl"
+          >
+            <div className="flex items-start gap-4">
+              <div className="w-11 h-11 rounded-xl bg-purple-100 dark:bg-purple-900/40 text-purple-600 dark:text-purple-300 flex items-center justify-center shrink-0">
+                <BookOpenCheck className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <AlertDialogTitle className="text-lg font-bold text-slate-900 dark:text-slate-100">
+                  {t('overtime.newCourse.title')}
+                </AlertDialogTitle>
+                <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
+                  {t('overtime.newCourse.description')}
+                </p>
+                {pendingNewCourse && (
+                  <p className="mt-3 rounded-lg bg-slate-100/80 dark:bg-slate-800/80 px-3 py-2 text-sm font-medium text-slate-800 dark:text-slate-200">
+                    {pendingNewCourse.request.topic}
+                  </p>
+                )}
+              </div>
+            </div>
+            <AlertDialogFooter className="mt-2 gap-2 sm:gap-2">
+              <AlertDialogCancel
+                onClick={() => {
+                  const pending = pendingNewCourse;
+                  setPendingNewCourse(null);
+                  if (pending) {
+                    void startOvertimeAppend(
+                      { ...pending.request, disposition: 'append_page' },
+                      pending.userPrompt,
+                    );
+                  }
+                }}
+              >
+                {t('overtime.newCourse.stay')}
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={createOvertimeCourse}
+                className="bg-purple-600 text-white hover:bg-purple-500"
+              >
+                {t('overtime.newCourse.create')}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

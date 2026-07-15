@@ -234,7 +234,9 @@
       "imageDrop": "画像をドロップまたはクリックして選択",
       "imageOr": "または画像 URL を貼り付け",
       "imageUrlPlaceholder": "https://…",
-      "imageInsert": "挿入"
+      "imageInsert": "挿入",
+      "expandToolbar": "挿入ツールを表示",
+      "collapseToolbar": "挿入ツールを隠す"
     },
     "nav": {
       "addSlide": "スライドを追加",
@@ -287,7 +289,7 @@
       "commentPromptLabel": "採点ガイド",
       "commentPromptPlaceholder": "この記述式をどう採点しますか？",
       "empty": "問題がありません",
-      "emptyHint": "「問題を追加」から最初の問題を作成します。",
+      "emptyHint": "上の「問題を追加」から最初の問題を作成します。",
       "type": {
         "single": "単一選択",
         "multiple": "複数選択",
@@ -857,19 +859,19 @@
   },
   "upload": {
     "pdfSizeLimit": "50MBまでのPDFファイルに対応しています",
-    "courseMaterialSizeLimit": "ドキュメント、スライド、表計算、画像、テキスト — 最大50MB（対応形式は選択したエクストラクタに依存）",
+    "courseMaterialSizeLimit": "50MBまでのPDF、DOCX、PPTX、TXT、Markdownファイルに対応しています",
     "generateFailed": "教室の生成に失敗しました。もう一度お試しください",
     "requirementPlaceholder": "学びたいことを自由に入力してください。例えば：\n「Pythonをゼロから30分で教えて」\n「フーリエ変換をホワイトボードで解説して」\n「ボードゲーム『アバロン』の遊び方」",
     "requirementRequired": "コースの要件を入力してください",
     "fileTooLarge": "ファイルが大きすぎます。50MB以下のファイルを選択してください",
     "courseMaterialCountLimit": "教材ファイルは最大5件までアップロードできます",
     "courseMaterialTotalSizeLimit": "教材の合計サイズは150MB未満にしてください",
-    "unsupportedCourseMaterial": "現在の解析器はこの形式に対応していません。解析器を切り替えるか、別のファイルを選択してください。"
+    "unsupportedCourseMaterial": "対応していない教材形式です。PDF、DOCX、PPTX、TXT、Markdownをアップロードしてください。"
   },
   "generation": {
     "pdfLoadFailed": "PDFファイルの読み込みに失敗しました。もう一度お試しください",
     "pdfParseFailed": "PDFの解析に失敗しました",
-    "analyzingCourseMaterial": "ドキュメントを分析中",
+    "analyzingCourseMaterial": "{{type}}ファイルを分析中",
     "analyzingCourseMaterialDesc": "ドキュメントの構造と内容を抽出しています...",
     "courseMaterialLoadFailed": "教材の読み込みに失敗しました。もう一度お試しください",
     "courseMaterialParseFailed": "教材の解析に失敗しました",
@@ -975,7 +977,18 @@
     "webSearchFailed": "ウェブ検索に失敗しました",
     "outlinesReadyCount": "{{ready}} / {{total}} セクション準備完了",
     "jumpToBlankTitle": "タイトルが未入力のセクションへ移動",
-    "analyzingMediaMaterial": "音声・動画を解析中"
+    "analyzingMediaMaterial": "音声・動画を解析中",
+    "revisitPreparingPath": "Preparing Review Path",
+    "revisitPreparingPathDesc": "Analyzing the key ideas from this lesson...",
+    "revisitGeneratingPage": "Generating Challenge Page",
+    "revisitGeneratingPageDesc": "Generating reverse-teaching prompt pages...",
+    "revisitReady": "Review Challenge Ready",
+    "revisitReadyDesc": "The first challenge page is ready. Opening the classroom now.",
+    "generatingCourse": "コースを生成中",
+    "openingClassroom": "教室を開いています...",
+    "outlineReady": "コースアウトラインが完成しました",
+    "generatingFirstPage": "最初のページを生成中...",
+    "firstPageReady": "最初のページが完成しました！教室を開いています..."
   },
   "settings": {
     "title": "設定",
@@ -1076,7 +1089,8 @@
       "bocha": "Bocha",
       "brave": "Brave Search",
       "baidu": "Baidu",
-      "searxng": "SearXNG"
+      "searxng": "SearXNG",
+      "openai-codex": "Codex"
     },
     "providerTypes": {
       "openai": "OpenAIプロトコル",
@@ -1682,10 +1696,49 @@
       "multiplierValue": "{{value}}x",
       "demoArea": "デモ",
       "acceleratedClock": "加速時計",
-      "gateSkip": "ページ判定をスキップ"
+      "gateSkip": "ページ判定をスキップ",
+      "virtualClock": "仮想時計",
+      "virtualClockDetail": "最初の時間移動で Spiral データを複製し、正式記録は変更しません。",
+      "simulatedTime": "現在時刻",
+      "realTime": "実際のシステム時刻",
+      "demoOffset": "デモ時刻は {{hours}} 時間先です",
+      "restoreRealTime": "実時間に戻す"
     },
     "alidocmindAccessKeyId": "AccessKey ID",
-    "alidocmindAccessKeySecret": "AccessKey Secret"
+    "alidocmindAccessKeySecret": "AccessKey Secret",
+    "codexOAuth": {
+      "experimental": "実験的なサードパーティ Codex 連携です。ChatGPT プランの利用枠を使用します。",
+      "unavailableTitle": "Codex サインインは利用できません",
+      "unavailable": {
+        "FEATURE_DISABLED": "サーバーで Codex OAuth を有効にしてください。",
+        "SERVERLESS_UNSUPPORTED": "Codex OAuth には永続ストレージを備えたセルフホスト Node サーバーが必要です。",
+        "ACCESS_CODE_REQUIRED": "本番環境で Codex OAuth を有効にする前に ACCESS_CODE を設定してください。",
+        "DATA_DIR_UNWRITABLE": "データディレクトリに書き込めません。/app/data の権限を確認してください。"
+      },
+      "connectedAs": "{email} として接続中",
+      "connected": "ChatGPT に接続済み",
+      "signInBrowser": "ChatGPT でサインイン",
+      "signInDevice": "デバイスコードを使用",
+      "waiting": "認証を待っています…",
+      "deviceInstructions": "確認ページを開き、このワンタイムコードを入力してください。",
+      "openVerification": "確認ページを開く",
+      "copyCode": "コードをコピー",
+      "copied": "コピーしました",
+      "cancel": "サインインをキャンセル",
+      "signOut": "サインアウト",
+      "models": "利用可能なモデル",
+      "fastMode": "Fast モード",
+      "fastModeDescription": "対応モデルにのみ適用されます。約 1.5 倍高速ですが、ChatGPT プランの利用枠をより多く消費します。",
+      "testConnection": "接続をテスト",
+      "testSuccess": "Codex への接続に成功しました。",
+      "testUnauthorized": "ChatGPT でもう一度サインインしてください。",
+      "testForbidden": "この ChatGPT ワークスペースには Codex の権限がありません。",
+      "testRateLimited": "ChatGPT プランの利用枠またはレート上限に達しました。",
+      "testFailed": "Codex への接続に失敗しました。",
+      "loginFailed": "サインインに失敗しました。再試行するかデバイスコードを使用してください。",
+      "loginExpired": "サインインの有効期限が切れました。もう一度開始してください。"
+    },
+    "connected": "接続済み"
   },
   "profile": {
     "title": "プロフィール",
@@ -1740,8 +1793,8 @@
       "assistant": "AI assistant",
       "emptyTranscript": "Start teaching this page when you are ready.",
       "thinking": "Student is thinking...",
-      "teachThisPage": "Teach this page to your students.",
-      "assistantOpening": "This challenge is about \"{{stage}}\". The first page is \"{{page}}\". I will keep the class on track from the side; when you are ready, teach this page to your students.",
+      "teachThisPage": "Teach this page.",
+      "assistantOpening": "{{overview}} This challenge will revisit and apply that progression. Start with \"{{page}}\" and teach this page in your own words.",
       "teacherPlaceholder": "Teach this page in your own words...",
       "send": "Send",
       "finish": "Dismiss class",
@@ -1768,7 +1821,305 @@
         "rescue": "Assistant",
         "fail": "Retry"
       },
-      "open": "Review challenge"
+      "open": "Review challenge",
+      "studentStatus": {
+        "listening": "Listening to the teacher",
+        "thinking": "Thinking, waiting for the check",
+        "questioning": "Has an unresolved question",
+        "uncertain": "Still uncertain; needs more",
+        "satisfied": "Understands and agrees",
+        "rescue": "Assistant rescue in progress"
+      },
+      "assistantOpeningFallback": "The completed lesson on \"{{stage}}\" covered {{topics}} in sequence.",
+      "complete": "Complete challenge",
+      "readyToComplete": "All challenge pages passed",
+      "completeDescription": "Complete the challenge to generate your report and update the learning record.",
+      "generatingReport": "Generating challenge report",
+      "generatingReportDescription": "Evaluating clarity, doubt resolution, transfer, and error correction.",
+      "retryReport": "Generate report again",
+      "reportReady": "Challenge report is ready",
+      "replayComplete": "再挑戦完了",
+      "replayNotCounted": "この再挑戦は記録に反映されません"
+    },
+    "panel": {
+      "title": "復習パネル",
+      "loading": "このコースの復習状態を読み込んでいます...",
+      "memoryStatus": "記憶状態",
+      "suggestedReview": "おすすめの復習",
+      "createdAt": "コース作成日時",
+      "completedAt": "受講完了日時",
+      "notRecorded": "記録なし",
+      "quizAccuracy": "授業内正答率",
+      "noQuiz": "クイズなし",
+      "latestChallenge": "前回のチャレンジ",
+      "currentMemory": "現在の記憶",
+      "pendingAssessment": "未評価の概念",
+      "openCourse": "通常コースを開く",
+      "completeCourseFirst": "先に通常コースを完了",
+      "none": "まだありません",
+      "now": "今すぐ"
+    },
+    "tabs": {
+      "challenge": "Reverse Challenge",
+      "materials": "復習教材",
+      "demo": "Demo ボックス"
+    },
+    "history": {
+      "title": "チャレンジ履歴",
+      "empty": "Reverse Challenge はまだありません",
+      "completed": "完了",
+      "unfinished": "未完了",
+      "reportOnly": "レポートのみ",
+      "preparationFailed": "準備失敗",
+      "preparing": "準備未完了",
+      "ready": "開始可能",
+      "replayable": "再挑戦可能",
+      "awaitingCompletion": "完了後に詳細レポートが表示されます。",
+      "generateNew": "新しいチャレンジを生成",
+      "actions": {
+        "prepare": "再準備",
+        "enter": "チャレンジへ",
+        "replay": "再挑戦",
+        "none": ""
+      }
+    },
+    "lowBenefit": {
+      "title": "今は新しいチャレンジの効果が低い可能性があります",
+      "description": "現在の記憶保持率は {{percent}}%。推奨復習時刻は {{date}} です。",
+      "later": "あとで",
+      "generateAnyway": "それでも生成"
+    },
+    "report": {
+      "summary": "チャレンジ概要",
+      "errors": "事実誤り",
+      "noErrors": "事実誤りは記録されていません。",
+      "corrected": "訂正済み",
+      "uncorrected": "未訂正",
+      "pages": "ページ別結果",
+      "passed": "合格",
+      "notPassed": "未合格",
+      "probes": "プローブ {{count}} 回",
+      "unavailable": "この古い記録はレポートのみで、再入場できません。",
+      "dimensions": {
+        "clarity": "説明の明瞭さ",
+        "doubtResolution": "疑問解決",
+        "transfer": "応用",
+        "errorCorrection": "誤り訂正"
+      }
+    },
+    "demo": {
+      "title": "Demo ボックス",
+      "subtitle": "独立保存された仮想時間の履歴です。",
+      "batches": "デモ履歴",
+      "isolated": "各履歴は独立したデータコピーを使い、正式な学習記録には書き込みません。",
+      "empty": "デモデータはありません",
+      "active": "使用中",
+      "archived": "保存済み",
+      "batchName": "Demo · {{date}}",
+      "counts": "Reverse {{attempts}} · レポート {{reports}} · 教材 {{artifacts}} · 練習 {{practice}}",
+      "clear": "デモデータを消去",
+      "clearTitle": "すべてのデモデータを消去しますか？",
+      "clearDescription": "すべてのデモ履歴とチャレンジ、レポート、教材、練習記録が完全に削除されます。"
+    },
+    "studio": {
+      "title": "学習素材スタジオ",
+      "subtitle": "復習作品を種類ごとに作成・保存・活用できます。",
+      "createTitle": "学習素材を作成",
+      "createDescription": "一度に一種類だけ生成し、他の素材はそのまま閲覧できます。",
+      "queueActive": "待機中のタスクがあります",
+      "libraryTitle": "マイ学習素材",
+      "emptyTitle": "学習素材はまだありません",
+      "emptyDescription": "上から素材を選んでください。完成した作品はここに保存されます。",
+      "latestVersion": "最新版 v{{version}}",
+      "generate": "生成",
+      "regenerate": "新バージョン",
+      "retry": "再試行",
+      "openCourse": "授業を開く",
+      "customizeButton": "カスタマイズ",
+      "cancelGeneration": "生成をキャンセル",
+      "open": "開く",
+      "moreActions": "その他の操作",
+      "regenerateSame": "同じ設定で再生成",
+      "rename": "名前を変更",
+      "renameTitle": "作品名を変更",
+      "renameDescription": "このバージョンのライブラリ表示名だけを変更します。",
+      "renamed": "作品名を変更しました",
+      "deleteTitle": "この作品を削除しますか？",
+      "deleteDescription": "このバージョンとカードまたはクイズの進捗は完全に削除されます。",
+      "deleted": "作品を削除しました",
+      "save": "保存",
+      "deleteAction": "削除",
+      "kinds": {
+        "briefing": {
+          "title": "ビジュアル要約",
+          "description": "要点・比較・流れを印刷可能な1ページに整理します。"
+        },
+        "mindMap": {
+          "title": "マインドマップ",
+          "description": "概念の関係、例、記憶状態を知識マップとして探索します。"
+        },
+        "studyGuide": {
+          "title": "学習ガイド",
+          "description": "要点、定義、例、注意点、練習のヒントを章ごとに整理します。"
+        },
+        "faq": {
+          "title": "FAQ",
+          "description": "よくある疑問への回答で、混同しやすい概念を確認します。"
+        },
+        "flashcards": {
+          "title": "フラッシュカード",
+          "description": "カードをめくり、習得・要復習を記録して想起練習をします。"
+        },
+        "quiz": {
+          "title": "クイズ",
+          "description": "一問ずつ答え、解説を確認し、間違いだけ再挑戦できます。"
+        }
+      },
+      "status": {
+        "generating": "生成中",
+        "queued": "待機中",
+        "failed": "失敗",
+        "interrupted": "中断",
+        "ready": "完成",
+        "empty": "未生成",
+        "stale": "授業内容が更新されました"
+      },
+      "groups": {
+        "understanding": {
+          "title": "理解と要約",
+          "description": "要点を整理し曖昧さを解消"
+        },
+        "structure": {
+          "title": "知識構造",
+          "description": "概念同士のつながりを把握"
+        },
+        "practice": {
+          "title": "能動的練習",
+          "description": "想起と解答で記憶を強化"
+        }
+      },
+      "customize": {
+        "title": "生成をカスタマイズ",
+        "description": "作品の範囲、重点、形式を設定します。",
+        "focus": "内容範囲",
+        "focusDescription": "授業のどの部分を優先するか選びます。",
+        "focusModes": {
+          "balanced": {
+            "title": "授業全体＋弱点",
+            "description": "全体を扱いながら弱い概念を重点化"
+          },
+          "weak-points": {
+            "title": "弱点のみ",
+            "description": "記憶状態と直近の課題に集中"
+          },
+          "selected-scenes": {
+            "title": "授業ページを選択",
+            "description": "選択したページだけを主な情報源に使用"
+          }
+        },
+        "selectScenes": "ページを選択",
+        "selectScenesRequired": "授業ページを1つ以上選択してください。",
+        "customInstructions": "追加の要望",
+        "customInstructionsPlaceholder": "例：日常生活への応用例を増やし、専門用語を控える…",
+        "orientation": "レイアウト",
+        "detail": "詳しさ",
+        "depth": "マップの階層",
+        "includeExamples": "マップのノードに例を含める",
+        "itemCount": "項目数",
+        "difficulty": "難易度"
+      },
+      "options": {
+        "portrait": "縦",
+        "landscape": "横",
+        "square": "正方形",
+        "compact": "簡潔",
+        "standard": "標準",
+        "detailed": "詳細",
+        "easy": "やさしい",
+        "medium": "普通",
+        "hard": "難しい"
+      }
+    },
+    "viewer": {
+      "tableOfContents": "目次",
+      "noSections": "このガイドには独立した章がありません",
+      "overview": "概要",
+      "sections": "章",
+      "concepts": "概念",
+      "sourcePages": "出典ページ",
+      "version": "バージョン {{version}}",
+      "questionCount": "{{count}} 件の質問",
+      "searchFaq": "質問と回答を検索",
+      "clearSearch": "検索をクリア",
+      "allTopics": "すべてのトピック",
+      "faqResults": "該当する質問 {{count}} 件",
+      "noFaqMatches": "該当する質問はありません",
+      "collapseAll": "すべて折りたたむ",
+      "expandAll": "すべて展開",
+      "flashcardsProgress": "{{mastered}} / {{total}} 枚習得",
+      "shuffle": "シャッフル",
+      "onlyDifficult": "難しいカードのみ",
+      "needsPractice": "要練習",
+      "mastered": "習得済み",
+      "unseen": "未評価",
+      "showFront": "カードの表を表示",
+      "showBack": "答えを表示",
+      "answer": "答え",
+      "prompt": "問題",
+      "tapForFront": "タップして表に戻る",
+      "tapToReveal": "タップして答えを見る",
+      "previous": "前へ",
+      "next": "次へ",
+      "notYet": "まだ",
+      "gotIt": "できた",
+      "noDifficultCards": "難しいカードはありません",
+      "backToAllCards": "すべてのカードに戻る",
+      "quizResult": "クイズ結果",
+      "correctCount": "{{correct}} / {{total}} 問正解",
+      "retryWrong": "間違いだけ再挑戦",
+      "questionProgress": "問題 {{current}} / {{total}}",
+      "hint": "ヒントを見る",
+      "submitQuiz": "クイズを提出",
+      "answerKey": "解答と解説",
+      "searchMindMap": "ノードを検索",
+      "expandNode": "ノードを展開",
+      "collapseNode": "ノードを折りたたむ",
+      "nodeDetails": "ノード詳細",
+      "noCourseMemoryEvidence": "記録対象の Reverse Challenge を1回完了すると、ここに記憶保持率が表示されます。",
+      "nodeMemoryUnlinked": "このノードは評価済みの概念にまだ関連付けられていません。",
+      "memoryPercent": "現在の記憶 {{percent}}%",
+      "examples": "例",
+      "sources": "参照ページ",
+      "sourcePageLabel": "{{page}}ページ · {{title}}",
+      "sourcePageRemoved": "元のページは削除されました",
+      "notFound": "この学習素材は見つかりません。",
+      "courseUnavailable": "元の授業を利用できません。",
+      "loadFailed": "学習素材を開けませんでした",
+      "exportPdf": "PDFを書き出す",
+      "exportPng": "PNGを書き出す",
+      "exportSvg": "SVGを書き出す",
+      "exportComplete": "ビジュアル作品を書き出しました",
+      "exportFailed": "書き出しに失敗しました"
+    }
+  },
+  "overtime": {
+    "retry": "教材を再準備",
+    "status": {
+      "failed": "教材の準備に失敗しました",
+      "interrupted": "教材の準備が中断されました"
+    },
+    "phase": {
+      "outline": "延長教材を計画中...",
+      "content": "教材内容を生成中...",
+      "actions": "説明を構成中...",
+      "tts": "音声を準備中...",
+      "commit": "コースに追加中..."
+    },
+    "newCourse": {
+      "title": "このテーマは別のコースに適しています",
+      "description": "このコースに1ページでまとめるか、テーマ全体の新しいコースを作成できます。",
+      "stay": "このコースに残す",
+      "create": "新しいコースを作成"
     }
   }
 }

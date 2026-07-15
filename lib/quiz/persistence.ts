@@ -1,4 +1,5 @@
 import type { QuestionResult } from '@/lib/quiz/grading';
+import { emitOvertimeLearningSignal } from '@/lib/overtime/learning';
 
 /**
  * Quiz state persistence in localStorage, keyed per scene.
@@ -110,6 +111,7 @@ export function writeSubmittedAnswers(sceneId: string, answers: QuizAnswers): vo
 /** Called by quiz-view when grading transitions to reviewing. */
 export function writeSubmittedResults(sceneId: string, results: QuestionResult[]): void {
   safeSet(RESULTS_KEY_PREFIX + sceneId, JSON.stringify(results));
+  emitOvertimeLearningSignal(sceneId, 'quiz_reviewed');
 }
 
 /** Called by quiz-view on retry: wipes submitted answers + results but keeps draft lifecycle. */
