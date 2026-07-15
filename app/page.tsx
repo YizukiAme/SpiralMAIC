@@ -99,6 +99,7 @@ import { RevisitDemoBadge } from '@/components/revisit/demo-badge';
 import { FeaturedDemoCourseCard } from '@/components/demo/featured-demo-course-card';
 import {
   FEATURED_DEMO_COURSE,
+  findFeaturedDemoStage,
   openFeaturedDemoCourse,
   type FeaturedDemoPhase,
 } from '@/lib/demo/featured-course';
@@ -161,14 +162,14 @@ function HomePage() {
   );
   const hasUsableProvider = hasUsableLLMProvider(providersConfig);
   const [recentOpen, setRecentOpen] = useState(true);
-  const persistRecentOpen = (next: boolean) => {
+  const persistRecentOpen = useCallback((next: boolean) => {
     setRecentOpen(next);
     try {
       localStorage.setItem(RECENT_OPEN_STORAGE_KEY, String(next));
     } catch {
       /* ignore */
     }
-  };
+  }, []);
 
   // Hydrate client-only state after mount (avoids SSR mismatch)
   useEffect(() => {
@@ -218,6 +219,7 @@ function HomePage() {
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [featuredDemoPresent, setFeaturedDemoPresent] = useState<boolean | null>(null);
   const [featuredDemoPhase, setFeaturedDemoPhase] = useState<FeaturedDemoPhase>('idle');
   const [featuredDemoError, setFeaturedDemoError] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -274,9 +276,10 @@ function HomePage() {
   const handleOpenFeaturedDemo = useCallback(async () => {
     setFeaturedDemoError(null);
     try {
-      const stageId = await openFeaturedDemoCourse({ onPhase: setFeaturedDemoPhase });
+      await openFeaturedDemoCourse({ onPhase: setFeaturedDemoPhase });
       await loadClassrooms();
-      router.push(`/classroom/${stageId}`);
+      setFeaturedDemoPresent(true);
+      persistRecentOpen(true);
     } catch (err) {
       log.error('Failed to open featured demo course:', err);
       const isQuotaError = err instanceof DOMException && err.name === 'QuotaExceededError';
@@ -286,7 +289,22 @@ function HomePage() {
     } finally {
       setFeaturedDemoPhase('idle');
     }
-  }, [loadClassrooms, router]);
+  }, [loadClassrooms, persistRecentOpen]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void findFeaturedDemoStage()
+      .then((stage) => {
+        if (!cancelled) setFeaturedDemoPresent(Boolean(stage));
+      })
+      .catch((err) => {
+        log.error('Failed to resolve featured demo course:', err);
+        if (!cancelled) setFeaturedDemoPresent(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (
@@ -1121,12 +1139,14 @@ function HomePage() {
         )}
       </motion.div>
 
-      <FeaturedDemoCourseCard
-        course={FEATURED_DEMO_COURSE}
-        phase={featuredDemoPhase}
-        error={featuredDemoError}
-        onOpen={handleOpenFeaturedDemo}
-      />
+      {featuredDemoPresent === false && (
+        <FeaturedDemoCourseCard
+          course={FEATURED_DEMO_COURSE}
+          phase={featuredDemoPhase}
+          error={featuredDemoError}
+          onOpen={handleOpenFeaturedDemo}
+        />
+      )}
 
       {/* ═══ Recent classrooms — collapsible ═══ */}
       {classrooms.length > 0 && (
