@@ -31,7 +31,7 @@ describe('native Codex provider seam', () => {
   it('registers OAuth credentials and rejects disconnected model construction', () => {
     expect(PROVIDERS['openai-codex']).toMatchObject({
       id: 'openai-codex',
-      name: 'ChatGPT Codex',
+      name: 'Codex',
       type: 'openai',
       credentialMode: 'oauth',
       requiresApiKey: false,

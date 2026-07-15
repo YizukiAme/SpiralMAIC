@@ -23,6 +23,7 @@ const CODEX_KEYS = [
   'settings.providerNames.openai-codex',
   'settings.connected',
   'settings.codexOAuth.experimental',
+  'settings.codexOAuth.connectTitle',
   'settings.codexOAuth.unavailableTitle',
   'settings.codexOAuth.unavailable.FEATURE_DISABLED',
   'settings.codexOAuth.unavailable.SERVERLESS_UNSUPPORTED',
@@ -57,6 +58,10 @@ const get = (source: any, key: string) =>
 describe('Codex OAuth locale coverage', () => {
   it('keeps the same non-empty leaf shape in all eight locales', () => {
     for (const [locale, messages] of Object.entries(locales)) {
+      expect(
+        messages.settings.providerNames['openai-codex'],
+        `${locale} has the Codex provider display name`,
+      ).toBe('Codex');
       for (const key of CODEX_KEYS) {
         const value = get(messages, key);
         expect(typeof value, `${locale} missing ${key}`).toBe('string');

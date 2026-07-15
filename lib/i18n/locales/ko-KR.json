@@ -1035,7 +1035,7 @@
     "addProviderDescription": "사용 가능한 AI 모델을 확장하기 위해 사용자 지정 모델 제공업체를 추가하세요",
     "providerNames": {
       "openai": "OpenAI",
-      "openai-codex": "ChatGPT Codex",
+      "openai-codex": "Codex",
       "anthropic": "Claude",
       "google": "Gemini",
       "deepseek": "DeepSeek",
@@ -1058,6 +1058,7 @@
     },
     "codexOAuth": {
       "experimental": "실험적인 타사 Codex 연동이며 ChatGPT 요금제 한도를 사용합니다.",
+      "connectTitle": "ChatGPT 연결",
       "unavailableTitle": "Codex 로그인을 사용할 수 없습니다",
       "unavailable": {
         "FEATURE_DISABLED": "서버에서 Codex OAuth를 활성화해 주세요.",

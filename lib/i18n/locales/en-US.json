@@ -1035,7 +1035,7 @@
     "addProviderDescription": "Add custom model providers to extend available AI models",
     "providerNames": {
       "openai": "OpenAI",
-      "openai-codex": "ChatGPT Codex",
+      "openai-codex": "Codex",
       "anthropic": "Claude",
       "google": "Gemini",
       "deepseek": "DeepSeek",
@@ -1058,6 +1058,7 @@
     },
     "codexOAuth": {
       "experimental": "Experimental third-party Codex integration; uses your ChatGPT plan quota.",
+      "connectTitle": "ChatGPT connection",
       "unavailableTitle": "Codex sign-in is unavailable",
       "unavailable": {
         "FEATURE_DISABLED": "Enable Codex OAuth on the server to use this provider.",

@@ -1035,7 +1035,7 @@
     "addProviderDescription": "أضف مزوّدي نماذج مخصصين لتوسيع نماذج الذكاء الاصطناعي المتاحة",
     "providerNames": {
       "openai": "OpenAI",
-      "openai-codex": "ChatGPT Codex",
+      "openai-codex": "Codex",
       "anthropic": "Claude",
       "google": "Gemini",
       "deepseek": "DeepSeek",
@@ -1058,6 +1058,7 @@
     },
     "codexOAuth": {
       "experimental": "تكامل تجريبي من جهة خارجية مع Codex؛ يستخدم حصة خطة ChatGPT الخاصة بك.",
+      "connectTitle": "اتصال ChatGPT",
       "unavailableTitle": "تسجيل الدخول إلى Codex غير متاح",
       "unavailable": {
         "FEATURE_DISABLED": "فعّل Codex OAuth على الخادم لاستخدام هذا المزوّد.",

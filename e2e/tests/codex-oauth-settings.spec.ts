@@ -20,10 +20,7 @@ async function openCodexSettings(page: HomePage['page']) {
   await expect(home.textarea).toBeVisible();
   await page.locator('button:has(svg.lucide-settings)').first().click();
   await expect(page.getByRole('dialog')).toBeVisible();
-  await page
-    .getByRole('button', { name: /ChatGPT Codex/i })
-    .first()
-    .click();
+  await page.getByRole('button', { name: /Codex/i }).first().click();
   await expect(page.getByText(/Experimental third-party Codex integration/i).first()).toBeVisible();
 }
 
@@ -177,7 +174,7 @@ test.describe('Codex OAuth settings', () => {
     await expect(page.getByRole('button', { name: 'Use device code' })).toBeDisabled();
     releaseProviderSync();
     await expect(page.getByText('Connected with ChatGPT')).toBeVisible({ timeout: 5_000 });
-    await expect(page.getByRole('button', { name: /ChatGPT Codex Connected/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Codex Connected/ })).toBeVisible();
 
     await page.getByRole('button', { name: 'Test connection' }).click();
     await expect(

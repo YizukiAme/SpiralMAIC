@@ -6,10 +6,15 @@ import {
   CheckCircle2,
   Copy,
   ExternalLink,
+  FileText,
   KeyRound,
   Loader2,
   LogOut,
+  Send,
   ShieldAlert,
+  Sparkles,
+  Wrench,
+  XCircle,
   Zap,
 } from 'lucide-react';
 
@@ -17,6 +22,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Label } from '@/components/ui/label';
 import {
   CodexOAuthClient,
   syncCodexProviderAndSelect,
@@ -26,11 +32,14 @@ import {
 } from '@/lib/client/codex-oauth';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { useSettingsStore } from '@/lib/store/settings';
+import { cn } from '@/lib/utils';
+import { formatContextWindow } from './utils';
 
 const INITIAL_SNAPSHOT: CodexOAuthClientSnapshot = {
   auth: null,
   attempt: null,
   busy: null,
+  startingMethod: null,
   errorKey: null,
 };
 
@@ -162,7 +171,7 @@ export function CodexProviderSettings() {
     <div className="max-w-3xl space-y-5">
       <Alert>
         <KeyRound aria-hidden="true" />
-        <AlertTitle>{t('settings.providerNames.openai-codex')}</AlertTitle>
+        <AlertTitle>{t('settings.codexOAuth.connectTitle')}</AlertTitle>
         <AlertDescription>{t('settings.codexOAuth.experimental')}</AlertDescription>
       </Alert>
 
@@ -177,18 +186,63 @@ export function CodexProviderSettings() {
                     ? t('settings.codexOAuth.connectedAs').replace('{email}', auth.email)
                     : t('settings.codexOAuth.connected')}
                 </CardTitle>
-                <CardDescription>{t('settings.codexOAuth.models')}</CardDescription>
               </div>
               <Badge variant="secondary">{t('settings.connected')}</Badge>
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex flex-wrap gap-2" aria-label={t('settings.codexOAuth.models')}>
-              {models.map((model) => (
-                <Badge key={model.id} variant="outline">
-                  {model.name || model.id}
-                </Badge>
-              ))}
+            <div className="space-y-2">
+              <Label>{t('settings.codexOAuth.models')}</Label>
+              <div className="space-y-1.5" aria-label={t('settings.codexOAuth.models')}>
+                {models.map((model) => (
+                  <div
+                    key={model.id}
+                    data-codex-model-row
+                    className="flex items-center justify-between rounded-lg border border-border/50 bg-card p-3"
+                  >
+                    <div className="flex-1">
+                      <div className="mb-1.5 font-mono text-sm font-medium">
+                        {model.name || model.id}
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <div className="flex items-center gap-1">
+                          {model.capabilities?.vision && (
+                            <span title={t('settings.capabilities.vision')}>
+                              <Sparkles className="h-3 w-3" aria-hidden="true" />
+                            </span>
+                          )}
+                          {model.capabilities?.tools && (
+                            <span title={t('settings.capabilities.tools')}>
+                              <Wrench className="h-3 w-3" aria-hidden="true" />
+                            </span>
+                          )}
+                          {model.capabilities?.streaming && (
+                            <span title={t('settings.capabilities.streaming')}>
+                              <Zap className="h-3 w-3" aria-hidden="true" />
+                            </span>
+                          )}
+                        </div>
+                        {model.contextWindow && (
+                          <span className="flex items-center gap-0.5">
+                            <FileText className="h-3 w-3" aria-hidden="true" />
+                            <span className="text-[10px]">
+                              {formatContextWindow(model.contextWindow)}
+                            </span>
+                          </span>
+                        )}
+                        {model.outputWindow && (
+                          <span className="flex items-center gap-0.5">
+                            <Send className="h-3 w-3" aria-hidden="true" />
+                            <span className="text-[10px]">
+                              {formatContextWindow(model.outputWindow)}
+                            </span>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
             <div className="flex flex-wrap gap-2">
               <Button
@@ -211,6 +265,7 @@ export function CodexProviderSettings() {
                 size="sm"
                 onClick={() => void clientRef.current?.logout()}
                 disabled={isBusy}
+                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
               >
                 {snapshot.busy === 'signing-out' ? (
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
@@ -221,16 +276,27 @@ export function CodexProviderSettings() {
               </Button>
             </div>
             {testState.messageKey && (
-              <p
+              <div
                 role="status"
-                className={
-                  testState.status === 'success'
-                    ? 'text-sm text-emerald-700 dark:text-emerald-400'
-                    : 'text-sm text-destructive'
-                }
+                className={cn(
+                  'overflow-hidden rounded-lg p-3 text-sm',
+                  testState.status === 'success' &&
+                    'bg-green-50 text-green-700 border border-green-200',
+                  testState.status === 'error' && 'bg-red-50 text-red-700 border border-red-200',
+                )}
               >
-                {t(`settings.codexOAuth.${testState.messageKey}`)}
-              </p>
+                <div className="flex min-w-0 items-start gap-2">
+                  {testState.status === 'success' && (
+                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                  )}
+                  {testState.status === 'error' && (
+                    <XCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                  )}
+                  <p className="min-w-0 flex-1 break-words">
+                    {t(`settings.codexOAuth.${testState.messageKey}`)}
+                  </p>
+                </div>
+              </div>
             )}
           </CardContent>
         </Card>
@@ -254,7 +320,7 @@ export function CodexProviderSettings() {
               <div className="flex flex-wrap gap-2">
                 {supportsBrowser && (
                   <Button type="button" onClick={startBrowser} disabled={isBusy}>
-                    {snapshot.busy === 'starting' ? (
+                    {snapshot.busy === 'starting' && snapshot.startingMethod === 'browser' ? (
                       <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                     ) : (
                       <KeyRound className="h-4 w-4" aria-hidden="true" />
@@ -269,7 +335,7 @@ export function CodexProviderSettings() {
                     onClick={startDevice}
                     disabled={isBusy}
                   >
-                    {snapshot.busy === 'starting' && !supportsBrowser && (
+                    {snapshot.busy === 'starting' && snapshot.startingMethod === 'device' && (
                       <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                     )}
                     {t('settings.codexOAuth.signInDevice')}
