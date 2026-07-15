@@ -37,6 +37,8 @@
     "removePdf": "ファイルを削除",
     "documentExtractor": "抽出器",
     "courseMaterialUpload": "教材をアップロード",
+    "courseMaterialsSelected": "{{n}}件の教材を選択済み",
+    "courseMaterialMergeOrder": "教材は下に表示された順序で結合されます。",
     "removeCourseMaterial": "ファイルを削除",
     "webSearchOn": "有効",
     "webSearchOff": "クリックして有効化",
@@ -113,7 +115,9 @@
       "empty": "講義の再生後にノートがここに表示されます",
       "emptyHint": "再生ボタンを押して講義を開始してください",
       "pageLabel": "ページ {{n}}",
-      "currentPage": "現在"
+      "currentPage": "現在",
+      "jumpToLine": "Jump to this line",
+      "jumpUnavailable": "Jump unavailable for this line"
     },
     "badge": {
       "qa": "Q&A",
@@ -224,8 +228,8 @@
     },
     "insert": {
       "textBox": "テキストボックス",
-      "expandToolbar": "挿入ツールを表示",
-      "collapseToolbar": "挿入ツールを隠す",
+      "dragToolbar": "挿入ツールを移動",
+      "dragToolbarKeyboard": "挿入ツールを移動：Enter または Space を押してから矢印キーで移動",
       "image": "画像",
       "imageDrop": "画像をドロップまたはクリックして選択",
       "imageOr": "または画像 URL を貼り付け",
@@ -283,7 +287,7 @@
       "commentPromptLabel": "採点ガイド",
       "commentPromptPlaceholder": "この記述式をどう採点しますか？",
       "empty": "問題がありません",
-      "emptyHint": "上の「問題を追加」から最初の問題を作成します。",
+      "emptyHint": "「問題を追加」から最初の問題を作成します。",
       "type": {
         "single": "単一選択",
         "multiple": "複数選択",
@@ -346,6 +350,10 @@
         "fixHtml": {
           "examples": "「スタートボタンを押しても何も起きない」「スマホでパネルが重なる」",
           "label": "ページの不具合を修正"
+        },
+        "elements": {
+          "label": "要素を微調整",
+          "examples": "「タイトルを青くして上に」「この図を小さく」"
         }
       },
       "newConversation": "新しい会話",
@@ -446,6 +454,14 @@
       "fixing": "修正中",
       "notFixed": "未修正",
       "title": "インタラクティブページを修正"
+    },
+    "editElements": {
+      "title": "要素を編集",
+      "editing": "編集中",
+      "applied": "適用済み",
+      "notApplied": "未適用",
+      "applyFailed": "エディターで要素の編集を適用できませんでした。変更はありません。",
+      "applyPartiallyFailed": "一部の要素編集を適用できませんでした。ほかの編集は適用されている可能性があります。"
     }
   },
   "classroomComplete": {
@@ -525,6 +541,9 @@
     "autoPlay": "自動再生",
     "autoPlayOff": "自動再生を停止",
     "speed": "速度",
+    "previousLine": "Previous line",
+    "nextLine": "Next line",
+    "lineProgress": "Line {{current}} / {{total}}",
     "voiceInput": "音声入力",
     "voiceInputDisabled": "音声入力無効",
     "textInput": "テキスト入力",
@@ -838,17 +857,19 @@
   },
   "upload": {
     "pdfSizeLimit": "50MBまでのPDFファイルに対応しています",
-    "courseMaterialSizeLimit": "50MBまでのPDF、DOCX、PPTX、TXT、Markdownファイルに対応しています",
+    "courseMaterialSizeLimit": "ドキュメント、スライド、表計算、画像、テキスト — 最大50MB（対応形式は選択したエクストラクタに依存）",
     "generateFailed": "教室の生成に失敗しました。もう一度お試しください",
     "requirementPlaceholder": "学びたいことを自由に入力してください。例えば：\n「Pythonをゼロから30分で教えて」\n「フーリエ変換をホワイトボードで解説して」\n「ボードゲーム『アバロン』の遊び方」",
     "requirementRequired": "コースの要件を入力してください",
     "fileTooLarge": "ファイルが大きすぎます。50MB以下のファイルを選択してください",
-    "unsupportedCourseMaterial": "対応していない教材形式です。PDF、DOCX、PPTX、TXT、Markdownをアップロードしてください。"
+    "courseMaterialCountLimit": "教材ファイルは最大5件までアップロードできます",
+    "courseMaterialTotalSizeLimit": "教材の合計サイズは150MB未満にしてください",
+    "unsupportedCourseMaterial": "現在の解析器はこの形式に対応していません。解析器を切り替えるか、別のファイルを選択してください。"
   },
   "generation": {
     "pdfLoadFailed": "PDFファイルの読み込みに失敗しました。もう一度お試しください",
     "pdfParseFailed": "PDFの解析に失敗しました",
-    "analyzingCourseMaterial": "{{type}}ファイルを分析中",
+    "analyzingCourseMaterial": "ドキュメントを分析中",
     "analyzingCourseMaterialDesc": "ドキュメントの構造と内容を抽出しています...",
     "courseMaterialLoadFailed": "教材の読み込みに失敗しました。もう一度お試しください",
     "courseMaterialParseFailed": "教材の解析に失敗しました",
@@ -861,11 +882,6 @@
     "generatingActionsDesc": "ナレーション、スポットライト、インタラクションを構成しています...",
     "generationComplete": "生成が完了しました！",
     "generationFailed": "生成に失敗しました",
-    "generatingCourse": "コースを生成中",
-    "openingClassroom": "教室を開いています...",
-    "outlineReady": "コースアウトラインが完成しました",
-    "generatingFirstPage": "最初のページを生成中...",
-    "firstPageReady": "最初のページが完成しました！教室を開いています...",
     "speechFailed": "音声の生成に失敗しました",
     "retryScene": "やり直す",
     "retryingScene": "再生成中...",
@@ -886,6 +902,10 @@
     "outlineEmptyResponse": "モデルから有効なアウトラインが返されませんでした。モデルの設定を確認して再度お試しください",
     "outlineGenerateFailed": "アウトラインの生成に失敗しました。しばらくしてからお試しください",
     "sceneGenerateFailed": "シーンの生成に失敗しました。しばらくしてからお試しください",
+    "sceneGenerateAuthFailed": "モデルプロバイダーが認証情報を拒否したため、シーン生成に失敗しました。モデル設定を確認してください。",
+    "sceneGenerateRateLimited": "シーン生成がレート制限されています。少し待ってからもう一度お試しください。",
+    "sceneGenerateProviderUnavailable": "モデルプロバイダーが一時的に利用できません。しばらくしてからお試しください。",
+    "sceneGenerateInvalidResponse": "モデルから有効なシーン内容が返されませんでした。別のモデルを試すか、コース要件を調整してください。",
     "reviewOutlineTitle": "アウトラインを確認",
     "reviewOutlineDesc": "コンテンツ生成の前に、シーンの編集、並び替え、削除、追加ができます。",
     "reviewOutlineAutoContinue": "確認しない場合は、自動的にコース内容の生成へ進みます。",
@@ -954,7 +974,8 @@
     "webSearchingDesc": "ウェブで最新情報を検索しています",
     "webSearchFailed": "ウェブ検索に失敗しました",
     "outlinesReadyCount": "{{ready}} / {{total}} セクション準備完了",
-    "jumpToBlankTitle": "タイトルが未入力のセクションへ移動"
+    "jumpToBlankTitle": "タイトルが未入力のセクションへ移動",
+    "analyzingMediaMaterial": "音声・動画を解析中"
   },
   "settings": {
     "title": "設定",
@@ -1035,6 +1056,7 @@
     "addProviderDescription": "カスタムモデルプロバイダーを追加して利用可能なAIモデルを拡張",
     "providerNames": {
       "openai": "OpenAI",
+      "azure": "Azure OpenAI",
       "anthropic": "Claude",
       "google": "Gemini",
       "deepseek": "DeepSeek",
@@ -1053,10 +1075,12 @@
       "tavily": "Tavily",
       "bocha": "Bocha",
       "brave": "Brave Search",
-      "baidu": "Baidu"
+      "baidu": "Baidu",
+      "searxng": "SearXNG"
     },
     "providerTypes": {
       "openai": "OpenAIプロトコル",
+      "azure": "Azure OpenAI",
       "anthropic": "Claudeプロトコル",
       "google": "Geminiプロトコル"
     },
@@ -1075,6 +1099,7 @@
     "importFromClipboard": "クリップボードからインポート",
     "apiSecret": "APIキー",
     "apiHost": "ベースURL",
+    "azureDeploymentHint": "上に Azure OpenAI エンドポイントを入力し、各 Azure デプロイ名をモデルとして追加してください。",
     "baseUrlRegion": {
       "china": "中国",
       "international": "国際",
@@ -1085,6 +1110,14 @@
     },
     "requestUrl": "リクエストURL",
     "models": "モデル",
+    "comfyuiWorkflows": "ワークフロー",
+    "comfyuiRefresh": "更新",
+    "comfyuiNoWorkflowsFoundPrefix": "ワークフローのJSONファイルが見つかりません：",
+    "comfyuiAddWorkflowPrefix": "追加してください：",
+    "comfyuiAddWorkflowSuffix": "ファイルを追加して開始します。",
+    "comfyuiFolderHintPrefix": "ワークフローのJSONファイルを",
+    "comfyuiFolderHintMiddle": "フォルダに配置してください。ファイル名が表示名になります。例：",
+    "comfyuiLoadError": "ワークフローの読み込みに失敗しました: {error}",
     "addModel": "追加",
     "reset": "リセット",
     "fetch": "取得",
@@ -1469,6 +1502,9 @@
     "lang_af-ZA": "Afrikaans (Suid-Afrika)",
     "lang_uk-UA": "Українська (Україна)",
     "pdfSettings": "PDF解析",
+    "documentParsingSettings": "ドキュメント解析",
+    "supportedFormats": "対応フォーマット",
+    "mineruSelfHostFormatsNote": "PDF と画像の解析には、MinerU サーバーに mineru[pipeline] または mineru[core] の追加依存関係が必要です。軽量版の mineru-api では Office 文書のみに対応する場合があります。",
     "pdfParsingSettings": "PDF解析設定",
     "pdfDescription": "テキスト抽出、画像処理、表認識に対応したPDF解析エンジンを選択",
     "pdfProvider": "PDFパーサー",
@@ -1503,6 +1539,7 @@
     "providerNanoBanana": "Nano Banana（Gemini）",
     "providerMiniMaxImage": "MiniMax Image",
     "providerGrokImage": "Grok Image（xAI）",
+    "providerComfyUIImage": "ComfyUI Image",
     "providerLemonadeImage": "Lemonade Image（ローカル）",
     "testImageGeneration": "画像生成をテスト",
     "testImageConnectivity": "接続テスト",
@@ -1570,6 +1607,7 @@
     "webSearchApiKeyPlaceholderServer": "サーバーキー設定済み、任意で上書き",
     "webSearchApiKeyHint": "選択した検索プロバイダーからAPIキーを取得してください",
     "webSearchApiKeyOptional": "APIキーは任意です。未設定の場合、公開ページのスクレイピングが使用されます。",
+    "searxngServerOnlyNotice": "SearXNG はサーバー側で設定する必要があります。SEARXNG_BASE_URL 環境変数（または server-providers.yml の web-search セクション）を設定してください。クライアントからのインスタンス URL は受け付けません。",
     "baiduSubSources": "Baidu検索ソース",
     "baiduSubSourcesDescription": "少なくとも1つのBaiduソースを選択してください。",
     "baiduSubSourceWeb": "Web検索",
@@ -1645,7 +1683,9 @@
       "demoArea": "デモ",
       "acceleratedClock": "加速時計",
       "gateSkip": "ページ判定をスキップ"
-    }
+    },
+    "alidocmindAccessKeyId": "AccessKey ID",
+    "alidocmindAccessKeySecret": "AccessKey Secret"
   },
   "profile": {
     "title": "プロフィール",

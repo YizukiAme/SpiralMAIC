@@ -20,6 +20,7 @@ import type { VoiceDesign } from '@/lib/audio/voice-design';
 import type { UIMessage } from 'ai';
 import type { AgentEditSessionRecord } from '@/lib/agent/client/agent-edit-session-types';
 import { createLogger } from '@/lib/logger';
+import { deleteStageRuntimeSafely } from '@/lib/runtime/store';
 
 const log = createLogger('Database');
 
@@ -98,7 +99,7 @@ export interface AudioFileRecord {
  */
 export interface ImageFileRecord {
   id: string; // Primary key
-  blob: Blob; // Image binary data
+  blob: Blob | ArrayBuffer; // Image binary data
   filename: string; // Original filename
   mimeType: string; // image/png, image/jpeg, etc.
   size: number; // File size (bytes)
@@ -551,6 +552,10 @@ export async function deleteStageWithRelatedData(stageId: string): Promise<void>
       await db.agentEditSessions.where('stageId').equals(stageId).delete();
     },
   );
+  // Learner-runtime data lives in a separate IndexedDB database, so it is
+  // cascaded after the Dexie transaction: it cannot join it, and a runtime
+  // failure must not abort it (the helper warns instead of throwing).
+  await deleteStageRuntimeSafely(stageId);
 }
 
 /**
