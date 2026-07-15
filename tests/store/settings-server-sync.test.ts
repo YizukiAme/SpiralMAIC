@@ -31,7 +31,7 @@ vi.mock('@/lib/ai/providers', () => ({
     },
     'openai-codex': {
       id: 'openai-codex',
-      name: 'ChatGPT Codex',
+      name: 'Codex',
       type: 'openai',
       requiresApiKey: false,
       credentialMode: 'oauth',
@@ -402,7 +402,7 @@ describe('settings rehydrate — built-in provider models', () => {
     expect(codex).toMatchObject({
       apiKey: '',
       baseUrl: '',
-      name: 'ChatGPT Codex',
+      name: 'Codex',
       type: 'openai',
       requiresApiKey: false,
       credentialMode: 'oauth',

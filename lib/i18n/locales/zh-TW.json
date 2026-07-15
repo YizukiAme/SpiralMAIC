@@ -1019,7 +1019,7 @@
     "addProviderDescription": "新增自訂模型供應商以擴充可用的AI模型",
     "providerNames": {
       "openai": "OpenAI",
-      "openai-codex": "ChatGPT Codex",
+      "openai-codex": "Codex",
       "anthropic": "Claude",
       "google": "Gemini",
       "deepseek": "DeepSeek",
@@ -1042,6 +1042,7 @@
     },
     "codexOAuth": {
       "experimental": "實驗性第三方 Codex 接入；使用你的 ChatGPT 方案額度。",
+      "connectTitle": "ChatGPT 連線",
       "unavailableTitle": "Codex 登入目前不可用",
       "unavailable": {
         "FEATURE_DISABLED": "請在伺服器啟用 Codex OAuth 後使用此提供者。",

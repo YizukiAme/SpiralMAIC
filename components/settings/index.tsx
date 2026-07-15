@@ -381,6 +381,8 @@ export function SettingsDialog({ open, onOpenChange, initialSection }: SettingsD
         models: providersConfig[selectedProviderId].models,
       }
     : undefined;
+  const isCodexProviderSurface =
+    activeSection === 'providers' && selectedProviderId === 'openai-codex';
 
   // Handle model editing
   const handleEditModel = (pid: ProviderId, modelIndex: number) => {
@@ -1144,13 +1146,13 @@ export function SettingsDialog({ open, onOpenChange, initialSection }: SettingsD
 
             {/* Footer */}
             <div className="flex items-center justify-end gap-3 px-5 py-3 border-t bg-muted/30">
-              {saveStatus === 'saved' && (
+              {!isCodexProviderSurface && saveStatus === 'saved' && (
                 <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                   <CheckCircle2 className="h-4 w-4" />
                   <span>{t('settings.saveSuccess')}</span>
                 </div>
               )}
-              {saveStatus === 'error' && (
+              {!isCodexProviderSurface && saveStatus === 'error' && (
                 <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                   <XCircle className="h-4 w-4" />
                   <span>{t('settings.saveFailed')}</span>
@@ -1159,9 +1161,11 @@ export function SettingsDialog({ open, onOpenChange, initialSection }: SettingsD
               <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
                 {t('settings.close')}
               </Button>
-              <Button size="sm" onClick={handleSave}>
-                {t('settings.save')}
-              </Button>
+              {!isCodexProviderSurface && (
+                <Button size="sm" onClick={handleSave}>
+                  {t('settings.save')}
+                </Button>
+              )}
             </div>
           </div>
         </div>

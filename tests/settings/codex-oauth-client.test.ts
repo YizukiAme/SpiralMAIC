@@ -241,6 +241,22 @@ describe('CodexOAuthClient', () => {
     ]);
   });
 
+  it('tracks the selected login method while the device request is starting', async () => {
+    const post = deferred<Response>();
+    const client = createClient(vi.fn(async () => post.promise));
+
+    const starting = client.startDevice();
+    const inFlightSnapshot = client.getSnapshot();
+    post.resolve(jsonResponse(pendingDevice()));
+    await starting;
+
+    expect(inFlightSnapshot).toMatchObject({
+      busy: 'starting',
+      startingMethod: 'device',
+    });
+    expect(client.getSnapshot().startingMethod).toBeNull();
+  });
+
   it('cancels a blocked browser attempt before falling back to device login', async () => {
     const events: string[] = [];
     const client = createClient(

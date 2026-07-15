@@ -22,6 +22,7 @@ export interface CodexOAuthClientSnapshot {
   auth: CodexAuthPublicStatus | null;
   attempt: CodexLoginAttempt | null;
   busy: 'loading' | 'starting' | 'waiting' | 'syncing' | 'cancelling' | 'signing-out' | null;
+  startingMethod: CodexOAuthLoginMethod | null;
   errorKey: CodexOAuthClientMessageKey | null;
 }
 
@@ -137,6 +138,7 @@ export class CodexOAuthClient {
     auth: null,
     attempt: null,
     busy: null,
+    startingMethod: null,
     errorKey: null,
   };
   private generation = 0;
@@ -221,7 +223,12 @@ export class CodexOAuthClient {
     const popup = this.dependencies.openPopup();
     const generation = this.beginGeneration();
     this.popup = popup;
-    this.publish({ attempt: null, busy: 'starting', errorKey: null });
+    this.publish({
+      attempt: null,
+      busy: 'starting',
+      startingMethod: 'browser',
+      errorKey: null,
+    });
 
     const attempt = await this.postLogin('browser', generation);
     if (!this.isCurrent(generation)) {
@@ -264,7 +271,7 @@ export class CodexOAuthClient {
     if (supportsDevice) {
       await this.startDeviceInternal();
     } else {
-      this.publish({ busy: null, errorKey: 'loginFailed' });
+      this.publish({ busy: null, startingMethod: null, errorKey: 'loginFailed' });
     }
   }
 
@@ -277,11 +284,16 @@ export class CodexOAuthClient {
     this.popup?.close();
     this.popup = null;
     const generation = this.beginGeneration();
-    this.publish({ attempt: null, busy: 'starting', errorKey: null });
+    this.publish({
+      attempt: null,
+      busy: 'starting',
+      startingMethod: 'device',
+      errorKey: null,
+    });
     const attempt = await this.postLogin('device', generation);
     if (!this.isCurrent(generation)) return;
     if (!attempt) {
-      this.publish({ busy: null, errorKey: 'loginFailed' });
+      this.publish({ busy: null, startingMethod: null, errorKey: 'loginFailed' });
       return;
     }
     await this.acceptAttempt(attempt, generation);
@@ -313,6 +325,7 @@ export class CodexOAuthClient {
       attempt,
       busy:
         attempt.status === 'pending' ? 'waiting' : attempt.status === 'complete' ? 'syncing' : null,
+      startingMethod: null,
       errorKey,
     });
 
@@ -368,8 +381,9 @@ export class CodexOAuthClient {
     }
     if (!this.isCurrent(generation)) return;
     if (!response.ok) {
-      if (response.status === 404) this.publish({ attempt: null, busy: null });
-      else if (this.snapshot.attempt) this.schedulePoll(this.snapshot.attempt, generation);
+      if (response.status === 404) {
+        this.publish({ attempt: null, busy: null, startingMethod: null });
+      } else if (this.snapshot.attempt) this.schedulePoll(this.snapshot.attempt, generation);
       return;
     }
     const attempt = parseAttempt(await readJson<CodexLoginAttempt>(response));
@@ -385,7 +399,7 @@ export class CodexOAuthClient {
       return;
     }
     const generation = this.beginGeneration();
-    this.publish({ busy: 'cancelling', errorKey: null });
+    this.publish({ busy: 'cancelling', startingMethod: null, errorKey: null });
     this.popup?.close();
     this.popup = null;
     try {
@@ -394,24 +408,26 @@ export class CodexOAuthClient {
       // Keep cancellation idempotent from the settings surface.
     }
     if (this.isCurrent(generation)) {
-      this.publish({ attempt: null, busy: null, errorKey: null });
+      this.publish({ attempt: null, busy: null, startingMethod: null, errorKey: null });
     }
   }
 
   async logout(): Promise<void> {
     if (!this.canStartAction()) return;
     const generation = this.beginGeneration();
-    this.publish({ busy: 'signing-out', errorKey: null });
+    this.publish({ busy: 'signing-out', startingMethod: null, errorKey: null });
     let response: Response;
     try {
       response = await this.dependencies.fetcher(AUTH_ENDPOINT, { method: 'DELETE' });
     } catch {
-      if (this.isCurrent(generation)) this.publish({ busy: null, errorKey: 'loginFailed' });
+      if (this.isCurrent(generation)) {
+        this.publish({ busy: null, startingMethod: null, errorKey: 'loginFailed' });
+      }
       return;
     }
     if (!this.isCurrent(generation)) return;
     if (!response.ok) {
-      this.publish({ busy: null, errorKey: 'loginFailed' });
+      this.publish({ busy: null, startingMethod: null, errorKey: 'loginFailed' });
       return;
     }
     let refreshFailed = false;
@@ -434,6 +450,7 @@ export class CodexOAuthClient {
       auth: disconnectedAuth,
       attempt: null,
       busy: null,
+      startingMethod: null,
       errorKey: refreshFailed ? 'loginFailed' : null,
     });
   }

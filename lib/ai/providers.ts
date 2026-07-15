@@ -157,7 +157,7 @@ export const PROVIDERS: Record<ProviderId, ProviderConfig> = {
 
   'openai-codex': {
     id: 'openai-codex',
-    name: 'ChatGPT Codex',
+    name: 'Codex',
     type: 'openai',
     requiresApiKey: false,
     credentialMode: 'oauth',
