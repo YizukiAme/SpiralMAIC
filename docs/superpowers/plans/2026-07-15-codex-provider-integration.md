@@ -118,7 +118,7 @@ git commit -m "feat(codex): align oauth provider settings"
 ### Task 2: Import the verified feature into the live SpiralMAIC worktree
 
 **Files:**
-- Modify/Create: every path in `git diff --name-only 83b69c8..codex/native-codex-oauth`
+- Modify/Create: every functional path in `git diff --name-only 83b69c8..codex/native-codex-oauth`, excluding ignored `docs/` process artifacts
 - Preserve: all pre-existing dirty and untracked files in `/Users/yizuki/Workshop/Codes/SpiralMAIC`
 
 **Interfaces:**
@@ -134,14 +134,14 @@ Terminate only the process whose cwd is `/Users/yizuki/Workshop/Codes/SpiralMAIC
 Run from the main worktree:
 
 ```bash
-git -C ../SpiralMAIC-codex-oauth diff --binary 83b69c8..HEAD | git apply --check
+git -C ../SpiralMAIC-codex-oauth diff --binary 83b69c8..HEAD -- . ':!docs' | git apply --check
 ```
 
 Expected: exit 0 with no rejected hunks.
 
 - [ ] **Step 3: Apply the complete feature diff as a working-tree patch**
 
-Run the same pipeline without `--check`. Do not use `--index`; the existing Spiral changes must remain unstaged.
+Run the same pipeline without `--check`. Do not use `--index`; the existing Spiral changes must remain unstaged. The ignored design/plan documents stay only in the isolated worktree.
 
 - [ ] **Step 4: Audit the twelve overlapping paths**
 
