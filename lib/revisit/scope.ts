@@ -16,7 +16,3 @@ export function parseRevisitScope(value: string | null | undefined): RevisitData
   }
   return FORMAL_REVISIT_SCOPE;
 }
-
-export function isSameRevisitScope(a: RevisitDataScope, b: RevisitDataScope): boolean {
-  return serializeRevisitScope(a) === serializeRevisitScope(b);
-}

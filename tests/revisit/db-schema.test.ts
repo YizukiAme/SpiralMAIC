@@ -3,11 +3,12 @@ import 'fake-indexeddb/auto';
 import Dexie from 'dexie';
 import { describe, expect, it } from 'vitest';
 
-import { REVISIT_DATABASE_NAME, revisitDb } from '@/lib/revisit/db';
+import { REVISIT_DATABASE_NAME, RevisitDatabase, revisitDb } from '@/lib/revisit/db';
 
 describe('SpiralMAIC revisit Dexie schema', () => {
   it('uses an independent database with the required PRD tables', () => {
     expect(REVISIT_DATABASE_NAME).toBe('SpiralMAIC-Revisit');
+    expect(revisitDb.verno).toBe(8);
     expect(revisitDb.tables.map((table) => table.name).sort()).toEqual([
       'conceptEvidence',
       'examBlueprints',
@@ -16,7 +17,6 @@ describe('SpiralMAIC revisit Dexie schema', () => {
       'revisitAttempts',
       'revisitDemoSessions',
       'revisitReports',
-      'skeletonDecks',
       'studyArtifacts',
       'studyMaterials',
       'studyPractice',
@@ -45,7 +45,7 @@ describe('SpiralMAIC revisit Dexie schema', () => {
     try {
       await revisitDb.open();
 
-      expect(revisitDb.verno).toBe(7);
+      expect(revisitDb.verno).toBe(8);
       expect(await revisitDb.table('studyMaterials').get('legacy-materials')).toMatchObject({
         stageId: 'stage-1',
         sourceHash: 'legacy-source',
@@ -58,6 +58,72 @@ describe('SpiralMAIC revisit Dexie schema', () => {
       revisitDb.close();
       await Dexie.delete(REVISIT_DATABASE_NAME);
       await revisitDb.open();
+    }
+  });
+
+  it('upgrades v7 by dropping only the obsolete skeleton deck cache', async () => {
+    const databaseName = `${REVISIT_DATABASE_NAME}-v7-upgrade-test`;
+    await Dexie.delete(databaseName);
+    const legacy = new Dexie(databaseName);
+    legacy.version(7).stores({
+      userConceptState:
+        '[stageId+conceptId], stageId, conceptId, lastRetrievalAt, stableAt, updatedAt',
+      conceptEvidence:
+        'id, stageId, conceptId, attemptId, timestamp, [stageId+timestamp], [stageId+conceptId]',
+      examBlueprints: 'id, stageId, generatedAt, sourceHash',
+      skeletonDecks: 'id, stageId, blueprintId, generatedAt, sourceHash',
+      revisitReports: 'attemptId, stageId, completedAt',
+      lessonProgress: 'stageId, completedAt, updatedAt',
+      studyMaterials: 'id, stageId, generatedAt, sourceHash, [stageId+generatedAt]',
+      studyArtifacts:
+        'id, stageId, kind, version, updatedAt, [stageId+kind], [stageId+kind+version], [stageId+updatedAt]',
+      studyPractice: 'artifactId, stageId, kind, updatedAt, [stageId+kind], [stageId+updatedAt]',
+      revisitAttempts:
+        'attemptId, stageId, sequence, status, createdAt, completedAt, [stageId+sequence], [stageId+status]',
+      revisitDemoSessions: 'id, status, createdAt, updatedAt',
+      lessonConcepts:
+        '[stageId+conceptId], stageId, conceptId, origin, learnedAt, updatedAt, [stageId+origin]',
+    });
+    await legacy.open();
+    await legacy
+      .table('lessonProgress')
+      .put({ stageId: 'stage-1', completedAt: 100, updatedAt: 100 });
+    await legacy.table('revisitAttempts').put({
+      attemptId: 'attempt-1',
+      stageId: 'stage-1',
+      sequence: 1,
+      status: 'ready',
+      sourceScenes: [],
+      scenes: [],
+      createdAt: 100,
+      updatedAt: 100,
+    });
+    await legacy.table('skeletonDecks').put({
+      id: 'obsolete-deck',
+      stageId: 'stage-1',
+      blueprintId: 'blueprint-1',
+      generatedAt: 100,
+      sourceHash: 'source-1',
+      scenes: [],
+    });
+    legacy.close();
+
+    const upgraded = new RevisitDatabase(databaseName);
+    try {
+      await upgraded.open();
+
+      expect(upgraded.verno).toBe(8);
+      expect(upgraded.tables.map((table) => table.name)).not.toContain('skeletonDecks');
+      expect(Array.from(upgraded.backendDB().objectStoreNames)).not.toContain('skeletonDecks');
+      expect(await upgraded.table('lessonProgress').get('stage-1')).toMatchObject({
+        completedAt: 100,
+      });
+      expect(await upgraded.table('revisitAttempts').get('attempt-1')).toMatchObject({
+        status: 'ready',
+      });
+    } finally {
+      upgraded.close();
+      await Dexie.delete(databaseName);
     }
   });
 

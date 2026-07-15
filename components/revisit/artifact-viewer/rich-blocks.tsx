@@ -335,17 +335,6 @@ function RichBlock({
   );
 }
 
-export function getRichBlockHeadings(
-  blocks: StudyArtifactRichBlock[],
-): Array<{ id: string; text: string; level: 2 | 3 }> {
-  const headings = blocks.filter(
-    (block): block is Extract<StudyArtifactRichBlock, { type: 'heading' }> =>
-      block.type === 'heading',
-  );
-  const ids = createHeadingIds(blocks);
-  return headings.map((heading, index) => ({ ...heading, id: ids[index] }));
-}
-
 function createHeadingIds(blocks: StudyArtifactRichBlock[]): string[] {
   const seen = new Map<string, number>();
   return blocks

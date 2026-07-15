@@ -325,7 +325,3 @@ export function parseOvertimePlanDraft(
 
   return { outline, sourceSceneIds, concepts };
 }
-
-export function isOvertimeScene(scene: Pick<Scene, 'overtime'>): boolean {
-  return Boolean(scene.overtime?.extensionId);
-}

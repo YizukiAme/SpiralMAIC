@@ -983,12 +983,7 @@
     "revisitGeneratingPage": "Generating Challenge Page",
     "revisitGeneratingPageDesc": "Generating reverse-teaching prompt pages...",
     "revisitReady": "Review Challenge Ready",
-    "revisitReadyDesc": "The first challenge page is ready. Opening the classroom now.",
-    "generatingCourse": "Генерация курса",
-    "openingClassroom": "Открытие класса...",
-    "outlineReady": "Структура курса сгенерирована",
-    "generatingFirstPage": "Генерация первой страницы...",
-    "firstPageReady": "Первая страница готова! Открываю класс..."
+    "revisitReadyDesc": "The first challenge page is ready. Opening the classroom now."
   },
   "settings": {
     "title": "Настройки",
