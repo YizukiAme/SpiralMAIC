@@ -434,8 +434,6 @@ function createCodexLanguageModelMiddleware(
   };
 }
 
-export const codexLanguageModelMiddleware = createCodexLanguageModelMiddleware();
-
 export function wrapCodexLanguageModel(
   model: LanguageModelV3,
   options: { serviceTier?: ModelServiceTier } = {},

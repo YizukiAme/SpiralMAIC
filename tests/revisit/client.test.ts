@@ -14,12 +14,10 @@ const dbMocks = vi.hoisted(() => ({
   getLatestExamBlueprint: vi.fn(),
   getLatestRevisitReport: vi.fn(),
   getRevisitReport: vi.fn(),
-  getLatestSkeletonDeck: vi.fn(),
   getLessonProgress: vi.fn(),
   getPendingAssessmentConcepts: vi.fn(),
   saveExamBlueprint: vi.fn(),
   saveEvidenceAndUpdateState: vi.fn(),
-  saveSkeletonDeck: vi.fn(),
   saveStudyArtifactNewVersion: vi.fn(),
 }));
 

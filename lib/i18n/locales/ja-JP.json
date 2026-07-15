@@ -983,12 +983,7 @@
     "revisitGeneratingPage": "Generating Challenge Page",
     "revisitGeneratingPageDesc": "Generating reverse-teaching prompt pages...",
     "revisitReady": "Review Challenge Ready",
-    "revisitReadyDesc": "The first challenge page is ready. Opening the classroom now.",
-    "generatingCourse": "コースを生成中",
-    "openingClassroom": "教室を開いています...",
-    "outlineReady": "コースアウトラインが完成しました",
-    "generatingFirstPage": "最初のページを生成中...",
-    "firstPageReady": "最初のページが完成しました！教室を開いています..."
+    "revisitReadyDesc": "The first challenge page is ready. Opening the classroom now."
   },
   "settings": {
     "title": "設定",

@@ -983,12 +983,7 @@
     "revisitGeneratingPage": "生成挑战页面",
     "revisitGeneratingPageDesc": "正在生成反向讲解提示页...",
     "revisitReady": "复习挑战已准备好",
-    "revisitReadyDesc": "第一张挑战页已生成，即将打开课堂。",
-    "generatingCourse": "正在生成课程",
-    "openingClassroom": "即将打开课堂...",
-    "outlineReady": "课程大纲已生成",
-    "generatingFirstPage": "首页内容生成中...",
-    "firstPageReady": "首页已就绪！正在打开课堂..."
+    "revisitReadyDesc": "第一张挑战页已生成，即将打开课堂。"
   },
   "settings": {
     "title": "设置",

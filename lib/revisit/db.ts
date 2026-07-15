@@ -16,7 +16,6 @@ import type {
   RevisitDemoSession,
   RevisitExamBlueprint,
   RevisitJudgeReport,
-  RevisitSkeletonDeck,
   StudyArtifact,
   StudyArtifactDraft,
   StudyPracticeState,
@@ -56,11 +55,14 @@ const V7_STORES = {
     '[stageId+conceptId], stageId, conceptId, origin, learnedAt, updatedAt, [stageId+origin]',
 } as const;
 
+const V8_STORES = {
+  skeletonDecks: null,
+} as const;
+
 const CLONED_TABLE_NAMES = [
   'userConceptState',
   'conceptEvidence',
   'examBlueprints',
-  'skeletonDecks',
   'revisitReports',
   'lessonProgress',
   'studyMaterials',
@@ -74,7 +76,6 @@ export class RevisitDatabase extends Dexie {
   userConceptState!: EntityTable<UserConceptState, 'conceptId'>;
   conceptEvidence!: EntityTable<ConceptEvidence, 'id'>;
   examBlueprints!: EntityTable<RevisitExamBlueprint, 'id'>;
-  skeletonDecks!: EntityTable<RevisitSkeletonDeck, 'id'>;
   revisitReports!: EntityTable<RevisitJudgeReport, 'attemptId'>;
   lessonProgress!: EntityTable<LessonProgress, 'stageId'>;
   studyMaterials!: EntityTable<LegacyStudyMaterialRecord, 'id'>;
@@ -134,6 +135,7 @@ export class RevisitDatabase extends Dexie {
     this.version(7)
       .stores(V7_STORES)
       .upgrade(async (transaction) => migrateLessonConceptDirectory(transaction));
+    this.version(8).stores(V8_STORES);
   }
 }
 
@@ -469,25 +471,6 @@ export async function getPendingAssessmentConcepts(
   );
 }
 
-export async function getLatestSkeletonDeck(
-  stageId: string,
-  blueprintId?: string,
-  scope = FORMAL_REVISIT_SCOPE,
-) {
-  const db = getRevisitDatabase(scope);
-  const records = await db.skeletonDecks.where('stageId').equals(stageId).toArray();
-  return records
-    .filter((record) => !blueprintId || record.blueprintId === blueprintId)
-    .sort((a, b) => b.generatedAt - a.generatedAt)[0];
-}
-
-export async function saveSkeletonDeck(
-  deck: RevisitSkeletonDeck,
-  scope = FORMAL_REVISIT_SCOPE,
-): Promise<void> {
-  await getRevisitDatabase(scope).skeletonDecks.put(deck);
-}
-
 export async function listStudyArtifacts(
   stageId: string,
   kind?: StudyArtifact['kind'],
@@ -705,7 +688,6 @@ export async function deleteRevisitStageData(
       await db.userConceptState.where('stageId').equals(stageId).delete();
       await db.conceptEvidence.where('stageId').equals(stageId).delete();
       await db.examBlueprints.where('stageId').equals(stageId).delete();
-      await db.skeletonDecks.where('stageId').equals(stageId).delete();
       await db.revisitReports.where('stageId').equals(stageId).delete();
       await db.lessonProgress.delete(stageId);
       await db.studyMaterials.where('stageId').equals(stageId).delete();

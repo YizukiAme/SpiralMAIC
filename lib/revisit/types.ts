@@ -48,15 +48,6 @@ export interface RevisitExamBlueprint {
   skeleton: RevisitSkeleton;
 }
 
-export interface RevisitSkeletonDeck {
-  id: string;
-  stageId: string;
-  blueprintId: string;
-  sourceHash: string;
-  generatedAt: number;
-  scenes: Scene[];
-}
-
 export interface UserConceptState {
   stageId: string;
   conceptId: string;
