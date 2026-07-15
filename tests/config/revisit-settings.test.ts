@@ -26,13 +26,13 @@ async function freshStore(persistedState?: Record<string, unknown>) {
 describe('SpiralMAIC revisit settings', () => {
   beforeEach(() => storage.clear());
 
-  it('defaults to PRD-compatible values', async () => {
+  it('defaults Spiral mode off with the real clock active', async () => {
     const store = await freshStore();
     expect(store.getState()).toMatchObject({
-      reverseChallengeEnabled: true,
+      reverseChallengeEnabled: false,
       stableSuccessesRequired: 2,
-      forgettingSpeedMultiplier: 1,
-      demoAcceleratedClockEnabled: false,
+      activeRevisitDemoSessionId: null,
+      revisitVirtualClockOffsetHours: 0,
       demoGateSkipEnabled: false,
     });
   });
@@ -43,15 +43,15 @@ describe('SpiralMAIC revisit settings', () => {
 
     state.setReverseChallengeEnabled(false);
     state.setStableSuccessesRequired(0);
-    state.setForgettingSpeedMultiplier(90);
-    state.setDemoAcceleratedClockEnabled(true);
+    state.setActiveRevisitDemoSession('demo-1');
+    state.setRevisitVirtualClockOffsetHours(200);
     state.setDemoGateSkipEnabled(true);
 
     expect(store.getState()).toMatchObject({
       reverseChallengeEnabled: false,
       stableSuccessesRequired: 1,
-      forgettingSpeedMultiplier: 60,
-      demoAcceleratedClockEnabled: true,
+      activeRevisitDemoSessionId: 'demo-1',
+      revisitVirtualClockOffsetHours: 168,
       demoGateSkipEnabled: true,
     });
 
@@ -59,16 +59,30 @@ describe('SpiralMAIC revisit settings', () => {
     expect(persisted.state).toMatchObject({
       reverseChallengeEnabled: false,
       stableSuccessesRequired: 1,
+      activeRevisitDemoSessionId: 'demo-1',
+      revisitVirtualClockOffsetHours: 168,
+      demoGateSkipEnabled: true,
+    });
+  });
+
+  it('drops the retired global forgetting controls during settings migration', async () => {
+    const store = await freshStore({
       forgettingSpeedMultiplier: 60,
       demoAcceleratedClockEnabled: true,
-      demoGateSkipEnabled: true,
+    });
+
+    expect(store.getState()).not.toHaveProperty('forgettingSpeedMultiplier');
+    expect(store.getState()).not.toHaveProperty('demoAcceleratedClockEnabled');
+    expect(store.getState()).toMatchObject({
+      activeRevisitDemoSessionId: null,
+      revisitVirtualClockOffsetHours: 0,
     });
   });
 
   it('hydrates missing fields from defaults for older settings blobs', async () => {
     const store = await freshStore({ ttsSpeed: 1.25 });
     expect(store.getState().ttsSpeed).toBe(1.25);
-    expect(store.getState().reverseChallengeEnabled).toBe(true);
+    expect(store.getState().reverseChallengeEnabled).toBe(false);
     expect(store.getState().stableSuccessesRequired).toBe(2);
   });
 });

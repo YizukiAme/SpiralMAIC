@@ -12,7 +12,7 @@
  */
 
 import type { StatelessEvent, DirectorState } from '@/lib/types/chat';
-import type { ThinkingConfig } from '@/lib/types/provider';
+import type { ModelServiceTier, ThinkingConfig } from '@/lib/types/provider';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('AgentLoop');
@@ -58,6 +58,9 @@ export interface AgentLoopRequest {
   model?: string;
   providerType?: string;
   thinkingConfig?: ThinkingConfig;
+  serviceTier?: ModelServiceTier;
+  /** Optional state accumulated by a caller across separate user turns. */
+  initialDirectorState?: DirectorState;
 }
 
 /** Per-iteration outcome extracted from the done event */
@@ -127,7 +130,7 @@ export async function runAgentLoop(
   callbacks: AgentLoopCallbacks,
   signal: AbortSignal,
 ): Promise<AgentLoopOutcome> {
-  let directorState: DirectorState | undefined = undefined;
+  let directorState: DirectorState | undefined = request.initialDirectorState;
   let turnCount = 0;
   let consecutiveEmptyTurns = 0;
 
@@ -153,6 +156,7 @@ export async function runAgentLoop(
       model: request.model,
       providerType: request.providerType,
       thinkingConfig: request.thinkingConfig,
+      serviceTier: request.serviceTier,
     };
 
     // Fetch

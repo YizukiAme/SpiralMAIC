@@ -44,6 +44,7 @@ import { findModelById } from './model-aliases';
 import { getDefaultThinkingConfig, getThinkingMode, pickThinkingBudget } from './thinking-config';
 import { createLogger } from '@/lib/logger';
 import { normalizeAzureBaseUrl } from './azure';
+import { CODEX_RESPONSES_BASE_URL, wrapCodexLanguageModel } from './codex-model';
 // NOTE: Do NOT import thinking-context.ts here — it uses node:async_hooks
 // which is server-only, and this file is also used on the client via
 // settings.ts. The thinking context is read from globalThis instead
@@ -55,7 +56,12 @@ const log = createLogger('AIProviders');
 export type { ProviderId, ProviderConfig, ModelInfo, ModelConfig };
 
 /** Provider IDs whose logos are monochrome-dark and need `dark:invert` in dark mode */
-export const MONO_LOGO_PROVIDERS: ReadonlySet<string> = new Set(['openai', 'openrouter', 'ollama']);
+export const MONO_LOGO_PROVIDERS: ReadonlySet<string> = new Set([
+  'openai',
+  'openai-codex',
+  'openrouter',
+  'ollama',
+]);
 
 /**
  * Provider registry
@@ -210,6 +216,41 @@ export const PROVIDERS: Record<ProviderId, ProviderConfig> = {
     icon: '/logos/azure.svg',
     // Azure requests use user-defined deployment names rather than model IDs.
     models: [],
+  },
+
+  'openai-codex': {
+    id: 'openai-codex',
+    name: 'Codex',
+    type: 'openai',
+    requiresApiKey: false,
+    credentialMode: 'oauth',
+    icon: '/logos/openai.svg',
+    models: [
+      {
+        id: 'gpt-5.6-sol',
+        name: 'GPT-5.6 Sol',
+        contextWindow: 272000,
+        capabilities: { streaming: true, tools: true, vision: true },
+        source: 'probed',
+      },
+      {
+        id: 'gpt-5.6-terra',
+        name: 'GPT-5.6 Terra',
+        contextWindow: 272000,
+        capabilities: { streaming: true, tools: true, vision: true },
+        source: 'probed',
+      },
+      {
+        id: 'gpt-5.6-luna',
+        name: 'GPT-5.6 Luna',
+        contextWindow: 272000,
+        capabilities: { streaming: true, tools: true, vision: true },
+        source: 'probed',
+      },
+      { id: 'gpt-5.5', name: 'GPT-5.5', source: 'probed' },
+      { id: 'gpt-5.4', name: 'GPT-5.4', source: 'probed' },
+      { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini', source: 'probed' },
+    ],
   },
 
   anthropic: {
@@ -1279,6 +1320,58 @@ export const PROVIDERS: Record<ProviderId, ProviderConfig> = {
 
 applyModelMetadata(PROVIDERS);
 
+function cloneModelCapabilities(
+  capabilities: ModelInfo['capabilities'],
+): ModelInfo['capabilities'] {
+  if (!capabilities) return undefined;
+  const thinking = capabilities.thinking;
+  return {
+    ...capabilities,
+    ...(thinking
+      ? {
+          thinking: {
+            ...thinking,
+            ...(thinking.effortValues ? { effortValues: [...thinking.effortValues] } : {}),
+            ...(thinking.levelValues ? { levelValues: [...thinking.levelValues] } : {}),
+            ...(thinking.budgetRange ? { budgetRange: { ...thinking.budgetRange } } : {}),
+            ...(thinking.anthropicThinking
+              ? {
+                  anthropicThinking: {
+                    ...thinking.anthropicThinking,
+                    ...(thinking.anthropicThinking.budgetByEffort
+                      ? { budgetByEffort: { ...thinking.anthropicThinking.budgetByEffort } }
+                      : {}),
+                  },
+                }
+              : {}),
+          },
+        }
+      : {}),
+  };
+}
+
+// Codex discovery exposes only IDs and display names. Seed its fallback
+// registry from the canonical OpenAI catalog so settings sync preserves the
+// same final context/output limits and deeply-isolated capabilities for shared
+// model IDs.
+const openAIModelsById = new Map(PROVIDERS.openai.models.map((model) => [model.id, model]));
+PROVIDERS['openai-codex'].models = PROVIDERS['openai-codex'].models.map((fallback) => {
+  const catalogModel = openAIModelsById.get(fallback.id);
+  if (!catalogModel) return fallback;
+  const catalogCapabilities = cloneModelCapabilities(catalogModel.capabilities);
+  const fallbackCapabilities = cloneModelCapabilities(fallback.capabilities);
+  return {
+    ...catalogModel,
+    ...fallback,
+    capabilities: {
+      ...catalogCapabilities,
+      ...fallbackCapabilities,
+      thinking: fallbackCapabilities?.thinking ?? catalogCapabilities?.thinking,
+    },
+    source: 'probed',
+  };
+});
+
 /**
  * Get provider config (from built-in or unified config in localStorage)
  */
@@ -1303,6 +1396,7 @@ function getProviderConfig(providerId: ProviderId): ProviderConfig | null {
             defaultBaseUrl: providerSettings.defaultBaseUrl,
             icon: providerSettings.icon,
             requiresApiKey: providerSettings.requiresApiKey,
+            credentialMode: providerSettings.credentialMode,
             models: providerSettings.models,
           };
         }
@@ -1480,6 +1574,7 @@ function normalizeMiniMaxAnthropicBaseUrl(
 }
 
 function shouldUseOpenAIResponsesApi(providerId: ProviderId, modelId: string): boolean {
+  if (providerId === 'openai-codex') return true;
   if (providerId !== 'openai') return false;
 
   return (
@@ -1504,6 +1599,10 @@ export function getModel(config: ModelConfig): ModelWithInfo {
   let providerType = config.providerType;
   const provider = getProviderConfig(config.providerId);
   const requiresApiKey = provider?.requiresApiKey ?? true;
+
+  if (provider?.credentialMode === 'oauth' && !config.customFetch) {
+    throw new Error(`OAuth provider ${config.providerId} requires a server transport`);
+  }
 
   if (!providerType) {
     if (provider) {
@@ -1540,16 +1639,19 @@ export function getModel(config: ModelConfig): ModelWithInfo {
     }
 
     case 'openai': {
+      const isCodex = config.providerId === 'openai-codex';
+      const isNativeOpenAI = config.providerId === 'openai' || isCodex;
       const openaiOptions: Parameters<typeof createOpenAI>[0] = {
-        apiKey: effectiveApiKey,
-        baseURL: effectiveBaseUrl,
+        apiKey: isCodex ? 'openmaic-codex-oauth' : effectiveApiKey,
+        baseURL: isCodex ? CODEX_RESPONSES_BASE_URL : effectiveBaseUrl,
       };
+      if (isCodex) openaiOptions.fetch = config.customFetch;
 
       // For OpenAI-compatible providers (not native OpenAI), add a fetch
       // wrapper that injects vendor-specific thinking params into the HTTP
       // body. The thinking config is read from AsyncLocalStorage, set by
       // callLLM / streamLLM at call time.
-      if (config.providerId !== 'openai') {
+      if (!isNativeOpenAI) {
         const providerId = config.providerId;
         const compatFetch = async (url: RequestInfo | URL, init?: RequestInit) => {
           // Read thinking config from globalThis (set by thinking-context.ts)
@@ -1645,12 +1747,13 @@ export function getModel(config: ModelConfig): ModelWithInfo {
       // Split it into first-class reasoning parts so the agent stream and UI can
       // show a thinking panel and the answer text stays clean. Native OpenAI
       // handles reasoning itself, so it is excluded.
-      if (config.providerId !== 'openai') {
+      if (!isNativeOpenAI) {
         model = wrapLanguageModel({
           model,
           middleware: extractReasoningMiddleware({ tagName: 'think' }),
         });
       }
+      if (isCodex) model = wrapCodexLanguageModel(model, { serviceTier: config.serviceTier });
       break;
     }
 

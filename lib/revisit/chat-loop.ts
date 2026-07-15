@@ -6,6 +6,7 @@ import {
   type AgentLoopIterationResult,
 } from '@/lib/chat/agent-loop';
 import {
+  isRevisitStudentQuestion,
   roleForRevisitAgent,
   type RevisitAgentIds,
   type RevisitMessage,
@@ -13,7 +14,7 @@ import {
 import type { RevisitGateDecision } from '@/lib/revisit/types';
 import type { StatelessChatRequest, StatelessEvent } from '@/lib/types/chat';
 
-export const REVISIT_MAX_AGENT_TURNS_PER_TEACHER_TURN = 2;
+export const REVISIT_MAX_AGENT_TURNS_PER_TEACHER_TURN = 1;
 
 export interface RevisitAgentLoopCallbacks {
   onAgentMessageStart?: (message: RevisitMessage) => void;
@@ -71,12 +72,13 @@ export async function runRevisitAgentLoop({
   let lastGate: RevisitGateDecision | null = null;
   let streamError: Error | null = null;
   let agentTurnsThisTeacherTurn = 0;
+  let currentIterationMessages = new Map<string, RevisitMessage>();
 
   const createBuffer = () => {
     const buffer = new StreamBuffer(
       {
         onAgentStart(data) {
-          callbacks.onAgentMessageStart?.({
+          const message: RevisitMessage = {
             id: data.messageId,
             role: roleForRevisitAgent(data.agentId, agentIds),
             agentId: data.agentId,
@@ -84,12 +86,20 @@ export async function runRevisitAgentLoop({
             agentAvatar: data.avatar,
             text: '',
             createdAt: Date.now(),
+          };
+          currentIterationMessages.set(message.id, message);
+          callbacks.onAgentMessageStart?.({
+            ...message,
           });
         },
         onAgentEnd(data) {
           callbacks.onAgentMessageEnd?.(data.messageId, data.agentId);
         },
         onTextReveal(messageId, _partId, revealedText) {
+          const message = currentIterationMessages.get(messageId);
+          if (message) {
+            currentIterationMessages.set(messageId, { ...message, text: revealedText });
+          }
           callbacks.onAgentMessageText?.(messageId, revealedText);
         },
         onActionReady() {
@@ -143,70 +153,84 @@ export async function runRevisitAgentLoop({
     return currentBuffer;
   };
 
-  const outcome = await runAgentLoop(
-    {
-      config: request.config,
-      userProfile: request.userProfile,
-      apiKey: request.apiKey,
-      baseUrl: request.baseUrl,
-      model: request.model,
-      providerType: request.providerType,
-      thinkingConfig: request.thinkingConfig,
-    },
-    {
-      getStoreState: () => getStoreState?.() ?? request.storeState,
-      getMessages: () => getMessages?.() ?? request.messages,
-      fetchChat,
-      onEvent: (event) => {
-        processRevisitLoopEvent(event, ensureBuffer(), {
-          getCurrentMessageId: () => currentMessageId,
-          setCurrentMessageId: (messageId) => {
-            currentMessageId = messageId;
+  const outcome = await (async () => {
+    try {
+      return await runAgentLoop(
+        {
+          config: request.config,
+          userProfile: request.userProfile,
+          apiKey: request.apiKey,
+          baseUrl: request.baseUrl,
+          model: request.model,
+          providerType: request.providerType,
+          thinkingConfig: request.thinkingConfig,
+          serviceTier: request.serviceTier,
+          initialDirectorState: request.directorState,
+        },
+        {
+          getStoreState: () => getStoreState?.() ?? request.storeState,
+          getMessages: () => getMessages?.() ?? request.messages,
+          fetchChat,
+          onEvent: (event) => {
+            processRevisitLoopEvent(event, ensureBuffer(), {
+              getCurrentMessageId: () => currentMessageId,
+              setCurrentMessageId: (messageId) => {
+                currentMessageId = messageId;
+              },
+              setGate: (gate) => {
+                pendingGate = gate;
+              },
+              setError: (error) => {
+                streamError = error;
+              },
+            });
           },
-          setGate: (gate) => {
-            pendingGate = gate;
+          onIterationEnd: async () => {
+            if (!currentBuffer) return null;
+            await currentBuffer.waitUntilDrained();
+            currentBuffer = null;
+
+            if (streamError) {
+              throw streamError;
+            }
+
+            if (pendingGate) {
+              lastGate = pendingGate;
+              callbacks.onGate?.(pendingGate);
+              pendingGate = null;
+            }
+
+            const result = doneData;
+            doneData = null;
+            currentMessageId = null;
+            const iterationHadStudentQuestion = Array.from(currentIterationMessages.values()).some(
+              (message) => message.role === 'student' && isRevisitStudentQuestion(message.text),
+            );
+            currentIterationMessages = new Map();
+            if (result && result.totalAgents > 0) {
+              agentTurnsThisTeacherTurn += result.totalAgents;
+              if (!result.cueUserReceived && iterationHadStudentQuestion) {
+                callbacks.onCueUser?.();
+                return { ...result, cueUserReceived: true };
+              }
+              if (
+                !result.cueUserReceived &&
+                agentTurnsThisTeacherTurn >= REVISIT_MAX_AGENT_TURNS_PER_TEACHER_TURN
+              ) {
+                callbacks.onCueUser?.();
+                return { ...result, cueUserReceived: true };
+              }
+            }
+            return result;
           },
-          setError: (error) => {
-            streamError = error;
-          },
-        });
-      },
-      onIterationEnd: async () => {
-        if (!currentBuffer) return null;
-        await currentBuffer.waitUntilDrained();
-        currentBuffer = null;
-
-        if (streamError) {
-          throw streamError;
-        }
-
-        if (pendingGate) {
-          lastGate = pendingGate;
-          callbacks.onGate?.(pendingGate);
-          pendingGate = null;
-        }
-
-        const result = doneData;
-        doneData = null;
-        currentMessageId = null;
-        if (result && result.totalAgents > 0) {
-          agentTurnsThisTeacherTurn += result.totalAgents;
-          if (
-            !result.cueUserReceived &&
-            agentTurnsThisTeacherTurn >= REVISIT_MAX_AGENT_TURNS_PER_TEACHER_TURN
-          ) {
-            callbacks.onCueUser?.();
-            return { ...result, cueUserReceived: true };
-          }
-        }
-        return result;
-      },
-    },
-    loopSignal,
-  );
-
-  const leftoverBuffer = currentBuffer as StreamBuffer | null;
-  leftoverBuffer?.dispose();
+        },
+        loopSignal,
+      );
+    } finally {
+      const leftoverBuffer = currentBuffer as StreamBuffer | null;
+      leftoverBuffer?.dispose();
+    }
+  })();
 
   return {
     outcome,

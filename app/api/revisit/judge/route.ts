@@ -16,6 +16,7 @@ interface JudgeRequest {
   transcript: unknown;
   pageReports: unknown;
   languageDirective?: string;
+  completedAt?: number;
 }
 
 export async function POST(req: NextRequest) {
@@ -37,6 +38,7 @@ export async function POST(req: NextRequest) {
         model,
         system: prompt.system,
         prompt: prompt.user,
+        abortSignal: req.signal,
       },
       'revisit-judge',
       undefined,
@@ -46,6 +48,8 @@ export async function POST(req: NextRequest) {
       text: result.text,
       attemptId: body.attemptId,
       stageId: body.stageId,
+      blueprint: body.blueprint,
+      completedAt: body.completedAt,
     });
 
     return apiSuccess({ report });

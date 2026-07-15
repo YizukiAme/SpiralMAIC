@@ -4,6 +4,7 @@ import { callLLM } from '@/lib/ai/llm';
 import { apiError, apiSuccess } from '@/lib/server/api-response';
 import { resolveModelFromRequest } from '@/lib/server/resolve-model';
 import type { Scene, Stage } from '@/lib/types/stage';
+import type { RevisitAdaptiveContext } from '@/lib/revisit/types';
 import { buildBlueprintPrompt, parseBlueprintResponse } from '@/lib/revisit/prompt-builders';
 import { createLogger } from '@/lib/logger';
 
@@ -13,6 +14,7 @@ interface BlueprintRequest {
   stage: Stage;
   scenes: Scene[];
   targetProbeCount?: number;
+  adaptiveContext?: RevisitAdaptiveContext;
 }
 
 export async function POST(req: NextRequest) {
@@ -27,21 +29,39 @@ export async function POST(req: NextRequest) {
       stage: body.stage,
       scenes: body.scenes,
       targetProbeCount: body.targetProbeCount,
+      adaptiveContext: body.adaptiveContext,
     });
     const result = await callLLM(
       {
         model,
         system: prompt.system,
         prompt: prompt.user,
+        abortSignal: req.signal,
       },
       'revisit-blueprint',
       undefined,
       thinkingConfig,
     );
+    const knownConcepts = [
+      ...(body.adaptiveContext?.conceptStates ?? []).map(({ conceptId, label }) => ({
+        id: conceptId,
+        label,
+      })),
+      ...(body.adaptiveContext?.pendingConcepts ?? []).map(({ conceptId, label }) => ({
+        id: conceptId,
+        label,
+      })),
+    ];
+    const canonicalConcepts = Array.from(
+      new Map(knownConcepts.map((concept) => [concept.id, concept])).values(),
+    );
     const blueprint = parseBlueprintResponse({
       text: result.text,
       stageId: body.stage.id,
       sourceHash: prompt.sourceHash,
+      maxCuesPerPage: prompt.maxCuesPerPage,
+      canonicalConcepts,
+      requiredConceptIds: body.adaptiveContext?.pendingConcepts?.map(({ conceptId }) => conceptId),
     });
 
     return apiSuccess({ blueprint });

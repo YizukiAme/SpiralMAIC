@@ -9,7 +9,7 @@ import type { ProviderId } from '@/lib/ai/providers';
 import type { ProvidersConfig } from '@/lib/types/settings';
 import { PROVIDERS } from '@/lib/ai/providers';
 import { findModelById, getCanonicalModelId } from '@/lib/ai/model-aliases';
-import type { ThinkingConfig } from '@/lib/types/provider';
+import type { ModelServiceTier, ThinkingConfig } from '@/lib/types/provider';
 import { getThinkingConfigKey, supportsConfigurableThinking } from '@/lib/ai/thinking-config';
 import type { TTSProviderId, ASRProviderId, BuiltInTTSProviderId } from '@/lib/audio/types';
 import type { AgentVoiceOverride } from '@/lib/audio/voice-resolver';
@@ -61,6 +61,7 @@ export interface SettingsState {
   providerId: ProviderId;
   modelId: string;
   thinkingConfigs: Record<string, ThinkingConfig>;
+  codexFastMode: boolean;
 
   // Provider configurations (unified JSON storage)
   providersConfig: ProvidersConfig;
@@ -171,8 +172,8 @@ export interface SettingsState {
   // SpiralMAIC revisit settings
   reverseChallengeEnabled: boolean;
   stableSuccessesRequired: number;
-  forgettingSpeedMultiplier: number;
-  demoAcceleratedClockEnabled: boolean;
+  activeRevisitDemoSessionId: string | null;
+  revisitVirtualClockOffsetHours: number;
   demoGateSkipEnabled: boolean;
 
   // Web Search settings
@@ -232,6 +233,7 @@ export interface SettingsState {
 
   // Actions
   setModel: (providerId: ProviderId, modelId: string) => void;
+  setCodexFastMode: (enabled: boolean) => void;
   setThinkingConfig: (
     providerId: ProviderId,
     modelId: string,
@@ -356,8 +358,8 @@ export interface SettingsState {
   // SpiralMAIC revisit actions
   setReverseChallengeEnabled: (enabled: boolean) => void;
   setStableSuccessesRequired: (count: number) => void;
-  setForgettingSpeedMultiplier: (multiplier: number) => void;
-  setDemoAcceleratedClockEnabled: (enabled: boolean) => void;
+  setActiveRevisitDemoSession: (sessionId: string | null) => void;
+  setRevisitVirtualClockOffsetHours: (hours: number) => void;
   setDemoGateSkipEnabled: (enabled: boolean) => void;
 
   // Web Search actions
@@ -386,6 +388,7 @@ const getDefaultProvidersConfig = (): ProvidersConfig => {
       defaultBaseUrl: provider.defaultBaseUrl,
       icon: provider.icon,
       requiresApiKey: provider.requiresApiKey,
+      credentialMode: provider.credentialMode,
       isBuiltIn: true,
     };
   });
@@ -707,6 +710,21 @@ function ensureBuiltInProviders(state: Partial<SettingsState>): void {
       const provider = PROVIDERS[providerId];
       const existing = state.providersConfig![providerId];
 
+      if (provider.credentialMode === 'oauth') {
+        // OAuth connection state and dynamic models are server truth. Never
+        // revive a persisted managed flag, fake browser credentials, or a
+        // previous account's discovered model IDs during rehydrate.
+        state.providersConfig![providerId] = {
+          ...defaultConfig[providerId],
+          apiKey: '',
+          baseUrl: '',
+          models: [...provider.models],
+          isServerConfigured: false,
+          serverModels: undefined,
+        };
+        return;
+      }
+
       const builtInModelIds = new Set(provider.models.map((m) => m.id));
       const customModels = (existing.models || []).filter((m) => !builtInModelIds.has(m.id));
       const mergedModels = [...provider.models, ...customModels];
@@ -719,10 +737,25 @@ function ensureBuiltInProviders(state: Partial<SettingsState>): void {
         defaultBaseUrl: existing.defaultBaseUrl || provider.defaultBaseUrl,
         icon: provider.icon || existing.icon,
         requiresApiKey: existing.requiresApiKey ?? provider.requiresApiKey,
+        credentialMode: provider.credentialMode ?? existing.credentialMode,
         isBuiltIn: existing.isBuiltIn ?? true,
       };
     }
   });
+}
+
+function distrustPersistedOAuthSelection(state: Partial<SettingsState>): void {
+  if (!state.providersConfig || !state.providerId) return;
+  const selected = state.providersConfig[state.providerId];
+  if (selected?.credentialMode !== 'oauth' || selected.isServerConfigured) return;
+
+  const resolved = resolveLLMSelection(
+    state.providersConfig,
+    state.providerId,
+    state.modelId ?? '',
+  );
+  state.providerId = resolved.providerId;
+  state.modelId = resolved.modelId;
 }
 
 /**
@@ -928,6 +961,7 @@ export const useSettingsStore = create<SettingsState>()(
           migratedData?.thinkingConfigs || {},
           initialProvidersConfig,
         ),
+        codexFastMode: false,
         providersConfig: initialProvidersConfig,
         ttsModel: migratedData?.ttsModel || 'openai-tts',
         selectedAgentIds: migratedData?.selectedAgentIds || ['default-1', 'default-2', 'default-3'],
@@ -967,10 +1001,10 @@ export const useSettingsStore = create<SettingsState>()(
         reviewOutlineEnabled: false,
 
         // SpiralMAIC revisit defaults
-        reverseChallengeEnabled: true,
+        reverseChallengeEnabled: false,
         stableSuccessesRequired: 2,
-        forgettingSpeedMultiplier: 1,
-        demoAcceleratedClockEnabled: false,
+        activeRevisitDemoSessionId: null,
+        revisitVirtualClockOffsetHours: 0,
         demoGateSkipEnabled: false,
 
         // TTS is OFF by default; auto-enabled on first server-sync when a TTS
@@ -989,6 +1023,8 @@ export const useSettingsStore = create<SettingsState>()(
 
         // Actions
         setModel: (providerId, modelId) => set({ providerId, modelId }),
+
+        setCodexFastMode: (enabled) => set({ codexFastMode: enabled }),
 
         setThinkingConfig: (providerId, modelId, config) =>
           set((state) => {
@@ -1314,14 +1350,18 @@ export const useSettingsStore = create<SettingsState>()(
         setReverseChallengeEnabled: (enabled) => set({ reverseChallengeEnabled: enabled }),
         setStableSuccessesRequired: (count) =>
           set({ stableSuccessesRequired: Math.max(1, Math.min(12, Math.round(count))) }),
-        setForgettingSpeedMultiplier: (multiplier) =>
+        setActiveRevisitDemoSession: (sessionId) =>
           set({
-            forgettingSpeedMultiplier: Math.max(
-              0.1,
-              Math.min(60, Number.isFinite(multiplier) ? multiplier : 1),
+            activeRevisitDemoSessionId: sessionId,
+            revisitVirtualClockOffsetHours: sessionId ? get().revisitVirtualClockOffsetHours : 0,
+          }),
+        setRevisitVirtualClockOffsetHours: (hours) =>
+          set({
+            revisitVirtualClockOffsetHours: Math.max(
+              0,
+              Math.min(168, Number.isFinite(hours) ? Math.round(hours) : 0),
             ),
           }),
-        setDemoAcceleratedClockEnabled: (enabled) => set({ demoAcceleratedClockEnabled: enabled }),
         setDemoGateSkipEnabled: (enabled) => set({ demoGateSkipEnabled: enabled }),
         setTTSEnabled: (enabled) => set({ ttsEnabled: enabled }),
         setASREnabled: (enabled) => set({ asrEnabled: enabled }),
@@ -1432,7 +1472,7 @@ export const useSettingsStore = create<SettingsState>()(
             // Managed providers expose only their allowed model list (LLM/image)
             // and presence (the "managed" flag) — never a base URL.
             const data = (await res.json()) as {
-              providers: Record<string, { models?: string[] }>;
+              providers: Record<string, { models?: string[]; fastModels?: string[] }>;
               // TTS additionally carries an optional `disabled` flag for
               // admin/server-level force-off (#665).
               tts: Record<string, { disabled?: boolean }>;
@@ -1451,8 +1491,22 @@ export const useSettingsStore = create<SettingsState>()(
               for (const pid of Object.keys(newProvidersConfig)) {
                 const key = pid as ProviderId;
                 if (newProvidersConfig[key]) {
+                  const registryProvider = PROVIDERS[key];
+                  const isOAuth = registryProvider?.credentialMode === 'oauth';
                   newProvidersConfig[key] = {
                     ...newProvidersConfig[key],
+                    ...(isOAuth
+                      ? {
+                          apiKey: '',
+                          baseUrl: '',
+                          models: [...registryProvider.models],
+                          name: registryProvider.name,
+                          type: registryProvider.type,
+                          icon: registryProvider.icon,
+                          requiresApiKey: registryProvider.requiresApiKey,
+                          credentialMode: registryProvider.credentialMode,
+                        }
+                      : {}),
                     isServerConfigured: false,
                     serverModels: undefined,
                   };
@@ -1463,12 +1517,16 @@ export const useSettingsStore = create<SettingsState>()(
                 const key = pid as ProviderId;
                 if (newProvidersConfig[key]) {
                   const currentModels = newProvidersConfig[key].models;
+                  const catalogModels =
+                    key === 'openai-codex'
+                      ? [...(PROVIDERS[key]?.models ?? []), ...PROVIDERS.openai.models]
+                      : PROVIDERS[key]?.models;
                   // When server specifies allowed models, filter the models list
                   // while preserving custom IDs from env/YAML in server order.
                   const filteredModels = info.models?.length
                     ? info.models.map((id) => {
                         const currentModel = findModelById(key, currentModels, id);
-                        const builtInModel = findModelById(key, PROVIDERS[key]?.models, id);
+                        const builtInModel = findModelById(key, catalogModels, id);
                         const model =
                           currentModel && builtInModel
                             ? {
@@ -1487,11 +1545,34 @@ export const useSettingsStore = create<SettingsState>()(
                         return model ? { ...model, id, name: model.name || id } : { id, name: id };
                       })
                     : currentModels;
+                  const fastModelIds = new Set(info.fastModels ?? []);
+                  const models =
+                    key === 'openai-codex'
+                      ? filteredModels.map((model) => {
+                          if (fastModelIds.has(model.id)) {
+                            return {
+                              ...model,
+                              capabilities: {
+                                ...model.capabilities,
+                                serviceTiers: ['priority'] as ModelServiceTier[],
+                              },
+                            };
+                          }
+                          if (!model.capabilities?.serviceTiers) return model;
+                          const { serviceTiers: _serviceTiers, ...capabilities } =
+                            model.capabilities;
+                          return {
+                            ...model,
+                            capabilities:
+                              Object.keys(capabilities).length > 0 ? capabilities : undefined,
+                          };
+                        })
+                      : filteredModels;
                   newProvidersConfig[key] = {
                     ...newProvidersConfig[key],
                     isServerConfigured: true,
                     serverModels: info.models,
-                    models: filteredModels,
+                    models,
                   };
                 }
               }
@@ -1644,7 +1725,16 @@ export const useSettingsStore = create<SettingsState>()(
                   .map(([id]) => id as T),
               ];
 
-              const llmFallback = buildFallback<ProviderId>(newProvidersConfig);
+              const llmFallback = [
+                ...Object.entries(newProvidersConfig)
+                  .filter(([, config]) => config.isServerConfigured)
+                  .filter(([, config]) => isLLMProviderConfigured(config))
+                  .map(([id]) => id as ProviderId),
+                ...Object.entries(newProvidersConfig)
+                  .filter(([, config]) => !config.isServerConfigured)
+                  .filter(([, config]) => isLLMProviderConfigured(config))
+                  .map(([id]) => id as ProviderId),
+              ];
               const ttsFallback = buildFallback<TTSProviderId>(newTTSConfig);
               const asrFallback = buildFallback<ASRProviderId>(newASRConfig);
               const pdfFallback = buildFallback<PDFProviderId>(newPDFConfig);
@@ -1911,7 +2001,7 @@ export const useSettingsStore = create<SettingsState>()(
     },
     {
       name: 'settings-storage',
-      version: 4,
+      version: 5,
       // Migrate persisted state
       migrate: (persistedState: unknown, version: number) => {
         const state = persistedState as Partial<SettingsState>;
@@ -1948,7 +2038,11 @@ export const useSettingsStore = create<SettingsState>()(
         // Add default audio config if missing
         if (!state.ttsProvidersConfig || !state.asrProvidersConfig) {
           const defaultAudioConfig = getDefaultAudioConfig();
-          Object.assign(state, defaultAudioConfig);
+          for (const [key, value] of Object.entries(defaultAudioConfig)) {
+            if ((state as Record<string, unknown>)[key] === undefined) {
+              (state as Record<string, unknown>)[key] = value;
+            }
+          }
         }
         ensureBuiltInAudioProviders(state);
         ensureBuiltInWebSearchProviders(state);
@@ -2016,16 +2110,18 @@ export const useSettingsStore = create<SettingsState>()(
           state.reviewOutlineEnabled = false;
         }
         if ((state as Record<string, unknown>).reverseChallengeEnabled === undefined) {
-          (state as Record<string, unknown>).reverseChallengeEnabled = true;
+          (state as Record<string, unknown>).reverseChallengeEnabled = false;
         }
         if ((state as Record<string, unknown>).stableSuccessesRequired === undefined) {
           (state as Record<string, unknown>).stableSuccessesRequired = 2;
         }
-        if ((state as Record<string, unknown>).forgettingSpeedMultiplier === undefined) {
-          (state as Record<string, unknown>).forgettingSpeedMultiplier = 1;
+        delete (state as Record<string, unknown>).forgettingSpeedMultiplier;
+        delete (state as Record<string, unknown>).demoAcceleratedClockEnabled;
+        if ((state as Record<string, unknown>).activeRevisitDemoSessionId === undefined) {
+          (state as Record<string, unknown>).activeRevisitDemoSessionId = null;
         }
-        if ((state as Record<string, unknown>).demoAcceleratedClockEnabled === undefined) {
-          (state as Record<string, unknown>).demoAcceleratedClockEnabled = false;
+        if ((state as Record<string, unknown>).revisitVirtualClockOffsetHours === undefined) {
+          (state as Record<string, unknown>).revisitVirtualClockOffsetHours = 0;
         }
         if ((state as Record<string, unknown>).demoGateSkipEnabled === undefined) {
           (state as Record<string, unknown>).demoGateSkipEnabled = false;
@@ -2131,6 +2227,7 @@ export const useSettingsStore = create<SettingsState>()(
         ensureValidProviderSelections(state);
         ensureBuiltInAudioProviders(state);
         ensureBuiltInWebSearchProviders(state);
+        distrustPersistedOAuthSelection(state);
         state.thinkingConfigs = pruneThinkingConfigs(state.thinkingConfigs, state.providersConfig);
 
         return state;
@@ -2144,6 +2241,8 @@ export const useSettingsStore = create<SettingsState>()(
         const persisted = { ...(persistedState as object) } as Record<string, unknown>;
         delete persisted.editInsertToolbarCollapsed;
         const merged = { ...currentState, ...persisted };
+        delete (merged as Record<string, unknown>).forgettingSpeedMultiplier;
+        delete (merged as Record<string, unknown>).demoAcceleratedClockEnabled;
         ensureBuiltInProviders(merged as Partial<SettingsState>);
         promoteLegacyCustomProviderBaseUrls(merged as Partial<SettingsState>);
         ensureBuiltInAudioProviders(merged as Partial<SettingsState>);
@@ -2154,6 +2253,7 @@ export const useSettingsStore = create<SettingsState>()(
         ensureValidProviderSelections(merged as Partial<SettingsState>);
         stripLegacyServerBaseUrl(merged as Partial<SettingsState>);
         const typedMerged = merged as Partial<SettingsState>;
+        distrustPersistedOAuthSelection(typedMerged);
         typedMerged.thinkingConfigs = pruneThinkingConfigs(
           typedMerged.thinkingConfigs,
           typedMerged.providersConfig,

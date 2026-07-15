@@ -93,6 +93,98 @@ describe('revisit director decision fallback', () => {
     });
   });
 
+  test('revisit pass rejects an assistant selection and routes to a student', () => {
+    const resolved = resolveDirectorDecisionForAvailableAgents({
+      decision: {
+        nextAgentId: 'assistant-1',
+        shouldEnd: false,
+        revisitGate: { status: 'pass', pageIndex: 0, reason: 'covered' },
+      },
+      agents: [studentLow, studentHigh, assistant],
+      revisitMode: true,
+    });
+
+    expect(resolved).toMatchObject({
+      nextAgentId: 'student-high',
+      shouldEnd: false,
+      cueUser: false,
+      fallbackUsed: true,
+    });
+  });
+
+  test('revisit rescue rejects a student selection and routes to the assistant', () => {
+    const resolved = resolveDirectorDecisionForAvailableAgents({
+      decision: {
+        nextAgentId: 'student-high',
+        shouldEnd: false,
+        revisitGate: { status: 'rescue', pageIndex: 0, reason: 'stuck' },
+      },
+      agents: [studentLow, studentHigh, assistant],
+      revisitMode: true,
+    });
+
+    expect(resolved).toMatchObject({
+      nextAgentId: 'assistant-1',
+      shouldEnd: false,
+      cueUser: false,
+      fallbackUsed: true,
+    });
+  });
+
+  test('missing gate uses the rescue fallback directive once the probe budget is exhausted', () => {
+    const resolved = resolveDirectorDecisionForAvailableAgents({
+      decision: { nextAgentId: 'student-high', shouldEnd: false },
+      agents: [studentLow, studentHigh, assistant],
+      revisitMode: true,
+      revisitFallbackDirective: 'rescue',
+    });
+
+    expect(resolved).toMatchObject({
+      nextAgentId: 'assistant-1',
+      shouldEnd: false,
+      cueUser: false,
+      fallbackUsed: true,
+    });
+  });
+
+  test('rescue never substitutes a student when no assistant is available', () => {
+    const resolved = resolveDirectorDecisionForAvailableAgents({
+      decision: {
+        nextAgentId: 'student-high',
+        shouldEnd: false,
+        revisitGate: { status: 'rescue', pageIndex: 0, reason: 'stuck' },
+      },
+      agents: [studentLow, studentHigh],
+      revisitMode: true,
+    });
+
+    expect(resolved).toEqual({
+      nextAgentId: null,
+      shouldEnd: true,
+      cueUser: false,
+      fallbackUsed: false,
+    });
+  });
+
+  test('pass never substitutes an assistant when no student is available', () => {
+    const resolved = resolveDirectorDecisionForAvailableAgents({
+      decision: {
+        nextAgentId: 'assistant-1',
+        shouldEnd: false,
+        revisitGate: { status: 'pass', pageIndex: 0, reason: 'covered' },
+      },
+      agents: [assistant],
+      revisitMode: true,
+    });
+
+    expect(resolved).toEqual({
+      nextAgentId: null,
+      shouldEnd: true,
+      cueUser: false,
+      fallbackUsed: false,
+    });
+  });
+
   test('revisit pass can end after an agent already acknowledged the teacher', () => {
     const resolved = resolveDirectorDecisionForAvailableAgents({
       decision: {

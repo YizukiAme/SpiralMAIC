@@ -142,9 +142,15 @@ function buildThinkingProviderOptions(
   config: ThinkingConfig,
 ): ProviderOptions | undefined {
   const lookupModelId = providerId ? getCanonicalModelId(providerId, modelId) : modelId;
-  const info = providerId
-    ? MODEL_THINKING_MAP.get(getModelMetadataKey(providerId, lookupModelId))
-    : UNIQUE_MODEL_THINKING_MAP.get(lookupModelId);
+  // Wrapped native models expose the SDK provider name (for example
+  // `openai.responses`) rather than OpenMAIC's registry id. Prefer the exact
+  // provider mapping, then use a model id only when that id is unique across
+  // registries. This lets native Codex-only models retain their subscription
+  // metadata without guessing when an id is shared by multiple providers.
+  const info =
+    (providerId
+      ? MODEL_THINKING_MAP.get(getModelMetadataKey(providerId, lookupModelId))
+      : undefined) ?? UNIQUE_MODEL_THINKING_MAP.get(lookupModelId);
   if (!info?.thinking) return undefined; // model has no thinking capability
   const thinking = info.thinking;
   if (thinking.control === 'none') return undefined;

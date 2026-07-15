@@ -23,6 +23,7 @@ import { PBLV2Workspace } from './pbl/v2/workspace';
 import { PBLV2Completion } from './pbl/v2/completion';
 import { rectsEqual, type LayoutRect } from './pbl/v2/host-rect';
 import { useI18n } from '@/lib/hooks/use-i18n';
+import { emitOvertimeLearningSignal } from '@/lib/overtime/learning';
 
 const IMMERSIVE_LAUNCH_DURATION_SECONDS = 0.45;
 // The one-time Hero → workspace launch gets a slower, more deliberate
@@ -47,6 +48,12 @@ export function PBLRenderer({ content, mode: _mode, sceneId }: PBLRendererProps)
 
   const { projectConfig } = content;
   const selectedRole = projectConfig?.selectedRole ?? null;
+  const legacyCompleted =
+    Boolean(projectConfig?.issueboard.issues.length) &&
+    projectConfig!.issueboard.issues.every((issue) => issue.is_done);
+  useEffect(() => {
+    if (legacyCompleted) emitOvertimeLearningSignal(sceneId, 'pbl_completed');
+  }, [legacyCompleted, sceneId]);
   const resolvedProjectV2 = useMemo(() => {
     if (content.projectV2) return content.projectV2;
     if (!projectConfig || isEmptyLegacyPBLConfig(projectConfig)) return null;
@@ -241,6 +248,12 @@ function PBLV2Container({
   useEffect(() => {
     if (changed) onProjectV2Change(runtimeProject);
   }, [changed, runtimeProject, onProjectV2Change]);
+
+  useEffect(() => {
+    if (runtimeProject.status === 'completed' || runtimeProject.uiPhase === 'completed') {
+      emitOvertimeLearningSignal(sceneId, 'pbl_completed');
+    }
+  }, [runtimeProject.status, runtimeProject.uiPhase, sceneId]);
 
   // Keep the portal host in sync with native fullscreen so the workspace
   // renders inside the fullscreened stage instead of an orphaned <body>.

@@ -36,6 +36,23 @@ export function isCurrentStageSceneLoadToken(token: StageSceneLoadToken): boolea
   return token === latestStageSceneLoadToken;
 }
 
+export type StagePersistenceScope = 'course' | 'transient-revisit';
+
+export function shouldPersistStageState(scope: StagePersistenceScope): boolean {
+  return scope === 'course';
+}
+
+export function shouldReuseStageFromMemory(
+  state: { persistenceScope: StagePersistenceScope; stageId?: string; sceneCount: number },
+  requestedStageId: string,
+): boolean {
+  return (
+    state.persistenceScope === 'course' &&
+    state.stageId === requestedStageId &&
+    state.sceneCount > 0
+  );
+}
+
 // ==================== Debounce Helper ====================
 
 /**
@@ -80,6 +97,7 @@ function mergeSceneContentForUpdate(
 interface StageState {
   // Stage info
   stage: Stage | null;
+  persistenceScope: StagePersistenceScope;
 
   // Scenes
   scenes: Scene[];
@@ -160,6 +178,7 @@ function isDeckComplete({
 const useStageStoreBase = create<StageState>()((set, get) => ({
   // Initial state
   stage: null,
+  persistenceScope: 'course',
   scenes: [],
   currentSceneId: null,
   chats: [],
@@ -178,6 +197,7 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
     claimStageSceneLoadToken();
     set((s) => ({
       stage,
+      persistenceScope: 'course',
       scenes: [],
       currentSceneId: null,
       chats: [],
@@ -320,6 +340,7 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
 
   setOutlines: (outlines) => {
     set({ outlines });
+    if (!shouldPersistStageState(get().persistenceScope)) return;
     // Persist outlines to IndexedDB. Carry generationComplete so writing
     // outlines never clobbers a previously-recorded completion flag.
     const stageId = get().stage?.id;
@@ -339,6 +360,7 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
 
   setGenerationComplete: (generationComplete) => {
     set({ generationComplete });
+    if (!shouldPersistStageState(get().persistenceScope)) return;
     // Persist alongside the outlines record so resume-on-mount can read it.
     const stageId = get().stage?.id;
     if (stageId) {
@@ -411,7 +433,11 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
   // durability (e.g. setGenerationComplete) can avoid recording state that
   // outruns the scene data.
   saveToStorage: async () => {
-    const { stage, scenes, currentSceneId, chats } = get();
+    const { stage, scenes, currentSceneId, chats, persistenceScope } = get();
+    if (!shouldPersistStageState(persistenceScope)) {
+      log.debug('Skipping storage write for transient revisit deck');
+      return false;
+    }
     if (!stage?.id) {
       log.warn('Cannot save: stage.id is required');
       return false;
@@ -440,9 +466,28 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
       // Skip IndexedDB load if the store already has this stage with scenes
       // (e.g. navigated from generation-preview with fresh in-memory data)
       const currentState = get();
-      if (currentState.stage?.id === stageId && currentState.scenes.length > 0) {
+      if (
+        shouldReuseStageFromMemory(
+          {
+            persistenceScope: currentState.persistenceScope,
+            stageId: currentState.stage?.id,
+            sceneCount: currentState.scenes.length,
+          },
+          stageId,
+        )
+      ) {
         log.info('Stage already loaded in memory, skipping IndexedDB load:', stageId);
         return;
+      }
+      if (currentState.persistenceScope === 'transient-revisit') {
+        set({
+          stage: null,
+          scenes: [],
+          currentSceneId: null,
+          chats: [],
+          outlines: [],
+          generatingOutlines: [],
+        });
       }
 
       const { loadStageData } = await import('@/lib/utils/stage-storage');
@@ -503,6 +548,7 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
 
         set({
           stage: data.stage,
+          persistenceScope: 'course',
           scenes: migrated,
           currentSceneId: data.currentSceneId,
           chats: data.chats,
@@ -525,6 +571,22 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
         });
         log.info('Loaded from storage:', stageId);
       } else {
+        // Keep the active load token valid so the classroom route can apply
+        // its same-navigation fallback after IndexedDB reports no snapshot.
+        set((s) => ({
+          stage: null,
+          persistenceScope: 'course',
+          scenes: [],
+          currentSceneId: null,
+          chats: [],
+          outlines: [],
+          generationComplete: false,
+          generationEpoch: s.generationEpoch + 1,
+          generationStatus: 'idle' as const,
+          currentGeneratingOrder: -1,
+          failedOutlines: [],
+          generatingOutlines: [],
+        }));
         log.warn('No data found for stage:', stageId);
       }
     } catch (error) {
@@ -537,6 +599,7 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
     claimStageSceneLoadToken();
     set((s) => ({
       stage: null,
+      persistenceScope: 'course',
       scenes: [],
       currentSceneId: null,
       chats: [],
@@ -570,7 +633,8 @@ const debouncedSave = debounce(() => {
  * advances (setCurrentSceneId etc.) never churn the registry mid-playback.
  */
 const debouncedSaveAgents = debounce(async () => {
-  const { stage } = useStageStore.getState();
+  const { stage, persistenceScope } = useStageStore.getState();
+  if (!shouldPersistStageState(persistenceScope)) return;
   if (!stage?.id || !stage.generatedAgentConfigs) return;
   const { saveGeneratedAgents } = await import('@/lib/orchestration/registry/store');
   await saveGeneratedAgents(stage.id, stage.generatedAgentConfigs);

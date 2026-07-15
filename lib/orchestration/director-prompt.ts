@@ -11,7 +11,12 @@ import type { AgentConfig } from '@/lib/orchestration/registry/types';
 import { createLogger } from '@/lib/logger';
 import { buildPrompt, PROMPT_IDS } from '@/lib/prompts';
 import type { WhiteboardActionRecord, AgentTurnSummary } from './types';
-import type { RevisitGateDecision, RevisitGateStatus } from '@/lib/revisit/types';
+import type {
+  RevisitGateDecision,
+  RevisitGateStatus,
+  RevisitStudentStateMap,
+  RevisitStudentUnderstandingState,
+} from '@/lib/revisit/types';
 
 const log = createLogger('DirectorPrompt');
 
@@ -106,9 +111,19 @@ The latest human turn is the human teacher's lesson attempt, not a student quest
 
 Evaluate whether the human teacher has sufficiently taught the current page, then choose either one AI student/assistant response or a USER cue when the teacher should answer a student follow-up.
 
+Track each active AI student separately in "student_states":
+- "questioning": this student asked a real question, expressed confusion, or still has an unresolved doubt.
+- "uncertain": this student has not clearly accepted the explanation yet.
+- "satisfied": this student has accepted the explanation or can summarize it correctly.
+
+"student_states" MUST contain every id listed in active_student_ids on every decision, and must not contain any other id. Questions are not participation rewards: do not invent a probe merely to keep the classroom active or to satisfy an agent persona.
+
+A student asking a real question means that student is "questioning", not "satisfied". Do not output "pass" while any active AI student is "questioning" or "uncertain". Use "pass" only when all active AI students are satisfied, even if only one of them speaks out loud.
+When a prior question has just been resolved and the status is "pass", prefer the most recent student whose question was resolved for the acknowledgment. This is a speaking preference only; still return every active student's state.
+
 Gate status:
-- "pass": the teacher covered the page well enough; choose an AI student for a brief acknowledgment, thanks, or one-sentence summary. Do not choose END until after an agent has responded to the teacher turn.
-- "probe": one short student probe should be asked. After that probe has been asked, cue USER so the human teacher can answer.
+- "pass": the teacher covered the page well enough and all active AI students are satisfied; choose an AI student for a brief acknowledgment, thanks, or one-sentence summary. Do not choose END until after an agent has responded to the teacher turn.
+- "probe": one short student probe about a genuine unresolved point on the current page should be asked. Never probe content reserved for later pages. After that probe has been asked, cue USER so the human teacher can answer.
 - "rescue": the teacher is stuck or has reached the page probe cap; choose the assistant. After the assistant speaks, cue USER unless the round is clearly complete.
 - "fail": the page still has material issues, but a rescue is not yet needed. Ask at most one concise follow-up before cueing USER.
 
@@ -116,7 +131,7 @@ Context:
 ${revisitGateContext}
 
 When this section is present, output the normal next_agent field and include:
-"revisit_gate":{"status":"pass|probe|rescue|fail","page_index":0,"reason":"brief reason","next_probe_id":"optional probe id","confidence":0.0}
+"revisit_gate":{"status":"pass|probe|rescue|fail","page_index":0,"reason":"brief reason","next_probe_id":"optional probe id","confidence":0.0,"student_states":{"student-agent-id":"questioning|uncertain|satisfied"}}
 `;
 }
 
@@ -305,9 +320,31 @@ function normalizeRevisitGateDecision(raw: unknown): RevisitGateDecision | undef
           ? record.nextProbeId
           : undefined,
     confidence: Number.isFinite(confidence) ? Math.min(1, Math.max(0, confidence)) : undefined,
+    studentStates: normalizeRevisitStudentStates(record.student_states, record.studentStates),
   };
 }
 
 function isRevisitGateStatus(value: unknown): value is RevisitGateStatus {
   return value === 'pass' || value === 'probe' || value === 'rescue' || value === 'fail';
+}
+
+function normalizeRevisitStudentStates(
+  ...rawValues: unknown[]
+): RevisitStudentStateMap | undefined {
+  const states: RevisitStudentStateMap = {};
+  for (const raw of rawValues) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+    for (const [agentId, value] of Object.entries(raw as Record<string, unknown>)) {
+      if (isRevisitStudentUnderstandingState(value)) {
+        states[agentId] = value;
+      }
+    }
+  }
+  return Object.keys(states).length > 0 ? states : undefined;
+}
+
+function isRevisitStudentUnderstandingState(
+  value: unknown,
+): value is RevisitStudentUnderstandingState {
+  return value === 'questioning' || value === 'uncertain' || value === 'satisfied';
 }

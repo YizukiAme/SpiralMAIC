@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, Suspense, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'motion/react';
 import { CheckCircle2, Sparkles, AlertCircle, AlertTriangle, ArrowLeft, Bot } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -29,7 +29,7 @@ import {
   cleanupOldImages,
   storeImages,
 } from '@/lib/utils/image-storage';
-import { getCurrentModelConfig } from '@/lib/utils/model-config';
+import { buildModelRequestHeaders, getCurrentModelConfig } from '@/lib/utils/model-config';
 import { MAX_VISION_IMAGES } from '@/lib/constants/generation';
 import {
   MAX_DOCUMENT_BUNDLE_FILES,
@@ -53,9 +53,24 @@ import {
   ALL_STEPS,
   getActiveSteps,
   getGenerationStepText,
+  shouldAutoStartRevisitGeneration,
 } from './types';
 import { StepVisualizer } from './components/visualizers';
 import { resolveTaskEngineModeFromOutlineDoneEvent } from './vocational-mode';
+import { ensureRevisitBlueprint, loadRevisitAdaptiveContext } from '@/lib/revisit/client';
+import { generateRevisitSkeletonScene } from '@/lib/revisit/slides';
+import {
+  getRevisitAttempt,
+  importLegacyRevisitAttemptSnapshot,
+  saveRevisitAttemptBlueprint,
+  saveRevisitAttemptSource,
+  setRevisitAttemptPreparationError,
+  upsertRevisitAttemptScene,
+} from '@/lib/revisit/attempt-store';
+import { getRevisitNow } from '@/lib/revisit/clock';
+import { parseRevisitScope, serializeRevisitScope } from '@/lib/revisit/scope';
+import { loadStageData } from '@/lib/utils/stage-storage';
+import { RevisitDemoBadge } from '@/components/revisit/demo-badge';
 
 const log = createLogger('GenerationPreview');
 const OUTLINE_REVIEW_AUTO_CONTINUE_MS = 2500;
@@ -111,6 +126,7 @@ type SceneGenerationFailure = {
 
 function GenerationPreviewContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { t } = useI18n();
   const hasStartedRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -120,6 +136,7 @@ function GenerationPreviewContent() {
   // streaming card mid-stream, or by restoring a session that was already in review).
   // Combined with `reviewOutlineEnabled` to decide whether the post-stream timer fires.
   const outlineReviewIntentRef = useRef(false);
+  const allowRevisitAutoStartRef = useRef(false);
   const { profiles: voxcpmProfiles } = useVoxCPMVoiceProfiles();
 
   const [session, setSession] = useState<GenerationSessionState | null>(null);
@@ -227,9 +244,45 @@ function GenerationPreviewContent() {
       }
     });
 
-  // Load session from sessionStorage
+  // Course generation remains tab-scoped. Reverse generation is recovered by attempt URL + Dexie.
   useEffect(() => {
     cleanupOldImages(24).catch((e) => log.error(e));
+
+    const attemptId = searchParams.get('attempt');
+    if (attemptId) {
+      const explicitlyRequested = shouldAutoStartRevisitGeneration(searchParams.get('run'));
+      if (explicitlyRequested) allowRevisitAutoStartRef.current = true;
+      if (explicitlyRequested && typeof window !== 'undefined') {
+        const cleanUrl = new URL(window.location.href);
+        cleanUrl.searchParams.delete('run');
+        window.history.replaceState(window.history.state, '', cleanUrl);
+      }
+      const scope = parseRevisitScope(searchParams.get('scope'));
+      void (async () => {
+        const attempt =
+          (await getRevisitAttempt(attemptId, scope)) ??
+          (await importLegacyRevisitAttemptSnapshot(attemptId, scope));
+        if (attempt) {
+          setSession({
+            sessionId: attempt.attemptId,
+            mode: 'revisit',
+            requirements: { requirement: `Reverse Challenge: ${attempt.sourceStage?.name ?? ''}` },
+            pdfText: '',
+            currentStep: 'generating',
+            previewPhase: 'preparing',
+            revisit: {
+              stageId: attempt.stageId,
+              attemptId: attempt.attemptId,
+              forceRegenerate: !attempt.blueprint,
+              scope: serializeRevisitScope(scope),
+              blueprint: attempt.blueprint,
+            },
+          });
+        }
+        setSessionLoaded(true);
+      })();
+      return;
+    }
 
     const saved = sessionStorage.getItem('generationSession');
     if (saved) {
@@ -251,7 +304,7 @@ function GenerationPreviewContent() {
       }
     }
     setSessionLoaded(true);
-  }, []);
+  }, [searchParams]);
 
   // Abort all in-flight requests on unmount
   useEffect(() => {
@@ -269,10 +322,7 @@ function GenerationPreviewContent() {
     const videoProviderConfig = settings.videoProvidersConfig?.[settings.videoProviderId];
     return {
       'Content-Type': 'application/json',
-      'x-model': modelConfig.modelString,
-      'x-api-key': modelConfig.apiKey,
-      'x-base-url': modelConfig.baseUrl,
-      'x-provider-type': modelConfig.providerType || '',
+      ...buildModelRequestHeaders(modelConfig),
       // Image generation provider
       'x-image-provider': settings.imageProviderId || '',
       'x-image-model': settings.imageModelId || '',
@@ -297,6 +347,11 @@ function GenerationPreviewContent() {
   // Auto-start generation when session is loaded
   useEffect(() => {
     if (!session || hasStartedRef.current) return;
+    if (session.mode === 'revisit' && !allowRevisitAutoStartRef.current) {
+      hasStartedRef.current = true;
+      setError(t('revisit.history.preparing'));
+      return;
+    }
     const needsOutlines = !session.sceneOutlines || session.sceneOutlines.length === 0;
     const phase = session.previewPhase;
     const shouldAutoStart =
@@ -311,7 +366,7 @@ function GenerationPreviewContent() {
       startGeneration();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session]);
+  }, [session, t]);
 
   // Main generation flow
   const startGeneration = async (sessionOverride?: GenerationSessionState) => {
@@ -333,6 +388,111 @@ function GenerationPreviewContent() {
     try {
       // Compute active steps for this session (recomputed after session mutations)
       let activeSteps = getActiveSteps(currentSession);
+
+      if (currentSession.mode === 'revisit') {
+        const revisit = currentSession.revisit;
+        if (!revisit) throw new Error(t('generation.sessionNotFound'));
+
+        const settings = useSettingsStore.getState();
+        if (!settings.reverseChallengeEnabled) {
+          router.replace('/');
+          return;
+        }
+
+        setCurrentStepIndex(0);
+        setStatusMessage(t('generation.revisitPreparingPathDesc'));
+
+        const scope = parseRevisitScope(revisit.scope);
+        let attempt =
+          (await getRevisitAttempt(revisit.attemptId, scope)) ??
+          (await importLegacyRevisitAttemptSnapshot(revisit.attemptId, scope));
+        throwIfAborted(signal);
+        const now = await getRevisitNow(scope);
+        if (attempt && (!attempt.sourceStage || attempt.sourceScenes.length === 0)) {
+          const currentSource = await loadStageData(attempt.stageId);
+          if (currentSource) {
+            attempt = await saveRevisitAttemptSource(
+              attempt.attemptId,
+              currentSource.stage,
+              currentSource.scenes,
+              now,
+              scope,
+            );
+          }
+        }
+        if (!attempt?.sourceStage || attempt.sourceScenes.length === 0) {
+          throw new Error(t('revisit.challenge.loadFailed'));
+        }
+        const modelConfig = getCurrentModelConfig();
+        const adaptiveContext = await loadRevisitAdaptiveContext(revisit.stageId, {
+          stableSuccessesRequired: settings.stableSuccessesRequired,
+          scope,
+          now,
+        });
+        throwIfAborted(signal);
+
+        const blueprint =
+          attempt.blueprint ??
+          (await ensureRevisitBlueprint({
+            stage: attempt.sourceStage,
+            scenes: attempt.sourceScenes,
+            modelConfig,
+            forceRegenerate: revisit.forceRegenerate,
+            adaptiveContext,
+            signal,
+            scope,
+          }));
+        throwIfAborted(signal);
+        await saveRevisitAttemptBlueprint(revisit.attemptId, blueprint, now, scope);
+
+        const sessionWithBlueprint: GenerationSessionState = {
+          ...currentSession,
+          revisit: {
+            ...revisit,
+            forceRegenerate: false,
+            blueprint,
+          },
+        };
+        setSession(sessionWithBlueprint);
+        currentSession = sessionWithBlueprint;
+
+        setCurrentStepIndex(
+          Math.max(
+            0,
+            activeSteps.findIndex((s) => s.id === 'revisit-page'),
+          ),
+        );
+        setStatusMessage(t('generation.revisitGeneratingPageDesc'));
+
+        const firstScene =
+          attempt.blueprint?.id === blueprint.id && attempt.scenes[0]
+            ? attempt.scenes[0]
+            : await generateRevisitSkeletonScene({
+                stage: attempt.sourceStage,
+                blueprint,
+                sourceScenes: attempt.sourceScenes,
+                modelConfig,
+                pageIndex: 0,
+                signal,
+              });
+        throwIfAborted(signal);
+
+        await upsertRevisitAttemptScene({
+          attemptId: revisit.attemptId,
+          scene: firstScene,
+          index: 0,
+          scope,
+          now,
+        });
+
+        setStatusMessage(t('generation.revisitReadyDesc'));
+        router.push(
+          `/classroom/${encodeURIComponent(attempt.stageId)}/revisit?attempt=${encodeURIComponent(
+            revisit.attemptId,
+          )}&scope=${encodeURIComponent(serializeRevisitScope(scope))}`,
+        );
+        return;
+      }
 
       // Determine if we need the document analysis step
       const documentSources = legacySourceFromSession(currentSession);
@@ -1084,9 +1244,24 @@ function GenerationPreviewContent() {
         log.info('[GenerationPreview] Generation aborted');
         return;
       }
-      sessionStorage.removeItem('generationSession');
+      if (currentSession.mode !== 'revisit') {
+        sessionStorage.removeItem('generationSession');
+      } else if (currentSession.revisit) {
+        const errorScope = parseRevisitScope(currentSession.revisit.scope);
+        await setRevisitAttemptPreparationError(
+          currentSession.revisit.attemptId,
+          err instanceof Error ? err.message : String(err),
+          await getRevisitNow(errorScope),
+          errorScope,
+        );
+      }
       setError(err instanceof Error ? err.message : String(err));
     }
+  };
+
+  const throwIfAborted = (signal: AbortSignal) => {
+    if (!signal.aborted) return;
+    throw signal.reason ?? new DOMException('Aborted', 'AbortError');
   };
 
   const extractTopicFromRequirement = (requirement: string): string => {
@@ -1101,7 +1276,7 @@ function GenerationPreviewContent() {
     abortControllerRef.current?.abort();
     clearOutlineReviewTimer();
     outlineReviewIntentRef.current = false;
-    sessionStorage.removeItem('generationSession');
+    if (session?.mode !== 'revisit') sessionStorage.removeItem('generationSession');
     router.push('/');
   };
 
@@ -1331,6 +1506,12 @@ function GenerationPreviewContent() {
 
   return (
     <div className="min-h-[100dvh] w-full bg-gradient-to-b from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 flex flex-col items-center justify-center p-4 relative overflow-hidden text-center">
+      {session.mode === 'revisit' ? (
+        <RevisitDemoBadge
+          scope={parseRevisitScope(session.revisit?.scope)}
+          className="absolute right-4 top-4 z-20 border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+        />
+      ) : null}
       {/* Background Decor */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">
         <div
@@ -1522,8 +1703,20 @@ function GenerationPreviewContent() {
                 animate={{ opacity: 1, y: 0 }}
                 className="w-full max-w-xs"
               >
-                <Button size="lg" variant="outline" className="w-full h-12" onClick={goBackToHome}>
-                  {t('generation.goBackAndRetry')}
+                <Button
+                  size="lg"
+                  variant="outline"
+                  className="w-full h-12"
+                  onClick={() => {
+                    if (session.mode === 'revisit') {
+                      setError(null);
+                      void startGeneration(session);
+                      return;
+                    }
+                    goBackToHome();
+                  }}
+                >
+                  {session.mode === 'revisit' ? t('common.retry') : t('generation.goBackAndRetry')}
                 </Button>
               </motion.div>
             ) : isOutlineReady ? null : !isComplete ? (

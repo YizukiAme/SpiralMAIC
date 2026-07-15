@@ -40,6 +40,9 @@ import { getEffectiveActions } from './tool-schemas';
 import type { AgentTurnSummary, WhiteboardActionRecord } from './types';
 import { parseStructuredChunk, createParserState, finalizeParser } from './stateless-generate';
 import { createLogger } from '@/lib/logger';
+import type { RevisitGateStatus, RevisitResponseDirective } from '@/lib/revisit/types';
+import type { OvertimeChatContext } from '@/lib/overtime/types';
+import { getOvertimeAgentActions, validateOvertimeChatContext } from '@/lib/overtime/chat';
 
 const log = createLogger('DirectorGraph');
 
@@ -58,6 +61,8 @@ const OrchestratorState = Annotation.Root({
   discussionContext: Annotation<{ topic: string; prompt?: string } | null>,
   revisitProbeContext: Annotation<string | null>,
   revisitGateContext: Annotation<string | null>,
+  revisitFallbackDirective: Annotation<'probe' | 'rescue'>,
+  overtimeContext: Annotation<OvertimeChatContext | null>,
   triggerAgentId: Annotation<string | null>,
   userProfile: Annotation<{ nickname?: string; bio?: string } | null>,
   /** Request-scoped agent configs for generated agents (not in the default registry) */
@@ -65,6 +70,7 @@ const OrchestratorState = Annotation.Root({
 
   // Mutable (updated by nodes)
   currentAgentId: Annotation<string | null>,
+  revisitResponseDirective: Annotation<RevisitResponseDirective | null>,
   turnCount: Annotation<number>,
   agentResponses: Annotation<AgentTurnSummary[]>({
     reducer: (prev, update) => [...prev, ...update],
@@ -97,19 +103,33 @@ export interface ResolvedDirectorDecision {
   fallbackUsed: boolean;
 }
 
+export function selectOvertimeInstructorIds(
+  agents: Pick<AgentConfig, 'id' | 'role' | 'priority'>[],
+): string[] {
+  const byPriority = (a: Pick<AgentConfig, 'priority'>, b: Pick<AgentConfig, 'priority'>) =>
+    (b.priority ?? 0) - (a.priority ?? 0);
+  const teacher = agents.filter((agent) => agent.role === 'teacher').sort(byPriority)[0];
+  if (teacher) return [teacher.id];
+  const assistant = agents.filter((agent) => agent.role === 'assistant').sort(byPriority)[0];
+  return assistant ? [assistant.id] : [];
+}
+
 export function resolveDirectorDecisionForAvailableAgents({
   decision,
   agents,
   revisitMode,
   agentRespondedAfterLatestHuman = false,
+  revisitFallbackDirective = 'probe',
 }: {
   decision: DirectorDecision;
   agents: Pick<AgentConfig, 'id' | 'role' | 'priority'>[];
   revisitMode: boolean;
   agentRespondedAfterLatestHuman?: boolean;
+  revisitFallbackDirective?: 'probe' | 'rescue';
 }): ResolvedDirectorDecision {
+  const effectiveGateStatus = decision.revisitGate?.status ?? revisitFallbackDirective;
   const fallbackAgentId = revisitMode
-    ? selectRevisitFallbackAgentId(agents, decision.revisitGate?.status)
+    ? selectRevisitFallbackAgentId(agents, effectiveGateStatus)
     : null;
 
   if (decision.nextAgentId === 'USER') {
@@ -147,7 +167,12 @@ export function resolveDirectorDecisionForAvailableAgents({
   }
 
   const selectedAgent = agents.find((agent) => agent.id === decision.nextAgentId);
-  if (selectedAgent && (!revisitMode || selectedAgent.role !== 'teacher')) {
+  const requiredRevisitRole = effectiveGateStatus === 'rescue' ? 'assistant' : 'student';
+  if (
+    selectedAgent &&
+    (!revisitMode ||
+      (selectedAgent.role !== 'teacher' && selectedAgent.role === requiredRevisitRole))
+  ) {
     return {
       nextAgentId: decision.nextAgentId,
       shouldEnd: false,
@@ -191,9 +216,9 @@ function selectRevisitFallbackAgentId(
   const assistants = agents.filter((agent) => agent.role === 'assistant').sort(byPriority);
 
   if (gateStatus === 'rescue') {
-    return assistants[0]?.id ?? students[0]?.id ?? agents[0]?.id ?? null;
+    return assistants[0]?.id ?? null;
   }
-  return students[0]?.id ?? assistants[0]?.id ?? agents[0]?.id ?? null;
+  return students[0]?.id ?? null;
 }
 
 // ==================== Director Node ====================
@@ -223,6 +248,8 @@ async function directorNode(
     }
   };
   const isSingleAgent = state.availableAgentIds.length <= 1;
+
+  if (state.availableAgentIds.length === 0) return { shouldEnd: true };
 
   // ── Single agent: code-only director ──
   if (isSingleAgent) {
@@ -305,6 +332,7 @@ async function directorNode(
       agents,
       revisitMode: Boolean(state.revisitGateContext),
       agentRespondedAfterLatestHuman: hasAgentResponseAfterLatestHumanTurn(state.messages),
+      revisitFallbackDirective: state.revisitFallbackDirective,
     });
 
     if (resolvedDecision.cueUser) {
@@ -322,9 +350,11 @@ async function directorNode(
     }
 
     if (resolvedDecision.fallbackUsed) {
-      log.warn(
-        `[Director] Revisit fallback for decision "${decision.nextAgentId ?? 'END'}" -> "${resolvedDecision.nextAgentId}"`,
-      );
+      log.warn('[Director] Revisit role fallback', {
+        requestedAgentId: decision.nextAgentId ?? 'END',
+        fallbackAgentId: resolvedDecision.nextAgentId,
+        gateStatus: decision.revisitGate?.status ?? state.revisitFallbackDirective,
+      });
     }
 
     write({
@@ -335,6 +365,12 @@ async function directorNode(
     log.info(`[Director] Decision: dispatch agent "${resolvedDecision.nextAgentId}"`);
     return {
       currentAgentId: resolvedDecision.nextAgentId,
+      revisitResponseDirective: state.revisitGateContext
+        ? resolveRevisitResponseDirective(
+            decision.revisitGate?.status,
+            state.revisitFallbackDirective,
+          )
+        : null,
       shouldEnd: false,
     };
   } catch (error) {
@@ -403,7 +439,11 @@ async function runAgentGeneration(
     ? state.storeState.scenes.find((s) => s.id === state.storeState.currentSceneId)
     : undefined;
   const sceneType = currentScene?.type;
-  const effectiveActions = getEffectiveActions(agentConfig.allowedActions, sceneType);
+  const effectiveActions = getOvertimeAgentActions(
+    getEffectiveActions(agentConfig.allowedActions, sceneType),
+    agentConfig.role,
+    state.overtimeContext ?? undefined,
+  );
 
   const discussionContext = state.discussionContext || undefined;
   const systemPrompt = buildStructuredPrompt(
@@ -413,7 +453,13 @@ async function runAgentGeneration(
     state.whiteboardLedger,
     state.userProfile || undefined,
     state.agentResponses,
-    state.revisitProbeContext || undefined,
+    state.revisitProbeContext && state.revisitResponseDirective
+      ? {
+          pageContext: state.revisitProbeContext,
+          responseDirective: state.revisitResponseDirective,
+        }
+      : undefined,
+    state.overtimeContext ?? undefined,
   );
   const openaiMessages = convertMessagesToOpenAI(state.messages, agentId);
   const adapter = new AISdkLangGraphAdapter(state.languageModel, state.thinkingConfig ?? undefined);
@@ -658,24 +704,47 @@ export function buildInitialState(
 
   const incoming = request.directorState;
   const turnCount = incoming?.turnCount ?? 0;
+  const overtimeContext = validateOvertimeChatContext(
+    request.config.overtimeContext,
+    request.storeState,
+  );
+  const configuredAgents = request.config.agentIds
+    .map((id) => agentConfigOverrides[id] ?? useAgentRegistry.getState().getAgent(id))
+    .filter((agent): agent is AgentConfig => Boolean(agent));
+  const availableAgentIds = overtimeContext
+    ? selectOvertimeInstructorIds(configuredAgents)
+    : request.config.agentIds;
 
   return {
     messages: request.messages,
     storeState: request.storeState,
-    availableAgentIds: request.config.agentIds,
+    availableAgentIds,
     languageModel,
     thinkingConfig: thinkingConfig ?? null,
     discussionContext,
     revisitProbeContext: request.config.revisitProbeContext || null,
     revisitGateContext: request.config.revisitGateContext || null,
+    revisitFallbackDirective: request.config.revisitFallbackDirective ?? 'probe',
+    overtimeContext: overtimeContext ?? null,
     triggerAgentId: request.config.triggerAgentId || null,
     userProfile: request.userProfile || null,
     agentConfigOverrides,
     currentAgentId: null,
+    revisitResponseDirective: null,
     turnCount,
     agentResponses: incoming?.agentResponses ?? [],
     whiteboardLedger: incoming?.whiteboardLedger ?? [],
     shouldEnd: false,
     totalActions: 0,
   };
+}
+
+function resolveRevisitResponseDirective(
+  gateStatus: RevisitGateStatus | undefined,
+  fallback: 'probe' | 'rescue',
+): RevisitResponseDirective {
+  if (gateStatus === 'pass') return 'acknowledge';
+  if (gateStatus === 'rescue') return 'rescue';
+  if (gateStatus === 'probe' || gateStatus === 'fail') return 'probe';
+  return fallback;
 }

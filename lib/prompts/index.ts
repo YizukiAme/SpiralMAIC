@@ -47,5 +47,12 @@ export const PROMPT_IDS = {
   DIRECTOR: 'director',
   REVISIT_EXAM_BLUEPRINT: 'revisit-exam-blueprint',
   REVISIT_JUDGE: 'revisit-judge',
+  REVISIT_STUDY_ARTIFACT_BRIEFING: 'revisit-study-artifact-briefing',
+  REVISIT_STUDY_ARTIFACT_MIND_MAP: 'revisit-study-artifact-mind-map',
+  REVISIT_STUDY_ARTIFACT_STUDY_GUIDE: 'revisit-study-artifact-study-guide',
+  REVISIT_STUDY_ARTIFACT_FAQ: 'revisit-study-artifact-faq',
+  REVISIT_STUDY_ARTIFACT_FLASHCARDS: 'revisit-study-artifact-flashcards',
+  REVISIT_STUDY_ARTIFACT_QUIZ: 'revisit-study-artifact-quiz',
+  OVERTIME_EXTENSION_OUTLINE: 'overtime-extension-outline',
   PBL_DESIGN: 'pbl-design',
 } as const satisfies Record<string, PromptId>;

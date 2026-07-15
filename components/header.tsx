@@ -13,6 +13,7 @@ interface HeaderProps {
   readonly canEdit?: boolean;
   readonly onToggleEditMode?: () => void;
   readonly rightSlot?: ReactNode;
+  readonly onBack?: () => void;
 }
 
 export function Header({
@@ -21,6 +22,7 @@ export function Header({
   canEdit,
   onToggleEditMode,
   rightSlot,
+  onBack,
 }: HeaderProps) {
   const { t } = useI18n();
   const router = useRouter();
@@ -30,7 +32,7 @@ export function Header({
       <header className="h-20 px-8 flex items-center justify-between z-10 bg-transparent gap-4">
         <div className="flex items-center gap-3 min-w-0 flex-1">
           <button
-            onClick={() => router.push('/')}
+            onClick={onBack ?? (() => router.push('/'))}
             className="shrink-0 p-2 rounded-lg text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
             title={t('generation.backToHome')}
           >

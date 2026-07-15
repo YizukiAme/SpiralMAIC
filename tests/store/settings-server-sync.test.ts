@@ -29,6 +29,49 @@ vi.mock('@/lib/ai/providers', () => ({
         { id: 'gpt-4-turbo', name: 'GPT-4 Turbo' },
       ],
     },
+    'openai-codex': {
+      id: 'openai-codex',
+      name: 'Codex',
+      type: 'openai',
+      requiresApiKey: false,
+      credentialMode: 'oauth',
+      icon: '/logos/openai.svg',
+      models: [
+        {
+          id: 'gpt-5.6-sol',
+          name: 'GPT-5.6 Sol',
+          capabilities: {
+            thinking: {
+              effortValues: ['low', 'medium', 'high', 'xhigh', 'max'],
+              defaultEffort: 'low',
+            },
+          },
+        },
+        {
+          id: 'gpt-5.6-terra',
+          name: 'GPT-5.6 Terra',
+          capabilities: {
+            thinking: {
+              effortValues: ['low', 'medium', 'high', 'xhigh', 'max'],
+              defaultEffort: 'medium',
+            },
+          },
+        },
+        {
+          id: 'gpt-5.6-luna',
+          name: 'GPT-5.6 Luna',
+          capabilities: {
+            thinking: {
+              effortValues: ['low', 'medium', 'high', 'xhigh', 'max'],
+              defaultEffort: 'medium',
+            },
+          },
+        },
+        { id: 'gpt-5.5', name: 'GPT-5.5' },
+        { id: 'gpt-5.4', name: 'GPT-5.4' },
+        { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini' },
+      ],
+    },
     anthropic: {
       id: 'anthropic',
       name: 'Anthropic',
@@ -184,7 +227,7 @@ vi.stubGlobal('window', { localStorage: localStorageStub });
 
 /** Full server response shape */
 interface MockServerResponse {
-  providers?: Record<string, { models?: string[]; baseUrl?: string }>;
+  providers?: Record<string, { models?: string[]; fastModels?: string[]; baseUrl?: string }>;
   tts?: Record<string, { baseUrl?: string; disabled?: boolean }>;
   asr?: Record<string, { baseUrl?: string }>;
   pdf?: Record<string, { baseUrl?: string }>;
@@ -336,6 +379,56 @@ describe('settings rehydrate — built-in provider models', () => {
     const persisted = JSON.parse(storage.get('settings-storage')!).state;
     expect('editInsertToolbarCollapsed' in persisted).toBe(false);
   });
+
+  it('distrusts persisted Codex server state, credentials, and dynamic models', async () => {
+    storage.set(
+      'settings-storage',
+      JSON.stringify({
+        state: {
+          providerId: 'openai-codex',
+          modelId: 'stale-secret-model',
+          providersConfig: {
+            'openai-codex': {
+              apiKey: 'fake-client-key',
+              baseUrl: 'https://fake.example/v1',
+              models: [{ id: 'stale-secret-model', name: 'Stale' }],
+              name: 'Spoofed Codex',
+              type: 'anthropic',
+              requiresApiKey: true,
+              credentialMode: 'api-key',
+              isBuiltIn: true,
+              isServerConfigured: true,
+              serverModels: ['stale-secret-model'],
+            },
+          },
+        },
+        version: 4,
+      }),
+    );
+
+    const store = await getStore();
+    const codex = store.getState().providersConfig['openai-codex'];
+    expect(codex).toMatchObject({
+      apiKey: '',
+      baseUrl: '',
+      name: 'Codex',
+      type: 'openai',
+      requiresApiKey: false,
+      credentialMode: 'oauth',
+      isServerConfigured: false,
+    });
+    expect(codex.serverModels).toBeUndefined();
+    expect(codex.models.map((model) => model.id)).toEqual([
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
+      'gpt-5.5',
+      'gpt-5.4',
+      'gpt-5.4-mini',
+    ]);
+    expect(store.getState().providerId).not.toBe('openai-codex');
+    expect(store.getState().modelId).not.toBe('stale-secret-model');
+  });
 });
 
 describe('fetchServerProviders — provider availability sync', () => {
@@ -446,6 +539,124 @@ describe('fetchServerProviders — provider availability sync', () => {
     await store.getState().fetchServerProviders();
 
     expect(store.getState().modelId).toBe('gpt-5.6-sol');
+  });
+
+  it('replaces Codex discovery models on every sync without accumulating stale IDs', async () => {
+    const store = await getStore();
+    mockServerResponse({ providers: { 'openai-codex': { models: ['gpt-old', 'gpt-4o'] } } });
+    await store.getState().fetchServerProviders();
+
+    let codex = store.getState().providersConfig['openai-codex'];
+    expect(codex.models.map((model) => model.id)).toEqual(['gpt-old', 'gpt-4o']);
+    expect(codex.models[1].name).toBe('GPT-4o');
+    expect(codex.credentialMode).toBe('oauth');
+
+    mockServerResponse({ providers: { 'openai-codex': { models: ['gpt-new'] } } });
+    await store.getState().fetchServerProviders();
+
+    codex = store.getState().providersConfig['openai-codex'];
+    expect(codex.models.map((model) => model.id)).toEqual(['gpt-new']);
+    expect(codex.isServerConfigured).toBe(true);
+  });
+
+  it('preserves GPT-5.6 Codex reasoning metadata when the server discovers it', async () => {
+    const store = await getStore();
+    mockServerResponse({
+      providers: { 'openai-codex': { models: ['gpt-5.6-luna'] } },
+    });
+
+    await store.getState().fetchServerProviders();
+
+    expect(store.getState().providersConfig['openai-codex'].models).toMatchObject([
+      {
+        id: 'gpt-5.6-luna',
+        capabilities: {
+          thinking: {
+            effortValues: ['low', 'medium', 'high', 'xhigh', 'max'],
+            defaultEffort: 'medium',
+          },
+        },
+      },
+    ]);
+  });
+
+  it('maps Codex fastModels to the priority service tier capability', async () => {
+    const store = await getStore();
+    mockServerResponse({
+      providers: {
+        'openai-codex': {
+          models: ['gpt-5.5', 'gpt-5.4-mini'],
+          fastModels: ['gpt-5.5'],
+        },
+      },
+    });
+
+    await store.getState().fetchServerProviders();
+
+    const models = store.getState().providersConfig['openai-codex'].models;
+    expect(models[0].capabilities?.serviceTiers).toEqual(['priority']);
+    expect(models[1].capabilities?.serviceTiers).toBeUndefined();
+  });
+
+  it('clears discovered fast capabilities when native OAuth disappears', async () => {
+    const store = await getStore();
+    mockServerResponse({
+      providers: {
+        'openai-codex': { models: ['gpt-5.5'], fastModels: ['gpt-5.5'] },
+      },
+    });
+    await store.getState().fetchServerProviders();
+    expect(
+      store.getState().providersConfig['openai-codex'].models[0].capabilities?.serviceTiers,
+    ).toEqual(['priority']);
+
+    mockServerResponse({});
+    await store.getState().fetchServerProviders();
+
+    expect(
+      store
+        .getState()
+        .providersConfig[
+          'openai-codex'
+        ].models.every((model) => model.capabilities?.serviceTiers === undefined),
+    ).toBe(true);
+  });
+
+  it('keeps the Codex fast preference across provider rebuilds', async () => {
+    const store = await getStore();
+    store.getState().setCodexFastMode(true);
+
+    mockServerResponse({
+      providers: {
+        'openai-codex': { models: ['gpt-5.5'], fastModels: ['gpt-5.5'] },
+      },
+    });
+    await store.getState().fetchServerProviders();
+    mockServerResponse({});
+    await store.getState().fetchServerProviders();
+
+    expect(store.getState().codexFastMode).toBe(true);
+  });
+
+  it('resets Codex to static fallback models when native OAuth disappears', async () => {
+    const store = await getStore();
+    mockServerResponse({ providers: { 'openai-codex': { models: ['gpt-live'] } } });
+    await store.getState().fetchServerProviders();
+    expect(store.getState().providersConfig['openai-codex'].models[0].id).toBe('gpt-live');
+
+    mockServerResponse({});
+    await store.getState().fetchServerProviders();
+    const codex = store.getState().providersConfig['openai-codex'];
+    expect(codex.isServerConfigured).toBe(false);
+    expect(codex.serverModels).toBeUndefined();
+    expect(codex.models.map((model) => model.id)).toEqual([
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
+      'gpt-5.5',
+      'gpt-5.4',
+      'gpt-5.4-mini',
+    ]);
   });
 
   it('keeps all models when server provides no model restriction', async () => {

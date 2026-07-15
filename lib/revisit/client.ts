@@ -1,25 +1,32 @@
 import type { Scene, Stage } from '@/lib/types/stage';
 import type {
   LessonMemorySummary,
+  RevisitAdaptiveContext,
   RevisitExamBlueprint,
   RevisitJudgeReport,
   RevisitPageReport,
-  RevisitSkeletonDeck,
+  StudyArtifactDraft,
+  StudyArtifactFor,
+  StudyArtifactKind,
+  StudyArtifactOptionsByKind,
 } from '@/lib/revisit/types';
-import { generateRevisitSkeletonScenes } from '@/lib/revisit/slides';
 import {
+  countRevisitReports,
   getConceptStates,
   getLatestExamBlueprint,
-  getLatestSkeletonDeck,
+  getLatestRevisitReport,
+  getRevisitReport,
+  getLessonProgress,
+  getPendingAssessmentConcepts,
   saveEvidenceAndUpdateState,
-  saveBlueprintAndInitializeState,
-  saveSkeletonDeck,
+  saveExamBlueprint,
+  saveStudyArtifactNewVersion,
 } from '@/lib/revisit/db';
-import { computeLessonMemory } from '@/lib/revisit/memory';
+import { computeLessonMemory, computeLessonMemoryFromCompletion } from '@/lib/revisit/memory';
 import type { RevisitMessage } from '@/lib/revisit/session';
-import { getCurrentModelConfig } from '@/lib/utils/model-config';
-
-const DEMO_ACCELERATED_CLOCK_MULTIPLIER = 1440;
+import { buildModelRequestHeaders, getCurrentModelConfig } from '@/lib/utils/model-config';
+import { isAbortError } from '@/lib/generation/generation-retry';
+import { FORMAL_REVISIT_SCOPE, type RevisitDataScope } from '@/lib/revisit/scope';
 
 interface ModelConfig {
   modelString: string;
@@ -29,33 +36,30 @@ interface ModelConfig {
   requiresApiKey?: boolean;
   isServerConfigured?: boolean;
   thinkingConfig?: unknown;
-}
-
-export function getEffectiveForgettingSpeedMultiplier(settings: {
-  forgettingSpeedMultiplier: number;
-  demoAcceleratedClockEnabled: boolean;
-}): number {
-  return settings.demoAcceleratedClockEnabled
-    ? DEMO_ACCELERATED_CLOCK_MULTIPLIER
-    : settings.forgettingSpeedMultiplier;
+  serviceTier?: 'priority';
 }
 
 export async function loadLessonMemorySummaries(
   stageIds: string[],
   options: {
     now?: number;
-    forgettingSpeedMultiplier: number;
     stableSuccessesRequired: number;
+    scope?: RevisitDataScope;
   },
 ): Promise<Record<string, LessonMemorySummary>> {
   const now = options.now ?? Date.now();
   const entries = await Promise.all(
     stageIds.map(async (stageId) => {
-      const states = await getConceptStates(stageId);
+      const states = await getConceptStates(stageId, options.scope);
+      if (states.length === 0) {
+        const progress = await getLessonProgress(stageId, options.scope);
+        if (progress) {
+          return [stageId, computeLessonMemoryFromCompletion(progress.completedAt, now)] as const;
+        }
+      }
       return [
         stageId,
         computeLessonMemory(states, now, {
-          forgettingSpeedMultiplier: options.forgettingSpeedMultiplier,
           stableSuccessesRequired: options.stableSuccessesRequired,
         }),
       ] as const;
@@ -64,19 +68,59 @@ export async function loadLessonMemorySummaries(
   return Object.fromEntries(entries);
 }
 
+export async function loadRevisitAdaptiveContext(
+  stageId: string,
+  options: {
+    now?: number;
+    stableSuccessesRequired: number;
+    scope?: RevisitDataScope;
+  },
+): Promise<RevisitAdaptiveContext> {
+  const now = options.now ?? Date.now();
+  const [conceptStates, latestReport, completedChallengeCount, pendingConcepts] = await Promise.all(
+    [
+      getConceptStates(stageId, options.scope),
+      getLatestRevisitReport(stageId, options.scope),
+      countRevisitReports(stageId, options.scope),
+      getPendingAssessmentConcepts(stageId, options.scope),
+    ],
+  );
+  const progress =
+    conceptStates.length === 0 ? await getLessonProgress(stageId, options.scope) : undefined;
+  const memorySummary =
+    conceptStates.length > 0
+      ? computeLessonMemory(conceptStates, now, {
+          stableSuccessesRequired: options.stableSuccessesRequired,
+        })
+      : progress
+        ? computeLessonMemoryFromCompletion(progress.completedAt, now)
+        : computeLessonMemory([], now, {
+            stableSuccessesRequired: options.stableSuccessesRequired,
+          });
+
+  return {
+    completedChallengeCount,
+    memorySummary,
+    conceptStates,
+    pendingConcepts,
+    latestReport,
+  };
+}
+
 export async function ensureRevisitBlueprint(args: {
   stage: Stage;
   scenes: Scene[];
   modelConfig?: ModelConfig;
   forceRegenerate?: boolean;
-  learnedAt?: number;
+  adaptiveContext?: RevisitAdaptiveContext;
+  scope?: RevisitDataScope;
+  signal?: AbortSignal;
 }): Promise<RevisitExamBlueprint> {
+  throwIfAborted(args.signal);
   if (!args.forceRegenerate) {
-    const existing = await getLatestExamBlueprint(args.stage.id);
-    if (existing) {
-      await saveBlueprintAndInitializeState(existing, args.learnedAt ?? Date.now());
-      return existing;
-    }
+    const existing = await getLatestExamBlueprint(args.stage.id, args.scope);
+    throwIfAborted(args.signal);
+    if (existing) return existing;
   }
 
   const modelConfig = args.modelConfig ?? getCurrentModelConfig();
@@ -88,8 +132,15 @@ export async function ensureRevisitBlueprint(args: {
 
   let blueprint: RevisitExamBlueprint;
   try {
-    blueprint = await requestBlueprintFromApi(args.stage, args.scenes, modelConfig);
+    blueprint = await requestBlueprintFromApi(
+      args.stage,
+      args.scenes,
+      modelConfig,
+      args.adaptiveContext,
+      args.signal,
+    );
   } catch (error) {
+    if (isAbortError(error)) throw error;
     throw new Error(
       `Revisit blueprint failed; challenge cannot start. ${
         error instanceof Error ? error.message : String(error)
@@ -97,74 +148,76 @@ export async function ensureRevisitBlueprint(args: {
     );
   }
 
-  await saveBlueprintAndInitializeState(blueprint, args.learnedAt ?? Date.now());
+  throwIfAborted(args.signal);
+  if (args.scope) await saveExamBlueprint(blueprint, args.scope);
+  else await saveExamBlueprint(blueprint);
   return blueprint;
 }
 
-export async function ensureRevisitSkeletonDeck(args: {
+export async function generateRevisitStudyArtifact<K extends StudyArtifactKind>(args: {
   stage: Stage;
-  blueprint: RevisitExamBlueprint;
-  sourceScenes: Scene[];
+  scenes: Scene[];
+  kind: K;
+  options: StudyArtifactOptionsByKind[K];
   modelConfig?: ModelConfig;
-  forceRegenerate?: boolean;
-  onScene?: (scene: Scene, index: number) => void;
-}): Promise<RevisitSkeletonDeck> {
-  if (!args.forceRegenerate) {
-    const existing = await getLatestSkeletonDeck(args.stage.id, args.blueprint.id);
-    if (existing?.scenes.length) return existing;
+  adaptiveContext?: RevisitAdaptiveContext;
+  stableSuccessesRequired?: number;
+  scope?: RevisitDataScope;
+  now?: number;
+  signal?: AbortSignal;
+}): Promise<StudyArtifactFor<K>> {
+  throwIfAborted(args.signal);
+  const progress = await getLessonProgress(args.stage.id, args.scope);
+  throwIfAborted(args.signal);
+  if (!progress) {
+    throw new Error('Complete the original lesson before generating study artifacts.');
   }
+
+  const adaptiveContext =
+    args.adaptiveContext ??
+    (await loadRevisitAdaptiveContext(args.stage.id, {
+      stableSuccessesRequired: args.stableSuccessesRequired ?? 2,
+      scope: args.scope,
+      now: args.now,
+    }));
+  throwIfAborted(args.signal);
 
   const modelConfig = args.modelConfig ?? getCurrentModelConfig();
   const canCallModel =
     !modelConfig.requiresApiKey || modelConfig.isServerConfigured || modelConfig.apiKey;
   if (!canCallModel) {
-    throw new Error('Revisit skeleton model is unavailable; challenge cannot start.');
+    throw new Error('Revisit artifact model is unavailable.');
   }
 
-  let scenes: Scene[];
+  let draft: Extract<StudyArtifactDraft, { kind: K }>;
   try {
-    scenes = await generateRevisitSkeletonScenes({
+    draft = await requestStudyArtifactFromApi({
       stage: args.stage,
-      blueprint: args.blueprint,
-      sourceScenes: args.sourceScenes,
+      scenes: args.scenes,
+      kind: args.kind,
+      options: args.options,
+      adaptiveContext,
       modelConfig,
-      onScene: args.onScene,
+      signal: args.signal,
     });
   } catch (error) {
+    if (isAbortError(error)) throw error;
     throw new Error(
-      `Revisit skeleton failed; challenge cannot start. ${
+      `Revisit artifact failed; nothing was saved. ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
   }
 
-  const deck: RevisitSkeletonDeck = {
-    id: `${args.stage.id}:${args.blueprint.id}:${Date.now()}`,
-    stageId: args.stage.id,
-    blueprintId: args.blueprint.id,
-    sourceHash: args.blueprint.sourceHash,
-    generatedAt: Date.now(),
-    scenes,
-  };
-  await saveSkeletonDeck(deck);
-  return deck;
-}
-
-export async function markPlaybackCompleteForRevisit(args: {
-  stage: Stage;
-  scenes: Scene[];
-  learnedAt?: number;
-}): Promise<void> {
-  const blueprint = await ensureRevisitBlueprint({
-    stage: args.stage,
-    scenes: args.scenes,
-    learnedAt: args.learnedAt ?? Date.now(),
-  });
-  await ensureRevisitSkeletonDeck({
-    stage: args.stage,
-    blueprint,
-    sourceScenes: args.scenes,
-  });
+  throwIfAborted(args.signal);
+  if (args.scope || args.now !== undefined) {
+    return (await saveStudyArtifactNewVersion(
+      draft,
+      args.scope ?? FORMAL_REVISIT_SCOPE,
+      args.now,
+    )) as StudyArtifactFor<K>;
+  }
+  return (await saveStudyArtifactNewVersion(draft)) as StudyArtifactFor<K>;
 }
 
 export async function submitRevisitAttempt(args: {
@@ -174,9 +227,22 @@ export async function submitRevisitAttempt(args: {
   transcript: RevisitMessage[];
   pageReports: RevisitPageReport[];
   stableSuccessesRequired: number;
-  forgettingSpeedMultiplier: number;
+  scope?: RevisitDataScope;
+  completedAt?: number;
   modelConfig?: ModelConfig;
+  signal?: AbortSignal;
 }): Promise<RevisitJudgeReport> {
+  throwIfAborted(args.signal);
+  const existingReport = await getRevisitReport(args.attemptId, args.scope);
+  throwIfAborted(args.signal);
+  if (existingReport) return existingReport;
+
+  const lessonProgress = await getLessonProgress(args.stage.id, args.scope);
+  throwIfAborted(args.signal);
+  if (!lessonProgress) {
+    throw new Error('Complete the original lesson before submitting a Reverse Challenge.');
+  }
+
   const modelConfig = args.modelConfig ?? getCurrentModelConfig();
   const canCallModel =
     !modelConfig.requiresApiKey || modelConfig.isServerConfigured || modelConfig.apiKey;
@@ -193,9 +259,12 @@ export async function submitRevisitAttempt(args: {
       blueprint: args.blueprint,
       transcript: args.transcript,
       pageReports: args.pageReports,
+      completedAt: args.completedAt,
       modelConfig,
+      signal: args.signal,
     });
   } catch (error) {
+    if (isAbortError(error)) throw error;
     throw new Error(
       `Revisit judge failed; attempt was not counted. ${
         error instanceof Error ? error.message : String(error)
@@ -203,9 +272,14 @@ export async function submitRevisitAttempt(args: {
     );
   }
 
+  throwIfAborted(args.signal);
   await saveEvidenceAndUpdateState(report, {
     stableSuccessesRequired: args.stableSuccessesRequired,
-    forgettingSpeedMultiplier: args.forgettingSpeedMultiplier,
+    conceptLabelsById: Object.fromEntries(
+      args.blueprint.concepts.map((concept) => [concept.id, concept.label]),
+    ),
+    signal: args.signal,
+    scope: args.scope,
   });
   return report;
 }
@@ -214,22 +288,23 @@ async function requestBlueprintFromApi(
   stage: Stage,
   scenes: Scene[],
   modelConfig: ModelConfig,
+  adaptiveContext?: RevisitAdaptiveContext,
+  signal?: AbortSignal,
 ): Promise<RevisitExamBlueprint> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'x-model': modelConfig.modelString,
-    'x-api-key': modelConfig.apiKey,
+    ...buildModelRequestHeaders(modelConfig),
   };
-  if (modelConfig.baseUrl) headers['x-base-url'] = modelConfig.baseUrl;
-  if (modelConfig.providerType) headers['x-provider-type'] = modelConfig.providerType;
 
   const response = await fetch('/api/revisit/blueprint', {
     method: 'POST',
     headers,
+    signal,
     body: JSON.stringify({
       stage,
       scenes,
       targetProbeCount: 4,
+      ...(adaptiveContext ? { adaptiveContext } : {}),
       ...(modelConfig.thinkingConfig ? { thinkingConfig: modelConfig.thinkingConfig } : {}),
     }),
   });
@@ -245,31 +320,82 @@ async function requestBlueprintFromApi(
   return data.blueprint;
 }
 
+async function requestStudyArtifactFromApi<K extends StudyArtifactKind>(args: {
+  stage: Stage;
+  scenes: Scene[];
+  kind: K;
+  options: StudyArtifactOptionsByKind[K];
+  adaptiveContext: RevisitAdaptiveContext;
+  modelConfig: ModelConfig;
+  signal?: AbortSignal;
+}): Promise<Extract<StudyArtifactDraft, { kind: K }>> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...buildModelRequestHeaders(args.modelConfig),
+  };
+
+  const response = await fetch('/api/revisit/artifacts', {
+    method: 'POST',
+    headers,
+    signal: args.signal,
+    body: JSON.stringify({
+      stage: args.stage,
+      scenes: args.scenes,
+      kind: args.kind,
+      options: args.options,
+      adaptiveContext: args.adaptiveContext,
+      ...(args.modelConfig.thinkingConfig
+        ? { thinkingConfig: args.modelConfig.thinkingConfig }
+        : {}),
+    }),
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const data = (await response.json()) as {
+    success?: boolean;
+    artifact?: StudyArtifactDraft;
+  };
+  if (
+    !data.success ||
+    !data.artifact ||
+    data.artifact.stageId !== args.stage.id ||
+    data.artifact.kind !== args.kind
+  ) {
+    throw new Error('Artifact response missing the requested study artifact');
+  }
+  return data.artifact as Extract<StudyArtifactDraft, { kind: K }>;
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  throw signal.reason ?? new DOMException('Aborted', 'AbortError');
+}
+
 async function requestJudgeFromApi(args: {
   attemptId: string;
   stage: Stage;
   blueprint: RevisitExamBlueprint;
   transcript: RevisitMessage[];
   pageReports: RevisitPageReport[];
+  completedAt?: number;
   modelConfig: ModelConfig;
+  signal?: AbortSignal;
 }): Promise<RevisitJudgeReport> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'x-model': args.modelConfig.modelString,
-    'x-api-key': args.modelConfig.apiKey,
+    ...buildModelRequestHeaders(args.modelConfig),
   };
-  if (args.modelConfig.baseUrl) headers['x-base-url'] = args.modelConfig.baseUrl;
-  if (args.modelConfig.providerType) headers['x-provider-type'] = args.modelConfig.providerType;
 
   const response = await fetch('/api/revisit/judge', {
     method: 'POST',
     headers,
+    signal: args.signal,
     body: JSON.stringify({
       attemptId: args.attemptId,
       stageId: args.stage.id,
       blueprint: args.blueprint,
       transcript: args.transcript,
       pageReports: args.pageReports,
+      completedAt: args.completedAt,
       languageDirective: args.stage.languageDirective,
       ...(args.modelConfig.thinkingConfig
         ? { thinkingConfig: args.modelConfig.thinkingConfig }

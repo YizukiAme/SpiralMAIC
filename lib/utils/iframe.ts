@@ -98,6 +98,26 @@ const ERROR_CAPTURE_SHIM = `<script data-iframe-error-shim>
 })();
 </script>`;
 
+const INTERACTION_CAPTURE_SHIM = `<script data-iframe-interaction-shim>
+(function () {
+  var lastPost = 0;
+  function post(e) {
+    var now = Date.now();
+    if (now - lastPost < 400) return;
+    lastPost = now;
+    try {
+      window.parent.postMessage(
+        { __maicInteractive: true, kind: 'learner-interaction', interactionType: e.type },
+        '*'
+      );
+    } catch (err) {}
+  }
+  ['pointerdown', 'input', 'keydown'].forEach(function (type) {
+    document.addEventListener(type, post, true);
+  });
+})();
+</script>`;
+
 /**
  * Patch embedded HTML to display correctly inside an iframe.
  *
@@ -122,7 +142,15 @@ export function patchHtmlForIframe(html: string): string {
   body { min-height: 100vh; }
 </style>`;
 
-  const injection = '\n' + ERROR_CAPTURE_SHIM + '\n' + STORAGE_SHIM + '\n' + iframeCss;
+  const injection =
+    '\n' +
+    ERROR_CAPTURE_SHIM +
+    '\n' +
+    STORAGE_SHIM +
+    '\n' +
+    INTERACTION_CAPTURE_SHIM +
+    '\n' +
+    iframeCss;
 
   // Insert right after <head> or at the start of the document
   const headIdx = html.indexOf('<head>');

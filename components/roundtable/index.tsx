@@ -62,6 +62,7 @@ interface RoundtableProps {
   readonly cueUserLabel?: string;
   readonly isTopicPending?: boolean;
   readonly onMessageSend?: (message: string) => void;
+  readonly onUserSpeechStateChange?: (active: boolean) => void;
   readonly onDiscussionStart?: (request: DiscussionAction) => void;
   readonly onDiscussionSkip?: () => void;
   readonly onStopDiscussion?: () => void;
@@ -158,6 +159,7 @@ export function Roundtable({
   cueUserLabel,
   isTopicPending,
   onMessageSend,
+  onUserSpeechStateChange,
   onDiscussionStart,
   onDiscussionSkip,
   onStopDiscussion,
@@ -381,6 +383,10 @@ export function Roundtable({
         setIsVoiceOpen(false);
       },
     });
+
+  useEffect(() => {
+    onUserSpeechStateChange?.(isInputOpen || isVoiceOpen || isRecording);
+  }, [isInputOpen, isRecording, isVoiceOpen, onUserSpeechStateChange]);
 
   const handleSendMessage = () => {
     if (!inputValue.trim() || isSendCooldown) return;
@@ -1935,8 +1941,8 @@ export function Roundtable({
                             {student.statusEmoji && (
                               <div
                                 className="absolute -bottom-1 -right-1 z-30 flex size-5 items-center justify-center rounded-full border border-white bg-white text-[12px] shadow-sm dark:border-gray-800 dark:bg-gray-900"
-                                aria-label={student.statusEmoji}
-                                title={student.statusEmoji}
+                                aria-label={student.statusLabel ?? student.statusEmoji}
+                                title={student.statusLabel ?? student.statusEmoji}
                               >
                                 {student.statusEmoji}
                               </div>

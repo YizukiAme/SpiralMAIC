@@ -13,6 +13,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { useChatSessions } from './use-chat-sessions';
 import { SessionList } from './session-list';
 import { LectureNotesView } from './lecture-notes-view';
+import type { RequestLearningExtensionParams } from '@/lib/overtime/types';
 
 interface ChatAreaProps {
   className?: string;
@@ -40,6 +41,10 @@ interface ChatAreaProps {
   currentActionIndex?: number | null;
   canJumpToAction?: (sceneId: string, actionIndex: number) => boolean;
   onJumpToAction?: (sceneId: string, actionIndex: number) => void;
+  onLearningExtensionRequest?: (
+    request: RequestLearningExtensionParams,
+    userPrompt: string,
+  ) => void | Promise<void>;
 }
 
 export interface ChatAreaRef {
@@ -88,6 +93,7 @@ export const ChatArea = forwardRef<ChatAreaRef, ChatAreaProps>(
       currentActionIndex,
       canJumpToAction,
       onJumpToAction,
+      onLearningExtensionRequest,
     },
     ref,
   ) => {
@@ -123,6 +129,7 @@ export const ChatArea = forwardRef<ChatAreaRef, ChatAreaProps>(
       onStopSession,
       onSegmentSealed,
       shouldHoldAfterReveal,
+      onLearningExtensionRequest,
     });
 
     const [activeTab, setActiveTab] = useState<'lecture' | 'chat'>('lecture');

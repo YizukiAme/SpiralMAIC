@@ -19,6 +19,7 @@ import type { SceneOutline } from '@/lib/types/generation';
 import type { VoiceDesign } from '@/lib/audio/voice-design';
 import type { UIMessage } from 'ai';
 import type { AgentEditSessionRecord } from '@/lib/agent/client/agent-edit-session-types';
+import type { OvertimeExtension, OvertimeSceneProvenance } from '@/lib/overtime/types';
 import { createLogger } from '@/lib/logger';
 import { deleteStageRuntimeSafely } from '@/lib/runtime/store';
 
@@ -76,6 +77,7 @@ export interface SceneRecord {
   content: SceneContent; // Stored as JSON
   actions?: Action[]; // Stored as JSON
   whiteboard?: Whiteboard[]; // Stored as JSON
+  overtime?: OvertimeSceneProvenance;
   createdAt: number;
   updatedAt: number;
 }
@@ -223,7 +225,7 @@ export function mediaFileKey(stageId: string, elementId: string): string {
 // ==================== Database Definition ====================
 
 const DATABASE_NAME = 'MAIC-Database';
-const _DATABASE_VERSION = 12;
+const _DATABASE_VERSION = 13;
 
 /**
  * MAIC Database Instance
@@ -243,6 +245,7 @@ class MAICDatabase extends Dexie {
   voiceProfiles!: EntityTable<VoiceProfileRecord, 'id'>;
   autoVoiceCache!: EntityTable<AutoVoiceCacheRecord, 'voiceId'>;
   agentEditSessions!: EntityTable<AgentEditSessionRecord, 'id'>;
+  overtimeExtensions!: EntityTable<OvertimeExtension, 'id'>;
 
   constructor() {
     super(DATABASE_NAME);
@@ -443,6 +446,25 @@ class MAICDatabase extends Dexie {
       autoVoiceCache: 'voiceId, updatedAt',
       agentEditSessions: 'id, stageId, [stageId+updatedAt]',
     });
+
+    // Version 13: Durable one-page post-class overtime generation tasks.
+    this.version(13).stores({
+      stages: 'id, updatedAt',
+      scenes: 'id, stageId, order, [stageId+order]',
+      audioFiles: 'id, createdAt',
+      imageFiles: 'id, createdAt',
+      snapshots: '++id',
+      chatSessions: 'id, stageId, [stageId+createdAt]',
+      playbackState: 'stageId',
+      stageOutlines: 'stageId',
+      mediaFiles: 'id, stageId, [stageId+type]',
+      generatedAgents: 'id, stageId',
+      voiceProfiles: 'id, providerId, kind, updatedAt',
+      autoVoiceCache: 'voiceId, updatedAt',
+      agentEditSessions: 'id, stageId, [stageId+updatedAt]',
+      overtimeExtensions:
+        'id, stageId, sequence, status, updatedAt, [stageId+status], [stageId+sequence]',
+    });
   }
 }
 
@@ -485,12 +507,14 @@ export async function exportDatabase(): Promise<{
   scenes: SceneRecord[];
   chatSessions: ChatSessionRecord[];
   playbackState: PlaybackStateRecord[];
+  overtimeExtensions: OvertimeExtension[];
 }> {
   return {
     stages: await db.stages.toArray(),
     scenes: await db.scenes.toArray(),
     chatSessions: await db.chatSessions.toArray(),
     playbackState: await db.playbackState.toArray(),
+    overtimeExtensions: await db.overtimeExtensions.toArray(),
   };
 }
 
@@ -502,15 +526,19 @@ export async function importDatabase(data: {
   scenes?: SceneRecord[];
   chatSessions?: ChatSessionRecord[];
   playbackState?: PlaybackStateRecord[];
+  overtimeExtensions?: OvertimeExtension[];
 }): Promise<void> {
   await db.transaction(
     'rw',
-    [db.stages, db.scenes, db.chatSessions, db.playbackState],
+    [db.stages, db.scenes, db.chatSessions, db.playbackState, db.overtimeExtensions],
     async () => {
       if (data.stages) await db.stages.bulkPut(data.stages);
       if (data.scenes) await db.scenes.bulkPut(data.scenes);
       if (data.chatSessions) await db.chatSessions.bulkPut(data.chatSessions);
       if (data.playbackState) await db.playbackState.bulkPut(data.playbackState);
+      if (data.overtimeExtensions) {
+        await db.overtimeExtensions.bulkPut(data.overtimeExtensions);
+      }
     },
   );
   log.info('Database imported successfully');
@@ -540,6 +568,7 @@ export async function deleteStageWithRelatedData(stageId: string): Promise<void>
       db.mediaFiles,
       db.generatedAgents,
       db.agentEditSessions,
+      db.overtimeExtensions,
     ],
     async () => {
       await db.stages.delete(stageId);
@@ -550,6 +579,7 @@ export async function deleteStageWithRelatedData(stageId: string): Promise<void>
       await db.mediaFiles.where('stageId').equals(stageId).delete();
       await db.generatedAgents.where('stageId').equals(stageId).delete();
       await db.agentEditSessions.where('stageId').equals(stageId).delete();
+      await db.overtimeExtensions.where('stageId').equals(stageId).delete();
     },
   );
   // Learner-runtime data lives in a separate IndexedDB database, so it is
@@ -582,5 +612,6 @@ export async function getDatabaseStats() {
     stageOutlines: await db.stageOutlines.count(),
     mediaFiles: await db.mediaFiles.count(),
     generatedAgents: await db.generatedAgents.count(),
+    overtimeExtensions: await db.overtimeExtensions.count(),
   };
 }

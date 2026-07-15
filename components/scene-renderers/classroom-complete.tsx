@@ -2,15 +2,13 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { animate, motion, MotionConfig, useReducedMotion } from 'motion/react';
-import { BrainCircuit, FileText, HelpCircle, Gamepad2, Puzzle } from 'lucide-react';
+import { FileText, HelpCircle, Gamepad2, Puzzle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { useStageStore } from '@/lib/store';
-import { useSettingsStore } from '@/lib/store/settings';
 import type { Scene, SceneType } from '@/lib/types/stage';
 import { summarizeScenes } from '@/lib/classroom/complete-summary';
 import { readAnswersForSummary } from '@/lib/quiz/persistence';
-import { markPlaybackCompleteForRevisit } from '@/lib/revisit/client';
 
 const SCENE_TYPE_ICONS: Record<SceneType, typeof FileText> = {
   slide: FileText,
@@ -305,16 +303,9 @@ function QuizRing({ pct, delay = 0 }: { pct: number; delay?: number }) {
 interface ClassroomCompletePageProps {
   readonly scenes: Scene[];
   readonly title: string;
-  readonly stageId?: string;
-  readonly showRevisitInvite?: boolean;
 }
 
-export function ClassroomCompletePage({
-  scenes,
-  title,
-  stageId,
-  showRevisitInvite = false,
-}: ClassroomCompletePageProps) {
+export function ClassroomCompletePage({ scenes, title }: ClassroomCompletePageProps) {
   const { t, locale } = useI18n();
   const prefersReducedMotion = useReducedMotion();
 
@@ -499,19 +490,6 @@ export function ClassroomCompletePage({
               </div>
             </motion.div>
           )}
-
-          {showRevisitInvite && stageId ? (
-            <motion.a
-              href={`/classroom/${stageId}/revisit`}
-              initial={{ opacity: 0, y: 14, scale: 0.96 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={{ delay: 1.32, type: 'spring', stiffness: 220, damping: 20 }}
-              className="inline-flex items-center gap-2 rounded-lg bg-gray-950 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-gray-950/15 transition-colors hover:bg-gray-800 dark:bg-white dark:text-gray-950 dark:hover:bg-gray-100"
-            >
-              <BrainCircuit className="size-4" />
-              {t('classroomComplete.revisitInviteCta')}
-            </motion.a>
-          ) : null}
         </div>
       </section>
     </MotionConfig>
@@ -521,21 +499,6 @@ export function ClassroomCompletePage({
 export function ClassroomCompletePageConnected() {
   const stage = useStageStore((s) => s.stage);
   const scenes = useStageStore((s) => s.scenes);
-  const reverseChallengeEnabled = useSettingsStore((s) => s.reverseChallengeEnabled);
 
-  useEffect(() => {
-    if (!stage) return;
-    void markPlaybackCompleteForRevisit({ stage, scenes }).catch(() => {
-      // Revisit prep is opportunistic here; the challenge page surfaces retry.
-    });
-  }, [stage, scenes]);
-
-  return (
-    <ClassroomCompletePage
-      scenes={scenes}
-      title={stage?.name ?? ''}
-      stageId={stage?.id}
-      showRevisitInvite={reverseChallengeEnabled}
-    />
-  );
+  return <ClassroomCompletePage scenes={scenes} title={stage?.name ?? ''} />;
 }

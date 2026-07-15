@@ -33,6 +33,7 @@ export function StepVisualizer({
 }) {
   switch (stepId) {
     case 'pdf-analysis':
+    case 'revisit-prepare':
       return <PdfScanVisualizer />;
     case 'web-search':
       return <WebSearchVisualizer sources={webSearchSources || []} />;
@@ -41,6 +42,7 @@ export function StepVisualizer({
     case 'agent-generation':
       return <AgentGenerationVisualizer />;
     case 'slide-content':
+    case 'revisit-page':
       return <ContentVisualizer />;
     case 'actions':
       return <ActionsVisualizer />;

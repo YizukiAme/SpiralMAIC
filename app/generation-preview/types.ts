@@ -1,4 +1,12 @@
-import { ScanLine, Search, Bot, FileText, LayoutPanelLeft, Clapperboard } from 'lucide-react';
+import {
+  ScanLine,
+  Search,
+  Bot,
+  FileText,
+  LayoutPanelLeft,
+  Clapperboard,
+  BrainCircuit,
+} from 'lucide-react';
 import { useSettingsStore } from '@/lib/store/settings';
 import type {
   SceneOutline,
@@ -7,10 +15,12 @@ import type {
   ImageMapping,
   SessionDocumentSource,
 } from '@/lib/types/generation';
+import type { RevisitExamBlueprint } from '@/lib/revisit/types';
 
 // Session state stored in sessionStorage
 export interface GenerationSessionState {
   sessionId: string;
+  mode?: 'course' | 'revisit';
   requirements: UserRequirements;
   pdfText: string;
   documentSources?: SessionDocumentSource[];
@@ -40,6 +50,14 @@ export interface GenerationSessionState {
   courseTitle?: string;
   // Server-effective vocational mode from the outline generation done event.
   taskEngineMode?: boolean;
+  // Reverse Challenge generation session. Course generation leaves this empty.
+  revisit?: {
+    stageId: string;
+    attemptId: string;
+    forceRegenerate: boolean;
+    scope?: string;
+    blueprint?: RevisitExamBlueprint;
+  };
 }
 
 export type GenerationStep = {
@@ -132,7 +150,26 @@ export const ALL_STEPS: GenerationStep[] = [
   },
 ];
 
+export const REVISIT_STEPS: GenerationStep[] = [
+  {
+    id: 'revisit-prepare',
+    title: 'generation.revisitPreparingPath',
+    description: 'generation.revisitPreparingPathDesc',
+    icon: BrainCircuit,
+    type: 'analysis',
+  },
+  {
+    id: 'revisit-page',
+    title: 'generation.revisitGeneratingPage',
+    description: 'generation.revisitGeneratingPageDesc',
+    icon: LayoutPanelLeft,
+    type: 'visual',
+  },
+];
+
 export const getActiveSteps = (session: GenerationSessionState | null) => {
+  if (session?.mode === 'revisit') return REVISIT_STEPS;
+
   return ALL_STEPS.filter((step) => {
     if (step.id === 'pdf-analysis') {
       return Boolean(
@@ -145,3 +182,7 @@ export const getActiveSteps = (session: GenerationSessionState | null) => {
     return true;
   });
 };
+
+export function shouldAutoStartRevisitGeneration(runParam: string | null): boolean {
+  return runParam === '1';
+}

@@ -121,6 +121,8 @@ export const LLM_STAGES = [
   'quiz-grade',
   'revisit-blueprint',
   'revisit-judge',
+  'revisit-materials',
+  'overtime-outline',
   'pbl-chat',
   'pbl-v2-runtime',
   'pbl-v2-runtime:instructor',

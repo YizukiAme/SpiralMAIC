@@ -15,6 +15,7 @@ import type { Action } from '@/lib/types/action';
 import type { WidgetType, WidgetConfig } from '@/lib/types/widgets';
 import type { PBLProjectConfig } from '@/lib/pbl/types';
 import type { PBLProjectV2 } from '@/lib/pbl/v2/types';
+import type { OvertimeSceneProvenance } from '@/lib/overtime/types';
 
 export type {
   SceneType,
@@ -113,6 +114,8 @@ export type AppScene = DslScene<Action, SceneContent> & {
    * scene-derived outline.
    */
   outlineId?: string;
+  /** Metadata for a durable page appended by Infinite Mode after lesson completion. */
+  overtime?: OvertimeSceneProvenance;
 };
 export type Scene = AppScene;
 

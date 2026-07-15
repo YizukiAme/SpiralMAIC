@@ -2,16 +2,21 @@ import { describe, expect, test } from 'vitest';
 
 import {
   buildRevisitGateContext,
+  buildRevisitOpeningContext,
   buildRevisitProbeContext,
   createRevisitChatRequest,
   createAssistantRevisitMessage,
   createTeacherRevisitMessage,
+  applyRevisitGateToPageState,
+  applyRevisitGateToPageStates,
   buildRevisitSceneStatuses,
   buildRevisitChatSession,
   canNavigateRevisitPage,
+  compactRevisitDirectorState,
   getRevisitCueUserLabelKey,
-  getRevisitStudentStatusEmoji,
-  parseRevisitChatSse,
+  getLastUnlockedRevisitPageIndex,
+  getRevisitParticipantStatusBadge,
+  isRevisitStudentQuestion,
   REVISIT_ASSISTANT_AGENT_ID,
   REVISIT_DEFAULT_STUDENT_AGENT_IDS,
   REVISIT_PAGE_PROBE_CAP,
@@ -119,6 +124,37 @@ const scene: Scene = {
   },
 };
 
+describe('Reverse Challenge assistant opening context', () => {
+  test('uses the model-authored whole-course brief when the blueprint provides one', () => {
+    const context = buildRevisitOpeningContext({
+      blueprint: {
+        ...blueprint,
+        openingBrief: '  本课从辨认真实主张出发，进一步理解主张如何在稻草人谬误中被歪曲。  ',
+      },
+      sourceScenes: [scene],
+      locale: 'zh-CN',
+    });
+
+    expect(context.brief).toBe('本课从辨认真实主张出发，进一步理解主张如何在稻草人谬误中被歪曲。');
+  });
+
+  test('builds an ordered topic path from source pages for older blueprints', () => {
+    const context = buildRevisitOpeningContext({
+      blueprint,
+      sourceScenes: [
+        { ...scene, id: 'object', order: 2, title: '什么是宾语' },
+        { ...scene, id: 'subject', order: 0, title: '什么是主语' },
+        { ...scene, id: 'predicate', order: 1, title: '什么是谓语' },
+      ],
+      locale: 'zh-CN',
+    });
+
+    expect(context.brief).toBeNull();
+    expect(context.topics.indexOf('什么是主语')).toBeLessThan(context.topics.indexOf('什么是谓语'));
+    expect(context.topics.indexOf('什么是谓语')).toBeLessThan(context.topics.indexOf('什么是宾语'));
+  });
+});
+
 describe('revisit session helpers', () => {
   test('selects probes for the active page only', () => {
     expect(selectPageProbes(blueprint, 0).map((probe) => probe.id)).toEqual(['p1', 'p2']);
@@ -163,7 +199,24 @@ describe('revisit session helpers', () => {
     ]);
     expect(request.config.revisitProbeContext).toContain('Candidate probes');
     expect(request.config.revisitGateContext).toContain('latest_teacher_turn');
+    expect(request.config.revisitFallbackDirective).toBe('probe');
     expect(request.messages[0].metadata?.originalRole).toBe('teacher');
+  });
+
+  test('chat request falls back to rescue after the page probe budget is exhausted', () => {
+    const request = createRevisitChatRequest({
+      stage,
+      scenes: [scene],
+      blueprint,
+      messages: [createTeacherRevisitMessage('Let me try again.', 10)],
+      pageState: { ...pageState, additionalProbeCount: REVISIT_PAGE_PROBE_CAP },
+      latestTeacherText: 'Let me try again.',
+      elapsedMinutes: 1,
+      model: 'openai:gpt-4.1-mini',
+      apiKey: 'key',
+    });
+
+    expect(request.config.revisitFallbackDirective).toBe('rescue');
   });
 
   test('builds a non-persisted chat session for the revisit transcript surface', () => {
@@ -202,7 +255,7 @@ describe('revisit session helpers', () => {
 
   test('creates a themed assistant opening message for the resolved assistant seat', () => {
     const message = createAssistantRevisitMessage({
-      text: '这场挑战会围绕「虚拟语气」展开，第一页是「什么是虚拟语气」。我会在旁边帮大家守住节奏。',
+      text: '上一堂课从语气的作用讲到虚拟语气的表达方式。这次会沿着这条脉络回顾和应用，先从「什么是虚拟语气」开始。',
       agentId: 'custom-assistant',
       agentName: 'AI助教',
       agentAvatar: '/avatars/assistant.png',
@@ -291,23 +344,14 @@ describe('revisit session helpers', () => {
     });
   });
 
-  test('classifies assistant turns using resolved revisit seats', () => {
+  test('classifies agent roles using resolved revisit seats', () => {
     const agentIds = {
       studentAgentId: 'custom-student',
       studentAgentIds: ['custom-student'],
       assistantAgentId: 'custom-assistant',
     };
-    const sse = [
-      'data: {"type":"agent_start","data":{"messageId":"m1","agentId":"custom-assistant","agentName":"Assistant"}}',
-      '',
-      'data: {"type":"text_delta","data":{"messageId":"m1","content":"Try a simpler example."}}',
-      '',
-      '',
-    ].join('\n');
-
     expect(roleForRevisitAgent('custom-assistant', agentIds)).toBe('assistant');
     expect(roleForRevisitAgent('custom-student', agentIds)).toBe('student');
-    expect(parseRevisitChatSse(sse, agentIds).events.messages[0]?.role).toBe('assistant');
   });
 
   test('locks forward revisit navigation until the current page passes', () => {
@@ -327,6 +371,28 @@ describe('revisit session helpers', () => {
     expect(canNavigateRevisitPage(unlocked, 1, 2, true)).toBe(true);
   });
 
+  test('allows opening a failed page without unlocking other future pages', () => {
+    const states: RevisitSessionPageState[] = [
+      { ...pageState, pageIndex: 0, passed: false },
+      { ...pageState, pageIndex: 1, passed: false },
+      { ...pageState, pageIndex: 2, passed: false },
+    ];
+
+    expect(canNavigateRevisitPage(states, 0, 1, false, 2)).toBe(false);
+    expect(canNavigateRevisitPage(states, 0, 2, false, 2)).toBe(true);
+  });
+
+  test('finds the last generated page unlocked by the pass chain', () => {
+    const states: RevisitSessionPageState[] = [
+      { ...pageState, pageIndex: 0, passed: true },
+      { ...pageState, pageIndex: 1, passed: false },
+      { ...pageState, pageIndex: 2, passed: false },
+    ];
+
+    expect(getLastUnlockedRevisitPageIndex(states, [{}, {}, undefined], false)).toBe(1);
+    expect(getLastUnlockedRevisitPageIndex(states, [{}, undefined, undefined], false)).toBe(0);
+  });
+
   test('maps revisit page state to classroom sidebar scene statuses', () => {
     const scenes = [{ id: 'scene-1' }, { id: 'scene-2' }, { id: 'scene-3' }];
     const states: RevisitSessionPageState[] = [
@@ -343,18 +409,373 @@ describe('revisit session helpers', () => {
     expect(buildRevisitSceneStatuses(scenes, states, 1, true)['scene-3']?.locked).toBe(false);
   });
 
-  test('maps page progress to lightweight student status emoji', () => {
-    expect(getRevisitStudentStatusEmoji({ ...pageState, additionalProbeCount: 0 }, false)).toBe(
-      '🤔',
-    );
-    expect(getRevisitStudentStatusEmoji({ ...pageState, additionalProbeCount: 0 }, true)).toBe(
-      '👂',
-    );
-    expect(getRevisitStudentStatusEmoji({ ...pageState, additionalProbeCount: 1 }, false)).toBe(
-      '🤨',
-    );
-    expect(getRevisitStudentStatusEmoji({ ...pageState, passed: true }, false)).toBe('🤓');
-    expect(getRevisitStudentStatusEmoji({ ...pageState, rescued: true }, false)).toBe('🤔');
+  test('keeps displayed states when a pass gate is incomplete but does not unlock the page', () => {
+    const incomplete = applyRevisitGateToPageState({
+      pageState: {
+        ...pageState,
+        studentStates: {
+          'student-1': 'uncertain',
+          'student-2': 'satisfied',
+        },
+      },
+      gate: {
+        status: 'pass',
+        pageIndex: 0,
+        reason: 'covered enough',
+        studentStates: { 'student-1': 'satisfied' },
+      },
+      activeStudentAgentIds: ['student-1', 'student-2'],
+    });
+
+    expect(incomplete.passed).toBe(false);
+    expect(incomplete.studentStates).toEqual({
+      'student-1': 'satisfied',
+      'student-2': 'satisfied',
+    });
+  });
+
+  test('applies pass only when every active student is satisfied', () => {
+    const complete = applyRevisitGateToPageState({
+      pageState,
+      gate: {
+        status: 'pass',
+        pageIndex: 0,
+        reason: 'everyone accepted it',
+        studentStates: {
+          'student-1': 'satisfied',
+          'student-2': 'satisfied',
+        },
+      },
+      activeStudentAgentIds: ['student-1', 'student-2'],
+    });
+
+    expect(complete.passed).toBe(true);
+  });
+
+  test('clears the responding student question after a complete pass and acknowledgment', () => {
+    const next = applyRevisitGateToPageState({
+      pageState: {
+        ...pageState,
+        askedProbeIds: ['p1'],
+        additionalProbeCount: 1,
+        studentStates: {
+          'student-1': 'questioning',
+          'student-2': 'satisfied',
+        },
+      },
+      gate: {
+        status: 'pass',
+        pageIndex: 0,
+        reason: 'the answer resolved the question',
+        studentStates: {
+          'student-1': 'questioning',
+          'student-2': 'satisfied',
+        },
+      },
+      activeStudentAgentIds: ['student-1', 'student-2'],
+      studentMessagesSinceTeacherTurn: [
+        {
+          id: 'm-ack',
+          role: 'student',
+          agentId: 'student-1',
+          text: '明白了，sep 只影响参数之间的分隔。',
+          createdAt: 20,
+        },
+      ],
+      fallbackNextProbeId: 'p2',
+    });
+
+    expect(next.studentStates).toEqual({
+      'student-1': 'satisfied',
+      'student-2': 'satisfied',
+    });
+    expect(next.passed).toBe(true);
+    expect(next.additionalProbeCount).toBe(1);
+    expect(next.askedProbeIds).toEqual(['p1']);
+  });
+
+  test('a stale questioning state blocks pass without consuming another probe', () => {
+    const next = applyRevisitGateToPageState({
+      pageState: {
+        ...pageState,
+        askedProbeIds: ['p1'],
+        additionalProbeCount: 1,
+        studentStates: {
+          'student-1': 'questioning',
+          'student-2': 'satisfied',
+        },
+      },
+      gate: {
+        status: 'pass',
+        pageIndex: 0,
+        reason: 'covered enough',
+        studentStates: {
+          'student-1': 'questioning',
+          'student-2': 'satisfied',
+        },
+      },
+      activeStudentAgentIds: ['student-1', 'student-2'],
+      fallbackNextProbeId: 'p2',
+    });
+
+    expect(next.passed).toBe(false);
+    expect(next.additionalProbeCount).toBe(1);
+    expect(next.askedProbeIds).toEqual(['p1']);
+  });
+
+  test('student questions locally block a pass decision and consume a probe turn', () => {
+    const next = applyRevisitGateToPageState({
+      pageState: { ...pageState, askedProbeIds: [], additionalProbeCount: 0 },
+      gate: {
+        status: 'pass',
+        pageIndex: 0,
+        reason: 'covered enough',
+        studentStates: {
+          'student-1': 'satisfied',
+          'student-2': 'satisfied',
+        },
+      },
+      activeStudentAgentIds: ['student-1', 'student-2'],
+      studentMessagesSinceTeacherTurn: [
+        {
+          id: 'm1',
+          role: 'student',
+          agentId: 'student-2',
+          text: '老师，apples 算主语吗？',
+          createdAt: 20,
+        },
+      ],
+      fallbackNextProbeId: 'p2',
+    });
+
+    expect(next.passed).toBe(false);
+    expect(next.additionalProbeCount).toBe(1);
+    expect(next.askedProbeIds).toEqual(['p2']);
+    expect(next.studentStates).toMatchObject({ 'student-2': 'questioning' });
+  });
+
+  test('successive gates merge into the latest page state in one teacher turn', () => {
+    const initial = [{ ...pageState, askedProbeIds: [], additionalProbeCount: 0 }];
+    const first = applyRevisitGateToPageStates({
+      pageStates: initial,
+      pageIndex: 0,
+      gate: { status: 'probe', pageIndex: 0, reason: 'ask once' },
+      activeStudentAgentIds: ['student-1'],
+      candidateProbeIds: ['p1', 'p2'],
+    });
+    const second = applyRevisitGateToPageStates({
+      pageStates: first,
+      pageIndex: 0,
+      gate: { status: 'probe', pageIndex: 0, reason: 'ask again' },
+      activeStudentAgentIds: ['student-1'],
+      candidateProbeIds: ['p1', 'p2'],
+    });
+
+    expect(second[0]).toMatchObject({
+      additionalProbeCount: 2,
+      askedProbeIds: ['p1', 'p2'],
+    });
+  });
+
+  test('an incomplete probe still consumes exactly one probe turn', () => {
+    const next = applyRevisitGateToPageState({
+      pageState: {
+        ...pageState,
+        askedProbeIds: [],
+        additionalProbeCount: 0,
+        studentStates: { 'student-2': 'satisfied' },
+      },
+      gate: {
+        status: 'probe',
+        pageIndex: 0,
+        reason: 'ask once',
+        studentStates: { 'student-1': 'questioning' },
+      },
+      activeStudentAgentIds: ['student-1', 'student-2'],
+      studentMessagesSinceTeacherTurn: [
+        {
+          id: 'm-probe',
+          role: 'student',
+          agentId: 'student-1',
+          text: 'sep 可以使用换行符吗？',
+          createdAt: 20,
+        },
+      ],
+      fallbackNextProbeId: 'p1',
+    });
+
+    expect(next.additionalProbeCount).toBe(1);
+    expect(next.askedProbeIds).toEqual(['p1']);
+    expect(next.studentStates).toEqual({
+      'student-1': 'questioning',
+      'student-2': 'satisfied',
+    });
+  });
+
+  test('a fail gate consumes one probe turn even when the state table is incomplete', () => {
+    const next = applyRevisitGateToPageState({
+      pageState: { ...pageState, askedProbeIds: [], additionalProbeCount: 0 },
+      gate: {
+        status: 'fail',
+        pageIndex: 0,
+        reason: 'the explanation needs one focused retry',
+        studentStates: { 'student-1': 'uncertain' },
+      },
+      activeStudentAgentIds: ['student-1', 'student-2'],
+      fallbackNextProbeId: 'p1',
+    });
+
+    expect(next.additionalProbeCount).toBe(1);
+    expect(next.askedProbeIds).toEqual(['p1']);
+    expect(next.passed).toBe(false);
+  });
+
+  test('rescue marks the page as rescued without consuming another probe turn', () => {
+    const next = applyRevisitGateToPageState({
+      pageState: {
+        ...pageState,
+        askedProbeIds: ['p1', 'p2'],
+        additionalProbeCount: REVISIT_PAGE_PROBE_CAP,
+      },
+      gate: {
+        status: 'rescue',
+        pageIndex: 0,
+        reason: 'the probe budget is exhausted',
+      },
+      activeStudentAgentIds: ['student-1', 'student-2'],
+      fallbackNextProbeId: 'p3',
+    });
+
+    expect(next.rescued).toBe(true);
+    expect(next.passed).toBe(false);
+    expect(next.additionalProbeCount).toBe(REVISIT_PAGE_PROBE_CAP);
+    expect(next.askedProbeIds).toEqual(['p1', 'p2']);
+  });
+
+  test('filters unknown student ids from the visible state map', () => {
+    const next = applyRevisitGateToPageState({
+      pageState,
+      gate: {
+        status: 'pass',
+        pageIndex: 0,
+        reason: 'covered',
+        studentStates: {
+          'student-1': 'satisfied',
+          'unknown-student': 'satisfied',
+        },
+      },
+      activeStudentAgentIds: ['student-1'],
+    });
+
+    expect(next.studentStates).toEqual({ 'student-1': 'satisfied' });
+    expect(next.passed).toBe(true);
+  });
+
+  test('compacts revisit director state without resetting its total turn count', () => {
+    const compacted = compactRevisitDirectorState({
+      turnCount: 9,
+      agentResponses: Array.from({ length: 9 }, (_, index) => ({
+        agentId: `student-${index}`,
+        agentName: `Student ${index}`,
+        contentPreview: `response-${index}`,
+        actionCount: 0,
+        whiteboardActions: [],
+      })),
+      whiteboardLedger: Array.from({ length: 30 }, (_, index) => ({
+        actionName: 'wb_clear' as const,
+        agentId: `student-${index}`,
+        agentName: `Student ${index}`,
+        params: {},
+      })),
+    });
+
+    expect(compacted.turnCount).toBe(9);
+    expect(compacted.agentResponses).toHaveLength(6);
+    expect(compacted.agentResponses[0]?.contentPreview).toBe('response-3');
+    expect(compacted.whiteboardLedger).toHaveLength(24);
+    expect(compacted.whiteboardLedger[0]?.agentId).toBe('student-6');
+  });
+
+  test('detects direct student questions without treating acknowledgements as questions', () => {
+    expect(isRevisitStudentQuestion('老师，为什么这里不是 apples？')).toBe(true);
+    expect(isRevisitStudentQuestion('我还是不明白。')).toBe(true);
+    expect(isRevisitStudentQuestion('这个我还不会。')).toBe(true);
+    expect(isRevisitStudentQuestion("I still don't understand.")).toBe(true);
+    expect(isRevisitStudentQuestion('I am still confused.')).toBe(true);
+    expect(isRevisitStudentQuestion("I don't know.")).toBe(true);
+    expect(isRevisitStudentQuestion("This still doesn't make sense.")).toBe(true);
+    expect(isRevisitStudentQuestion('懂了，我会把 Cats 当成主语。')).toBe(false);
+    expect(isRevisitStudentQuestion('我现在明白什么是主语了。')).toBe(false);
+    expect(isRevisitStudentQuestion('我知道为什么这里用主语了。')).toBe(false);
+    expect(isRevisitStudentQuestion('I understand it now.')).toBe(false);
+  });
+
+  test('maps per-student revisit state to lightweight status badges', () => {
+    expect(
+      getRevisitParticipantStatusBadge({
+        pageState,
+        agentId: 'student-1',
+        teacherSpeaking: true,
+      }),
+    ).toMatchObject({ emoji: '👂', labelKey: 'revisit.challenge.studentStatus.listening' });
+
+    expect(
+      getRevisitParticipantStatusBadge({
+        pageState,
+        agentId: 'student-1',
+        awaitingStudentStatusUpdate: true,
+      }),
+    ).toMatchObject({ emoji: '🤔', labelKey: 'revisit.challenge.studentStatus.thinking' });
+
+    expect(
+      getRevisitParticipantStatusBadge({
+        pageState: {
+          ...pageState,
+          studentStates: {
+            'student-1': 'questioning',
+            'student-2': 'satisfied',
+            'student-3': 'uncertain',
+          },
+        },
+        agentId: 'student-1',
+      }),
+    ).toMatchObject({ emoji: '❓', labelKey: 'revisit.challenge.studentStatus.questioning' });
+
+    expect(
+      getRevisitParticipantStatusBadge({
+        pageState: {
+          ...pageState,
+          studentStates: {
+            'student-1': 'questioning',
+            'student-2': 'satisfied',
+            'student-3': 'uncertain',
+          },
+        },
+        agentId: 'student-2',
+      }),
+    ).toMatchObject({ emoji: '🤓', labelKey: 'revisit.challenge.studentStatus.satisfied' });
+
+    expect(
+      getRevisitParticipantStatusBadge({
+        pageState: {
+          ...pageState,
+          studentStates: {
+            'student-1': 'questioning',
+            'student-2': 'satisfied',
+            'student-3': 'uncertain',
+          },
+        },
+        agentId: 'student-3',
+      }),
+    ).toMatchObject({ emoji: '🤨', labelKey: 'revisit.challenge.studentStatus.uncertain' });
+
+    expect(
+      getRevisitParticipantStatusBadge({
+        pageState: { ...pageState, rescued: true },
+        agentId: 'assistant-1',
+        assistant: true,
+      }),
+    ).toMatchObject({ emoji: '🛟', labelKey: 'revisit.challenge.studentStatus.rescue' });
   });
 
   test('uses the teach-this-page cue only when entering a revisit page', () => {
@@ -363,24 +784,5 @@ describe('revisit session helpers', () => {
     expect(reduceRevisitCueUserPrompt('default', 'enter-page')).toBe('teach-page');
     expect(reduceRevisitCueUserPrompt('teach-page', 'teacher-submit')).toBe('default');
     expect(reduceRevisitCueUserPrompt('teach-page', 'agent-cued-user')).toBe('default');
-  });
-
-  test('parses revisit gate and streamed agent text from SSE', () => {
-    const sse = [
-      'data: {"type":"agent_start","data":{"messageId":"m1","agentId":"default-4","agentName":"Student"}}',
-      '',
-      'data: {"type":"text_delta","data":{"messageId":"m1","content":"Why weaker?"}}',
-      '',
-      'data: {"type":"revisit_gate","data":{"status":"probe","pageIndex":0,"reason":"missing example"}}',
-      '',
-      'data: {"type":"done","data":{"totalActions":0,"totalAgents":1,"directorState":{"turnCount":1,"agentResponses":[],"whiteboardLedger":[]}}}',
-      '',
-      '',
-    ].join('\n');
-
-    const parsed = parseRevisitChatSse(sse);
-    expect(parsed.events.messages[0]?.text).toBe('Why weaker?');
-    expect(parsed.events.gate?.status).toBe('probe');
-    expect(parsed.events.directorState?.turnCount).toBe(1);
   });
 });

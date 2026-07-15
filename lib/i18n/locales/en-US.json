@@ -234,7 +234,9 @@
       "imageDrop": "Drop an image or click to choose a file",
       "imageOr": "or paste an image URL",
       "imageUrlPlaceholder": "https://…",
-      "imageInsert": "Insert"
+      "imageInsert": "Insert",
+      "expandToolbar": "Show insert tools",
+      "collapseToolbar": "Hide insert tools"
     },
     "nav": {
       "addSlide": "Add slide",
@@ -287,7 +289,7 @@
       "commentPromptLabel": "Grading guidance",
       "commentPromptPlaceholder": "How should this open response be graded?",
       "empty": "No questions yet",
-      "emptyHint": "Use “Add question” to create the first one.",
+      "emptyHint": "Use the “Add question” button above to create the first one.",
       "type": {
         "single": "Single choice",
         "multiple": "Multiple choice",
@@ -857,19 +859,19 @@
   },
   "upload": {
     "pdfSizeLimit": "Supports PDF files up to 50MB",
-    "courseMaterialSizeLimit": "Documents, slides, spreadsheets, images, and plain text — up to 50MB (accepted formats depend on the selected extractor)",
+    "courseMaterialSizeLimit": "Supports PDF, DOCX, PPTX, TXT, and Markdown files up to 50MB",
     "generateFailed": "Failed to generate classroom, please try again",
     "requirementPlaceholder": "Tell me anything you want to learn, e.g.\n\"Teach me Python from scratch in 30 minutes\"\n\"Explain Fourier Transform on the whiteboard\"\n\"How to play the board game Avalon\"",
     "requirementRequired": "Please enter course requirements",
     "fileTooLarge": "File too large. Please select a file smaller than 50MB",
     "courseMaterialCountLimit": "You can upload up to 5 course material files",
     "courseMaterialTotalSizeLimit": "Total course material size must be under 150MB",
-    "unsupportedCourseMaterial": "This format isn't supported by the current extractor. Switch the extractor or pick a different file."
+    "unsupportedCourseMaterial": "Unsupported course material type. Please upload PDF, DOCX, PPTX, TXT, or Markdown."
   },
   "generation": {
     "pdfLoadFailed": "Failed to load PDF file, please try again",
     "pdfParseFailed": "PDF parsing failed",
-    "analyzingCourseMaterial": "Analyzing documents",
+    "analyzingCourseMaterial": "Analyzing {{type}} file",
     "analyzingCourseMaterialDesc": "Extracting document structure and content...",
     "courseMaterialLoadFailed": "Failed to load course material, please try again",
     "courseMaterialParseFailed": "Course material parsing failed",
@@ -975,7 +977,18 @@
     "webSearchFailed": "Web search failed",
     "outlinesReadyCount": "{{ready}} / {{total}} sections ready",
     "jumpToBlankTitle": "Jump to a section that still needs a title",
-    "analyzingMediaMaterial": "Analyzing audio/video"
+    "analyzingMediaMaterial": "Analyzing audio/video",
+    "revisitPreparingPath": "Preparing Review Path",
+    "revisitPreparingPathDesc": "Analyzing the key ideas from this lesson...",
+    "revisitGeneratingPage": "Generating Challenge Page",
+    "revisitGeneratingPageDesc": "Generating reverse-teaching prompt pages...",
+    "revisitReady": "Review Challenge Ready",
+    "revisitReadyDesc": "The first challenge page is ready. Opening the classroom now.",
+    "generatingCourse": "Generating course",
+    "openingClassroom": "Opening classroom...",
+    "outlineReady": "Course outline generated",
+    "generatingFirstPage": "Generating first page...",
+    "firstPageReady": "First page ready! Opening classroom..."
   },
   "settings": {
     "title": "Settings",
@@ -1076,7 +1089,8 @@
       "bocha": "Bocha",
       "brave": "Brave Search",
       "baidu": "Baidu",
-      "searxng": "SearXNG"
+      "searxng": "SearXNG",
+      "openai-codex": "Codex"
     },
     "providerTypes": {
       "openai": "OpenAI Protocol",
@@ -1682,10 +1696,49 @@
       "multiplierValue": "{{value}}x",
       "demoArea": "Demo",
       "acceleratedClock": "Accelerated clock",
-      "gateSkip": "Skip page gates"
+      "gateSkip": "Skip page gates",
+      "virtualClock": "Virtual clock",
+      "virtualClockDetail": "The first time jump copies all Spiral data. Simulated actions never change formal records.",
+      "simulatedTime": "Current time",
+      "realTime": "Real system time",
+      "demoOffset": "Demo time is {{hours}} hours ahead",
+      "restoreRealTime": "Restore real time"
     },
     "alidocmindAccessKeyId": "AccessKey ID",
-    "alidocmindAccessKeySecret": "AccessKey Secret"
+    "alidocmindAccessKeySecret": "AccessKey Secret",
+    "codexOAuth": {
+      "experimental": "Experimental third-party Codex integration; uses your ChatGPT plan quota.",
+      "unavailableTitle": "Codex sign-in is unavailable",
+      "unavailable": {
+        "FEATURE_DISABLED": "Enable Codex OAuth on the server to use this provider.",
+        "SERVERLESS_UNSUPPORTED": "Codex OAuth requires a self-hosted Node server with persistent storage.",
+        "ACCESS_CODE_REQUIRED": "Set ACCESS_CODE before enabling Codex OAuth in production.",
+        "DATA_DIR_UNWRITABLE": "The server cannot write to its data directory. Check /app/data permissions."
+      },
+      "connectedAs": "Connected as {email}",
+      "connected": "Connected with ChatGPT",
+      "signInBrowser": "Sign in with ChatGPT",
+      "signInDevice": "Use device code",
+      "waiting": "Waiting for authorization…",
+      "deviceInstructions": "Open the verification page and enter this one-time code.",
+      "openVerification": "Open verification page",
+      "copyCode": "Copy code",
+      "copied": "Copied",
+      "cancel": "Cancel sign-in",
+      "signOut": "Sign out",
+      "models": "Available models",
+      "fastMode": "Fast mode",
+      "fastModeDescription": "Applies only to supported models: about 1.5x faster, but uses more of your ChatGPT plan quota.",
+      "testConnection": "Test connection",
+      "testSuccess": "Codex connection succeeded.",
+      "testUnauthorized": "Sign in with ChatGPT again.",
+      "testForbidden": "This ChatGPT workspace does not have Codex access.",
+      "testRateLimited": "Your ChatGPT plan quota or rate limit has been reached.",
+      "testFailed": "Codex connection failed.",
+      "loginFailed": "Sign-in failed. Try again or use the device-code flow.",
+      "loginExpired": "This sign-in attempt expired. Start a new one."
+    },
+    "connected": "Connected"
   },
   "profile": {
     "title": "Profile",
@@ -1740,8 +1793,8 @@
       "assistant": "AI assistant",
       "emptyTranscript": "Start teaching this page when you are ready.",
       "thinking": "Student is thinking...",
-      "teachThisPage": "Teach this page to your students.",
-      "assistantOpening": "This challenge is about \"{{stage}}\". The first page is \"{{page}}\". I will keep the class on track from the side; when you are ready, teach this page to your students.",
+      "teachThisPage": "Teach this page.",
+      "assistantOpening": "{{overview}} This challenge will revisit and apply that progression. Start with \"{{page}}\" and teach this page in your own words.",
       "teacherPlaceholder": "Teach this page in your own words...",
       "send": "Send",
       "finish": "Dismiss class",
@@ -1768,7 +1821,305 @@
         "rescue": "Assistant",
         "fail": "Retry"
       },
-      "open": "Review challenge"
+      "open": "Review challenge",
+      "studentStatus": {
+        "listening": "Listening to the teacher",
+        "thinking": "Thinking, waiting for the check",
+        "questioning": "Has an unresolved question",
+        "uncertain": "Still uncertain; needs more",
+        "satisfied": "Understands and agrees",
+        "rescue": "Assistant rescue in progress"
+      },
+      "assistantOpeningFallback": "The completed lesson on \"{{stage}}\" covered {{topics}} in sequence.",
+      "complete": "Complete challenge",
+      "readyToComplete": "All challenge pages passed",
+      "completeDescription": "Complete the challenge to generate your report and update the learning record.",
+      "generatingReport": "Generating challenge report",
+      "generatingReportDescription": "Evaluating clarity, doubt resolution, transfer, and error correction.",
+      "retryReport": "Generate report again",
+      "reportReady": "Challenge report is ready",
+      "replayComplete": "Replay complete",
+      "replayNotCounted": "This replay does not count toward your record"
+    },
+    "panel": {
+      "title": "Review overview",
+      "loading": "Loading this course's review status...",
+      "memoryStatus": "Memory status",
+      "suggestedReview": "Suggested review",
+      "createdAt": "Course created",
+      "completedAt": "Course completed",
+      "notRecorded": "Not recorded",
+      "quizAccuracy": "Course accuracy",
+      "noQuiz": "No quiz",
+      "latestChallenge": "Latest challenge",
+      "currentMemory": "Current memory",
+      "pendingAssessment": "Pending concepts",
+      "openCourse": "Open course",
+      "completeCourseFirst": "Finish course first",
+      "none": "None yet",
+      "now": "Now"
+    },
+    "tabs": {
+      "challenge": "Reverse Challenge",
+      "materials": "Study materials",
+      "demo": "Demo box"
+    },
+    "history": {
+      "title": "Challenge history",
+      "empty": "No Reverse Challenges yet",
+      "completed": "Completed",
+      "unfinished": "Unfinished",
+      "reportOnly": "Report only",
+      "preparationFailed": "Preparation failed",
+      "preparing": "Preparation incomplete",
+      "ready": "Ready to enter",
+      "replayable": "Available to replay",
+      "awaitingCompletion": "The full report will appear here after completion.",
+      "generateNew": "Generate new challenge",
+      "actions": {
+        "prepare": "Prepare again",
+        "enter": "Enter challenge",
+        "replay": "Challenge again",
+        "none": ""
+      }
+    },
+    "lowBenefit": {
+      "title": "A new challenge may have limited benefit right now",
+      "description": "Current memory is {{percent}}%. The suggested review time is {{date}}.",
+      "later": "Maybe later",
+      "generateAnyway": "Generate anyway"
+    },
+    "report": {
+      "summary": "Challenge summary",
+      "errors": "Factual errors",
+      "noErrors": "No factual errors were recorded.",
+      "corrected": "Corrected",
+      "uncorrected": "Uncorrected",
+      "pages": "Page performance",
+      "passed": "Passed",
+      "notPassed": "Not passed",
+      "probes": "{{count}} probes",
+      "unavailable": "This older entry contains a report only and cannot be reopened.",
+      "dimensions": {
+        "clarity": "Clarity",
+        "doubtResolution": "Doubt resolution",
+        "transfer": "Transfer",
+        "errorCorrection": "Error correction"
+      }
+    },
+    "demo": {
+      "title": "Demo box",
+      "subtitle": "Review independently saved simulated-time batches.",
+      "batches": "Demo batches",
+      "isolated": "Each batch uses an isolated data copy and never writes to formal learning records.",
+      "empty": "No demo data yet",
+      "active": "Active",
+      "archived": "Archived",
+      "batchName": "Demo · {{date}}",
+      "counts": "Reverse {{attempts}} · reports {{reports}} · materials {{artifacts}} · practice {{practice}}",
+      "clear": "Clear demo data",
+      "clearTitle": "Clear all demo data?",
+      "clearDescription": "Every demo batch and its challenges, reports, materials, and practice will be permanently deleted."
+    },
+    "studio": {
+      "title": "Study materials studio",
+      "subtitle": "Create, save, and use each study artifact independently.",
+      "createTitle": "Create study materials",
+      "createDescription": "Generate one artifact at a time while the rest remain available.",
+      "queueActive": "Tasks are queued",
+      "libraryTitle": "My study materials",
+      "emptyTitle": "No study artifacts yet",
+      "emptyDescription": "Choose a material above. Finished artifacts will be saved here.",
+      "latestVersion": "Latest is v{{version}}",
+      "generate": "Generate",
+      "regenerate": "New version",
+      "retry": "Retry",
+      "openCourse": "Open course",
+      "customizeButton": "Customize",
+      "cancelGeneration": "Cancel generation",
+      "open": "Open",
+      "moreActions": "More actions",
+      "regenerateSame": "Regenerate with same settings",
+      "rename": "Rename",
+      "renameTitle": "Rename artifact",
+      "renameDescription": "This changes only the name shown for this version.",
+      "renamed": "Artifact renamed",
+      "deleteTitle": "Delete this artifact?",
+      "deleteDescription": "This version and its flashcard or quiz progress will be permanently deleted.",
+      "deleted": "Artifact deleted",
+      "save": "Save",
+      "deleteAction": "Delete",
+      "kinds": {
+        "briefing": {
+          "title": "Visual briefing",
+          "description": "Arrange key ideas, comparisons, and sequences into a printable one-page summary."
+        },
+        "mindMap": {
+          "title": "Mind map",
+          "description": "Explore concept relationships, examples, and memory status as a knowledge map."
+        },
+        "studyGuide": {
+          "title": "Study guide",
+          "description": "Organize key ideas, definitions, examples, pitfalls, and practice prompts by section."
+        },
+        "faq": {
+          "title": "FAQ",
+          "description": "Resolve common questions and check concepts that are easy to confuse."
+        },
+        "flashcards": {
+          "title": "Flashcards",
+          "description": "Practice active recall with card flips and mastered or difficult markers."
+        },
+        "quiz": {
+          "title": "Quiz",
+          "description": "Answer one question at a time, review explanations, and retry mistakes."
+        }
+      },
+      "status": {
+        "generating": "Generating",
+        "queued": "Queued",
+        "failed": "Failed",
+        "interrupted": "Interrupted",
+        "ready": "Ready",
+        "empty": "Not generated",
+        "stale": "Course updated"
+      },
+      "groups": {
+        "understanding": {
+          "title": "Understand and summarize",
+          "description": "Clarify the lesson and its key ideas"
+        },
+        "structure": {
+          "title": "Knowledge structure",
+          "description": "See how concepts connect"
+        },
+        "practice": {
+          "title": "Active practice",
+          "description": "Strengthen recall through retrieval"
+        }
+      },
+      "customize": {
+        "title": "Customize generation",
+        "description": "Set the scope, emphasis, and format for this artifact.",
+        "focus": "Content scope",
+        "focusDescription": "Choose which parts of the lesson should receive the most attention.",
+        "focusModes": {
+          "balanced": {
+            "title": "Full course and weak points",
+            "description": "Cover the course while emphasizing weaker concepts"
+          },
+          "weak-points": {
+            "title": "Weak points only",
+            "description": "Use memory status and recent challenge gaps"
+          },
+          "selected-scenes": {
+            "title": "Select lesson pages",
+            "description": "Use only the pages you choose as the main source"
+          }
+        },
+        "selectScenes": "Select pages",
+        "selectScenesRequired": "Select at least one lesson page.",
+        "customInstructions": "Custom request",
+        "customInstructionsPlaceholder": "For example: use more real-world transfer examples and keep terminology light...",
+        "orientation": "Layout",
+        "detail": "Detail level",
+        "depth": "Map depth",
+        "includeExamples": "Include examples in map nodes",
+        "itemCount": "Number of items",
+        "difficulty": "Difficulty"
+      },
+      "options": {
+        "portrait": "Portrait",
+        "landscape": "Landscape",
+        "square": "Square",
+        "compact": "Compact",
+        "standard": "Standard",
+        "detailed": "Detailed",
+        "easy": "Easy",
+        "medium": "Medium",
+        "hard": "Hard"
+      }
+    },
+    "viewer": {
+      "tableOfContents": "Contents",
+      "noSections": "This guide has no separate sections",
+      "overview": "Overview",
+      "sections": "Sections",
+      "concepts": "Concepts",
+      "sourcePages": "Source pages",
+      "version": "Version {{version}}",
+      "questionCount": "{{count}} questions",
+      "searchFaq": "Search questions and answers",
+      "clearSearch": "Clear search",
+      "allTopics": "All topics",
+      "faqResults": "{{count}} matching questions",
+      "noFaqMatches": "No matching questions",
+      "collapseAll": "Collapse all",
+      "expandAll": "Expand all",
+      "flashcardsProgress": "{{mastered}} / {{total}} mastered",
+      "shuffle": "Shuffle",
+      "onlyDifficult": "Difficult only",
+      "needsPractice": "Needs practice",
+      "mastered": "Mastered",
+      "unseen": "Not marked",
+      "showFront": "Show card front",
+      "showBack": "Show card answer",
+      "answer": "Answer",
+      "prompt": "Prompt",
+      "tapForFront": "Tap to return to the front",
+      "tapToReveal": "Tap to reveal the answer",
+      "previous": "Previous",
+      "next": "Next",
+      "notYet": "Not yet",
+      "gotIt": "Got it",
+      "noDifficultCards": "No difficult cards right now",
+      "backToAllCards": "Back to all cards",
+      "quizResult": "Quiz result",
+      "correctCount": "{{correct}} / {{total}} correct",
+      "retryWrong": "Retry wrong answers",
+      "questionProgress": "Question {{current}} / {{total}}",
+      "hint": "Show hint",
+      "submitQuiz": "Submit quiz",
+      "answerKey": "Answer key and explanations",
+      "searchMindMap": "Search map nodes",
+      "expandNode": "Expand node",
+      "collapseNode": "Collapse node",
+      "nodeDetails": "Node details",
+      "noCourseMemoryEvidence": "Complete one counted Reverse Challenge to see memory retention here.",
+      "nodeMemoryUnlinked": "This node is not yet linked to an assessed concept.",
+      "memoryPercent": "Current memory {{percent}}%",
+      "examples": "Examples",
+      "sources": "Source pages",
+      "sourcePageLabel": "Page {{page}} · {{title}}",
+      "sourcePageRemoved": "Original page removed",
+      "notFound": "This study artifact could not be found.",
+      "courseUnavailable": "The source course is unavailable.",
+      "loadFailed": "Could not open study artifact",
+      "exportPdf": "Export PDF",
+      "exportPng": "Export PNG",
+      "exportSvg": "Export SVG",
+      "exportComplete": "Visual artifact exported",
+      "exportFailed": "Export failed. Please retry."
+    }
+  },
+  "overtime": {
+    "retry": "Prepare page again",
+    "status": {
+      "failed": "Page preparation failed",
+      "interrupted": "Page preparation was interrupted"
+    },
+    "phase": {
+      "outline": "Planning the overtime page...",
+      "content": "Generating page content...",
+      "actions": "Planning the explanation...",
+      "tts": "Preparing narration...",
+      "commit": "Adding the page to the course..."
+    },
+    "newCourse": {
+      "title": "This topic deserves its own course",
+      "description": "Keep a focused one-page answer in this course, or create a complete new course for the topic.",
+      "stay": "Stay in this course",
+      "create": "Create new course"
     }
   }
 }

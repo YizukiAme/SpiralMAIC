@@ -243,6 +243,25 @@ const THINKING_CAPABILITIES: Record<string, ThinkingCapability> = {
   [getModelMetadataKey('openai', 'gpt-5.6')]: openaiGpt56Effort,
   [getModelMetadataKey('openai', 'gpt-5.6-terra')]: openaiGpt56Effort,
   [getModelMetadataKey('openai', 'gpt-5.6-luna')]: openaiGpt56Effort,
+  // The subscription backend does not advertise the public API's `none`
+  // effort. It also advertises an `ultra` delegation mode that is outside this
+  // single-model MVP, so expose the verified common range and preserve the
+  // account-provided defaults without offering unsupported controls.
+  [getModelMetadataKey('openai-codex', 'gpt-5.6-sol')]: effortCapability(
+    'openai',
+    ['low', 'medium', 'high', 'xhigh', 'max'],
+    'low',
+  ),
+  [getModelMetadataKey('openai-codex', 'gpt-5.6-terra')]: effortCapability(
+    'openai',
+    ['low', 'medium', 'high', 'xhigh', 'max'],
+    'medium',
+  ),
+  [getModelMetadataKey('openai-codex', 'gpt-5.6-luna')]: effortCapability(
+    'openai',
+    ['low', 'medium', 'high', 'xhigh', 'max'],
+    'medium',
+  ),
   [getModelMetadataKey('openai', 'gpt-5.5')]: effortCapability(
     'openai',
     ['low', 'medium', 'high', 'xhigh'],
@@ -418,9 +437,16 @@ export function getCatalogThinkingCapability(
   providerId: string,
   modelId: string,
 ): ThinkingCapability | undefined {
+  const direct = THINKING_CAPABILITIES[getModelMetadataKey(providerId, modelId)];
+  if (direct) return direct;
+
   const canonicalModelId = getCanonicalModelId(providerId, modelId);
   const exact = THINKING_CAPABILITIES[getModelMetadataKey(providerId, canonicalModelId)];
   if (exact) return exact;
+
+  if (providerId === 'openai-codex') {
+    return THINKING_CAPABILITIES[getModelMetadataKey('openai', modelId)];
+  }
 
   if (providerId === 'lemonade') {
     return lemonadeToggleBudget;

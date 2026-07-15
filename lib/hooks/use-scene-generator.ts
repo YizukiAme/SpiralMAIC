@@ -3,7 +3,7 @@
 import { useCallback, useRef } from 'react';
 import { useStageStore } from '@/lib/store/stage';
 import { isSceneEditLocked } from '@/lib/edit/regen-lock';
-import { getCurrentModelConfig } from '@/lib/utils/model-config';
+import { buildModelRequestHeaders, getCurrentModelConfig } from '@/lib/utils/model-config';
 import { useSettingsStore } from '@/lib/store/settings';
 import { db } from '@/lib/utils/database';
 import type {
@@ -62,10 +62,7 @@ function getApiHeaders(): HeadersInit {
 
   return {
     'Content-Type': 'application/json',
-    'x-model': config.modelString || '',
-    'x-api-key': config.apiKey || '',
-    'x-base-url': config.baseUrl || '',
-    'x-provider-type': config.providerType || '',
+    ...buildModelRequestHeaders(config),
     // Image generation provider
     'x-image-provider': settings.imageProviderId || '',
     'x-image-model': settings.imageModelId || '',
@@ -334,12 +331,20 @@ export async function generateAndStoreTTS(
 }
 
 /** Generate TTS for all speech actions in a scene. Returns result. */
-async function generateTTSForScene(
+export async function generateTTSForScene(
   scene: Scene,
   language?: string,
   signal?: AbortSignal,
 ): Promise<{ success: boolean; failedCount: number; error?: string }> {
-  const providerId = useSettingsStore.getState().ttsProviderId;
+  const settings = useSettingsStore.getState();
+  const providerId = settings.ttsProviderId;
+  if (
+    !settings.ttsEnabled ||
+    providerId === 'browser-native-tts' ||
+    !isTTSProviderEnabled(providerId, settings.ttsProvidersConfig?.[providerId])
+  ) {
+    return { success: true, failedCount: 0 };
+  }
   scene.actions = splitLongSpeechActions(scene.actions || [], providerId);
   const speechActions = scene.actions.filter(
     (a): a is SpeechAction => a.type === 'speech' && !!a.text,

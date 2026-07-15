@@ -234,7 +234,9 @@
       "imageDrop": "أفلِت صورة أو انقر لاختيار ملف",
       "imageOr": "أو الصق رابط صورة",
       "imageUrlPlaceholder": "https://…",
-      "imageInsert": "إدراج"
+      "imageInsert": "إدراج",
+      "expandToolbar": "إظهار أدوات الإدراج",
+      "collapseToolbar": "إخفاء أدوات الإدراج"
     },
     "nav": {
       "addSlide": "إضافة شريحة",
@@ -287,7 +289,7 @@
       "commentPromptLabel": "إرشادات التصحيح",
       "commentPromptPlaceholder": "كيف ينبغي تقييم هذه الإجابة المفتوحة؟",
       "empty": "لا توجد أسئلة بعد",
-      "emptyHint": "استخدم «إضافة سؤال» لإنشاء أول سؤال.",
+      "emptyHint": "استخدم «إضافة سؤال» أعلاه لإنشاء أول سؤال.",
       "type": {
         "single": "اختيار واحد",
         "multiple": "اختيار متعدد",
@@ -857,19 +859,19 @@
   },
   "upload": {
     "pdfSizeLimit": "يدعم ملفات PDF حتى 50 ميغابايت",
-    "courseMaterialSizeLimit": "المستندات والعروض التقديمية وجداول البيانات والصور والنصوص العادية — حتى 50 ميغابايت (تعتمد الصيغ المقبولة على المستخرج المحدد)",
+    "courseMaterialSizeLimit": "يدعم ملفات PDF وDOCX وPPTX وTXT وMarkdown حتى 50 ميغابايت",
     "generateFailed": "فشل توليد الفصل، يرجى المحاولة مرة أخرى",
     "requirementPlaceholder": "أخبرني بأي شيء تريد تعلمه، مثلاً:\n\"علمني بايثون من الصفر في 30 دقيقة\"\n\"اشرح تحويل فورييه على السبورة\"\n\"كيف تلعب لعبة أفالون\"",
     "requirementRequired": "يرجى إدخال متطلبات المقرر",
     "fileTooLarge": "الملف كبير جدًا. يرجى اختيار ملف أصغر من 50 ميغابايت",
     "courseMaterialCountLimit": "يمكنك رفع ما يصل إلى 5 ملفات لمواد المقرر",
     "courseMaterialTotalSizeLimit": "يجب أن يكون الحجم الإجمالي لمواد المقرر أقل من 150 ميغابايت",
-    "unsupportedCourseMaterial": "المستخرج الحالي لا يدعم هذه الصيغة. غيّر المستخرج أو اختر ملفًا آخر."
+    "unsupportedCourseMaterial": "نوع مادة المقرر غير مدعوم. يرجى رفع PDF أو DOCX أو PPTX أو TXT أو Markdown."
   },
   "generation": {
     "pdfLoadFailed": "فشل تحميل ملف PDF، يرجى المحاولة مرة أخرى",
     "pdfParseFailed": "فشل تحليل PDF",
-    "analyzingCourseMaterial": "تحليل المستندات",
+    "analyzingCourseMaterial": "تحليل ملف {{type}}",
     "analyzingCourseMaterialDesc": "جارٍ استخراج هيكل المستند ومحتواه...",
     "courseMaterialLoadFailed": "فشل تحميل مادة المقرر، يرجى المحاولة مرة أخرى",
     "courseMaterialParseFailed": "فشل تحليل مادة المقرر",
@@ -975,7 +977,18 @@
     "webSearchFailed": "فشل البحث في الإنترنت",
     "outlinesReadyCount": "{{ready}} / {{total}} أقسام جاهزة",
     "jumpToBlankTitle": "الانتقال إلى قسم بحاجة إلى عنوان",
-    "analyzingMediaMaterial": "تحليل الصوت/الفيديو"
+    "analyzingMediaMaterial": "تحليل الصوت/الفيديو",
+    "revisitPreparingPath": "Preparing Review Path",
+    "revisitPreparingPathDesc": "Analyzing the key ideas from this lesson...",
+    "revisitGeneratingPage": "Generating Challenge Page",
+    "revisitGeneratingPageDesc": "Generating reverse-teaching prompt pages...",
+    "revisitReady": "Review Challenge Ready",
+    "revisitReadyDesc": "The first challenge page is ready. Opening the classroom now.",
+    "generatingCourse": "جارٍ توليد المقرر",
+    "openingClassroom": "جارٍ فتح الفصل...",
+    "outlineReady": "تم توليد مخطط المقرر",
+    "generatingFirstPage": "جارٍ توليد الصفحة الأولى...",
+    "firstPageReady": "الصفحة الأولى جاهزة! جارٍ فتح الفصل..."
   },
   "settings": {
     "title": "الإعدادات",
@@ -1076,7 +1089,8 @@
       "bocha": "Bocha",
       "brave": "Brave Search",
       "baidu": "Baidu",
-      "searxng": "SearXNG"
+      "searxng": "SearXNG",
+      "openai-codex": "Codex"
     },
     "providerTypes": {
       "openai": "بروتوكول OpenAI",
@@ -1682,10 +1696,49 @@
       "multiplierValue": "{{value}}x",
       "demoArea": "عرض تجريبي",
       "acceleratedClock": "ساعة مسرعة",
-      "gateSkip": "تخطي بوابات الصفحات"
+      "gateSkip": "تخطي بوابات الصفحات",
+      "virtualClock": "ساعة افتراضية",
+      "virtualClockDetail": "ينسخ أول انتقال زمني كل بيانات Spiral ولا يغير السجلات الرسمية.",
+      "simulatedTime": "الوقت الحالي",
+      "realTime": "وقت النظام الحقيقي",
+      "demoOffset": "وقت Demo متقدم {{hours}} ساعة",
+      "restoreRealTime": "استعادة الوقت الحقيقي"
     },
     "alidocmindAccessKeyId": "AccessKey ID",
-    "alidocmindAccessKeySecret": "AccessKey Secret"
+    "alidocmindAccessKeySecret": "AccessKey Secret",
+    "codexOAuth": {
+      "experimental": "تكامل تجريبي من جهة خارجية مع Codex؛ يستخدم حصة خطة ChatGPT الخاصة بك.",
+      "unavailableTitle": "تسجيل الدخول إلى Codex غير متاح",
+      "unavailable": {
+        "FEATURE_DISABLED": "فعّل Codex OAuth على الخادم لاستخدام هذا المزوّد.",
+        "SERVERLESS_UNSUPPORTED": "يتطلب Codex OAuth خادم Node مستضافاً ذاتياً مع تخزين دائم.",
+        "ACCESS_CODE_REQUIRED": "اضبط ACCESS_CODE قبل تفعيل Codex OAuth في بيئة الإنتاج.",
+        "DATA_DIR_UNWRITABLE": "لا يستطيع الخادم الكتابة في مجلد البيانات. تحقق من صلاحيات /app/data."
+      },
+      "connectedAs": "متصل باسم {email}",
+      "connected": "متصل بـ ChatGPT",
+      "signInBrowser": "تسجيل الدخول باستخدام ChatGPT",
+      "signInDevice": "استخدام رمز الجهاز",
+      "waiting": "بانتظار التفويض…",
+      "deviceInstructions": "افتح صفحة التحقق وأدخل رمز الاستخدام لمرة واحدة.",
+      "openVerification": "فتح صفحة التحقق",
+      "copyCode": "نسخ الرمز",
+      "copied": "تم النسخ",
+      "cancel": "إلغاء تسجيل الدخول",
+      "signOut": "تسجيل الخروج",
+      "models": "النماذج المتاحة",
+      "fastMode": "الوضع السريع",
+      "fastModeDescription": "ينطبق فقط على النماذج المدعومة: أسرع بنحو 1.5 مرة، لكنه يستهلك قدرًا أكبر من حصة خطة ChatGPT.",
+      "testConnection": "اختبار الاتصال",
+      "testSuccess": "تم الاتصال بـ Codex بنجاح.",
+      "testUnauthorized": "سجّل الدخول باستخدام ChatGPT مرة أخرى.",
+      "testForbidden": "مساحة عمل ChatGPT هذه لا تملك صلاحية Codex.",
+      "testRateLimited": "تم بلوغ حصة خطة ChatGPT أو حد معدل الطلبات.",
+      "testFailed": "فشل الاتصال بـ Codex.",
+      "loginFailed": "فشل تسجيل الدخول. حاول مجدداً أو استخدم رمز الجهاز.",
+      "loginExpired": "انتهت صلاحية محاولة تسجيل الدخول. ابدأ محاولة جديدة."
+    },
+    "connected": "متصل"
   },
   "profile": {
     "title": "الملف الشخصي",
@@ -1740,8 +1793,8 @@
       "assistant": "AI assistant",
       "emptyTranscript": "Start teaching this page when you are ready.",
       "thinking": "Student is thinking...",
-      "teachThisPage": "Teach this page to your students.",
-      "assistantOpening": "This challenge is about \"{{stage}}\". The first page is \"{{page}}\". I will keep the class on track from the side; when you are ready, teach this page to your students.",
+      "teachThisPage": "Teach this page.",
+      "assistantOpening": "{{overview}} This challenge will revisit and apply that progression. Start with \"{{page}}\" and teach this page in your own words.",
       "teacherPlaceholder": "Teach this page in your own words...",
       "send": "Send",
       "finish": "Dismiss class",
@@ -1768,7 +1821,305 @@
         "rescue": "Assistant",
         "fail": "Retry"
       },
-      "open": "Review challenge"
+      "open": "Review challenge",
+      "studentStatus": {
+        "listening": "Listening to the teacher",
+        "thinking": "Thinking, waiting for the check",
+        "questioning": "Has an unresolved question",
+        "uncertain": "Still uncertain; needs more",
+        "satisfied": "Understands and agrees",
+        "rescue": "Assistant rescue in progress"
+      },
+      "assistantOpeningFallback": "The completed lesson on \"{{stage}}\" covered {{topics}} in sequence.",
+      "complete": "Complete challenge",
+      "readyToComplete": "All challenge pages passed",
+      "completeDescription": "Complete the challenge to generate your report and update the learning record.",
+      "generatingReport": "Generating challenge report",
+      "generatingReportDescription": "Evaluating clarity, doubt resolution, transfer, and error correction.",
+      "retryReport": "Generate report again",
+      "reportReady": "Challenge report is ready",
+      "replayComplete": "اكتملت الإعادة",
+      "replayNotCounted": "هذه الإعادة لا تحتسب ضمن السجل"
+    },
+    "panel": {
+      "title": "لوحة المراجعة",
+      "loading": "جارٍ تحميل حالة مراجعة هذا الدرس...",
+      "memoryStatus": "حالة الذاكرة",
+      "suggestedReview": "المراجعة المقترحة",
+      "createdAt": "تاريخ إنشاء الدرس",
+      "completedAt": "تاريخ إكمال الدرس",
+      "notRecorded": "غير مسجل",
+      "quizAccuracy": "دقة الإجابات",
+      "noQuiz": "لا يوجد اختبار",
+      "latestChallenge": "آخر تحدٍ",
+      "currentMemory": "الذاكرة الحالية",
+      "pendingAssessment": "مفاهيم بانتظار التقييم",
+      "openCourse": "فتح الدرس",
+      "completeCourseFirst": "أكمل الدرس أولاً",
+      "none": "لا يوجد بعد",
+      "now": "الآن"
+    },
+    "tabs": {
+      "challenge": "Reverse Challenge",
+      "materials": "مواد المراجعة",
+      "demo": "صندوق Demo"
+    },
+    "history": {
+      "title": "سجل التحديات",
+      "empty": "لا توجد تحديات Reverse بعد",
+      "completed": "مكتمل",
+      "unfinished": "غير مكتمل",
+      "reportOnly": "تقرير فقط",
+      "preparationFailed": "فشل التحضير",
+      "preparing": "التحضير غير مكتمل",
+      "ready": "جاهز للدخول",
+      "replayable": "متاح للإعادة",
+      "awaitingCompletion": "سيظهر التقرير الكامل بعد الإكمال.",
+      "generateNew": "إنشاء تحد جديد",
+      "actions": {
+        "prepare": "إعادة التحضير",
+        "enter": "دخول التحدي",
+        "replay": "إعادة التحدي",
+        "none": ""
+      }
+    },
+    "lowBenefit": {
+      "title": "قد تكون فائدة تحد جديد محدودة الآن",
+      "description": "نسبة الاحتفاظ الحالية {{percent}}٪، وموعد المراجعة المقترح {{date}}.",
+      "later": "لاحقًا",
+      "generateAnyway": "إنشاء على أي حال"
+    },
+    "report": {
+      "summary": "ملخص التحدي",
+      "errors": "أخطاء واقعية",
+      "noErrors": "لم تسجل أخطاء واقعية.",
+      "corrected": "تم التصحيح",
+      "uncorrected": "غير مصحح",
+      "pages": "أداء الصفحات",
+      "passed": "ناجح",
+      "notPassed": "غير ناجح",
+      "probes": "{{count}} أسئلة فحص",
+      "unavailable": "يحتوي هذا السجل القديم على تقرير فقط ولا يمكن فتحه مجددًا.",
+      "dimensions": {
+        "clarity": "الوضوح",
+        "doubtResolution": "حل الشكوك",
+        "transfer": "النقل",
+        "errorCorrection": "تصحيح الأخطاء"
+      }
+    },
+    "demo": {
+      "title": "صندوق Demo",
+      "subtitle": "عرض دفعات الوقت الافتراضي المحفوظة بشكل مستقل.",
+      "batches": "دفعات العرض",
+      "isolated": "تستخدم كل دفعة نسخة بيانات مستقلة ولا تعدل السجلات الرسمية.",
+      "empty": "لا توجد بيانات Demo",
+      "active": "نشط",
+      "archived": "مؤرشف",
+      "batchName": "Demo · {{date}}",
+      "counts": "Reverse {{attempts}} · تقارير {{reports}} · مواد {{artifacts}} · تدريب {{practice}}",
+      "clear": "مسح بيانات Demo",
+      "clearTitle": "مسح كل بيانات Demo؟",
+      "clearDescription": "ستحذف نهائيًا كل دفعات العرض وتحدياتها وتقاريرها وموادها وتدريباتها."
+    },
+    "studio": {
+      "title": "استوديو مواد المراجعة",
+      "subtitle": "أنشئ كل مادة مراجعة واحفظها واستخدمها بشكل مستقل.",
+      "createTitle": "إنشاء مواد المراجعة",
+      "createDescription": "يتم إنشاء نوع واحد في كل مرة مع بقاء المواد الأخرى متاحة.",
+      "queueActive": "توجد مهام في قائمة الانتظار",
+      "libraryTitle": "مواد المراجعة الخاصة بي",
+      "emptyTitle": "لا توجد مواد بعد",
+      "emptyDescription": "اختر مادة من الأعلى، وستظهر الأعمال المكتملة هنا.",
+      "latestVersion": "أحدث إصدار v{{version}}",
+      "generate": "إنشاء",
+      "regenerate": "إصدار جديد",
+      "retry": "إعادة المحاولة",
+      "openCourse": "فتح الدرس",
+      "customizeButton": "تخصيص",
+      "cancelGeneration": "إلغاء الإنشاء",
+      "open": "فتح",
+      "moreActions": "إجراءات أخرى",
+      "regenerateSame": "إعادة الإنشاء بالإعدادات نفسها",
+      "rename": "إعادة التسمية",
+      "renameTitle": "إعادة تسمية المادة",
+      "renameDescription": "يغيّر هذا الاسم المعروض لهذا الإصدار فقط.",
+      "renamed": "تمت إعادة تسمية المادة",
+      "deleteTitle": "حذف هذه المادة؟",
+      "deleteDescription": "سيُحذف هذا الإصدار وتقدم البطاقات أو الاختبار نهائيًا.",
+      "deleted": "تم حذف المادة",
+      "save": "حفظ",
+      "deleteAction": "حذف",
+      "kinds": {
+        "briefing": {
+          "title": "موجز بصري",
+          "description": "رتّب الأفكار والمقارنات والتسلسل في صفحة واحدة قابلة للطباعة."
+        },
+        "mindMap": {
+          "title": "خريطة ذهنية",
+          "description": "استكشف علاقات المفاهيم والأمثلة وحالة الذاكرة كخريطة معرفة."
+        },
+        "studyGuide": {
+          "title": "دليل دراسة",
+          "description": "نظّم الأفكار والتعريفات والأمثلة والمزالق والتدريبات حسب القسم."
+        },
+        "faq": {
+          "title": "أسئلة شائعة",
+          "description": "عالج الأسئلة المتكررة وتحقق من المفاهيم سهلة الالتباس."
+        },
+        "flashcards": {
+          "title": "بطاقات تعليمية",
+          "description": "تدرّب على الاسترجاع النشط وحدد البطاقات المتقنة أو الصعبة."
+        },
+        "quiz": {
+          "title": "اختبار",
+          "description": "أجب سؤالًا تلو الآخر وراجع الشرح وأعد الأسئلة الخاطئة."
+        }
+      },
+      "status": {
+        "generating": "جارٍ الإنشاء",
+        "queued": "في الانتظار",
+        "failed": "فشل",
+        "interrupted": "متوقف",
+        "ready": "جاهز",
+        "empty": "غير منشأ",
+        "stale": "تم تحديث الدرس"
+      },
+      "groups": {
+        "understanding": {
+          "title": "الفهم والتلخيص",
+          "description": "وضّح الدرس وأفكاره الأساسية"
+        },
+        "structure": {
+          "title": "بنية المعرفة",
+          "description": "شاهد الروابط بين المفاهيم"
+        },
+        "practice": {
+          "title": "تدريب نشط",
+          "description": "عزّز الذاكرة بالاسترجاع"
+        }
+      },
+      "customize": {
+        "title": "تخصيص الإنشاء",
+        "description": "حدد نطاق المادة وتركيزها وشكلها.",
+        "focus": "نطاق المحتوى",
+        "focusDescription": "اختر أجزاء الدرس التي تستحق تركيزًا أكبر.",
+        "focusModes": {
+          "balanced": {
+            "title": "الدرس كاملًا ونقاط الضعف",
+            "description": "غطِّ الدرس مع إبراز المفاهيم الأضعف"
+          },
+          "weak-points": {
+            "title": "نقاط الضعف فقط",
+            "description": "استخدم حالة الذاكرة وفجوات التحدي الأخير"
+          },
+          "selected-scenes": {
+            "title": "اختيار صفحات الدرس",
+            "description": "استخدم الصفحات المحددة كمصدر رئيسي فقط"
+          }
+        },
+        "selectScenes": "اختيار الصفحات",
+        "selectScenesRequired": "اختر صفحة درس واحدة على الأقل.",
+        "customInstructions": "طلب مخصص",
+        "customInstructionsPlaceholder": "مثال: استخدم تطبيقات حياتية أكثر وقلّل المصطلحات...",
+        "orientation": "التخطيط",
+        "detail": "مستوى التفصيل",
+        "depth": "عمق الخريطة",
+        "includeExamples": "تضمين أمثلة في العقد",
+        "itemCount": "العدد",
+        "difficulty": "الصعوبة"
+      },
+      "options": {
+        "portrait": "عمودي",
+        "landscape": "أفقي",
+        "square": "مربع",
+        "compact": "موجز",
+        "standard": "قياسي",
+        "detailed": "مفصل",
+        "easy": "سهل",
+        "medium": "متوسط",
+        "hard": "صعب"
+      }
+    },
+    "viewer": {
+      "tableOfContents": "المحتويات",
+      "noSections": "لا يحتوي هذا الدليل على أقسام منفصلة",
+      "overview": "نظرة عامة",
+      "sections": "الأقسام",
+      "concepts": "المفاهيم",
+      "sourcePages": "صفحات المصدر",
+      "version": "الإصدار {{version}}",
+      "questionCount": "{{count}} أسئلة",
+      "searchFaq": "البحث في الأسئلة والإجابات",
+      "clearSearch": "مسح البحث",
+      "allTopics": "كل الموضوعات",
+      "faqResults": "{{count}} من الأسئلة المطابقة",
+      "noFaqMatches": "لا توجد أسئلة مطابقة",
+      "collapseAll": "طي الكل",
+      "expandAll": "توسيع الكل",
+      "flashcardsProgress": "تم إتقان {{mastered}} من {{total}}",
+      "shuffle": "خلط",
+      "onlyDifficult": "الصعبة فقط",
+      "needsPractice": "تحتاج تدريبًا",
+      "mastered": "متقنة",
+      "unseen": "غير محددة",
+      "showFront": "إظهار وجه البطاقة",
+      "showBack": "إظهار الإجابة",
+      "answer": "الإجابة",
+      "prompt": "السؤال",
+      "tapForFront": "انقر للعودة إلى الوجه",
+      "tapToReveal": "انقر لإظهار الإجابة",
+      "previous": "السابق",
+      "next": "التالي",
+      "notYet": "ليس بعد",
+      "gotIt": "أتقنتها",
+      "noDifficultCards": "لا توجد بطاقات صعبة الآن",
+      "backToAllCards": "العودة لكل البطاقات",
+      "quizResult": "نتيجة الاختبار",
+      "correctCount": "{{correct}} من {{total}} صحيحة",
+      "retryWrong": "إعادة الأسئلة الخاطئة",
+      "questionProgress": "السؤال {{current}} من {{total}}",
+      "hint": "إظهار تلميح",
+      "submitQuiz": "إرسال الاختبار",
+      "answerKey": "الإجابات والشرح",
+      "searchMindMap": "البحث في العقد",
+      "expandNode": "توسيع العقدة",
+      "collapseNode": "طي العقدة",
+      "nodeDetails": "تفاصيل العقدة",
+      "noCourseMemoryEvidence": "أكمل تحدي Reverse Challenge واحدًا محتسبًا لعرض معدل الاحتفاظ بالذاكرة هنا.",
+      "nodeMemoryUnlinked": "هذه العقدة غير مرتبطة بعد بمفهوم تم تقييمه.",
+      "memoryPercent": "الذاكرة الحالية {{percent}}%",
+      "examples": "أمثلة",
+      "sources": "صفحات المصدر",
+      "sourcePageLabel": "الصفحة {{page}} · {{title}}",
+      "sourcePageRemoved": "تمت إزالة الصفحة الأصلية",
+      "notFound": "تعذر العثور على هذه المادة.",
+      "courseUnavailable": "الدرس الأصلي غير متاح.",
+      "loadFailed": "تعذر فتح المادة",
+      "exportPdf": "تصدير PDF",
+      "exportPng": "تصدير PNG",
+      "exportSvg": "تصدير SVG",
+      "exportComplete": "تم تصدير المادة المرئية",
+      "exportFailed": "فشل التصدير"
+    }
+  },
+  "overtime": {
+    "retry": "إعادة إعداد الصفحة",
+    "status": {
+      "failed": "فشل إعداد الصفحة",
+      "interrupted": "توقف إعداد الصفحة"
+    },
+    "phase": {
+      "outline": "جارٍ تخطيط صفحة الوقت الإضافي...",
+      "content": "جارٍ إنشاء محتوى الصفحة...",
+      "actions": "جارٍ إعداد الشرح...",
+      "tts": "جارٍ إعداد الصوت...",
+      "commit": "جارٍ إضافة الصفحة إلى الدورة..."
+    },
+    "newCourse": {
+      "title": "هذا الموضوع يستحق دورة مستقلة",
+      "description": "يمكنك إبقاء إجابة مركزة من صفحة واحدة في هذه الدورة أو إنشاء دورة جديدة كاملة للموضوع.",
+      "stay": "البقاء في هذه الدورة",
+      "create": "إنشاء دورة جديدة"
     }
   }
 }

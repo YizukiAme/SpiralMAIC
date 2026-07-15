@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import type { ProviderId, ProviderConfig } from '@/lib/ai/providers';
 import { MONO_LOGO_PROVIDERS } from '@/lib/ai/providers';
+import { getProviderBadgeTranslationKey } from '@/lib/client/codex-oauth';
 
 interface ProviderWithServerInfo extends ProviderConfig {
   isServerConfigured?: boolean;
@@ -39,42 +40,45 @@ export function ProviderList({
   return (
     <div className="flex-shrink-0 bg-background flex flex-col" style={{ width: width ?? 192 }}>
       <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
-        {providers.map((provider) => (
-          <button
-            key={provider.id}
-            onClick={() => onSelect(provider.id)}
-            className={cn(
-              'w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg transition-all border text-left',
-              selectedProviderId === provider.id
-                ? 'bg-primary/5 border-primary/50 shadow-sm'
-                : 'border-transparent hover:bg-muted/50',
-            )}
-          >
-            {provider.icon ? (
-              <img
-                src={provider.icon}
-                alt={getProviderDisplayName(provider)}
-                className={cn(
-                  'w-5 h-5 rounded',
-                  MONO_LOGO_PROVIDERS.has(provider.id) && 'dark:invert',
-                )}
-                onError={(e) => {
-                  (e.target as HTMLImageElement).style.display = 'none';
-                }}
-              />
-            ) : (
-              <Box className="h-5 w-5 text-muted-foreground" />
-            )}
-            <span className="font-medium text-sm flex-1 truncate">
-              {getProviderDisplayName(provider)}
-            </span>
-            {provider.isServerConfigured && (
-              <span className="text-[10px] px-1 py-0 h-4 leading-4 rounded shrink-0 bg-muted text-muted-foreground">
-                {t('settings.serverConfigured')}
+        {providers.map((provider) => {
+          const badgeKey = getProviderBadgeTranslationKey(provider);
+          return (
+            <button
+              key={provider.id}
+              onClick={() => onSelect(provider.id)}
+              className={cn(
+                'w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg transition-all border text-left',
+                selectedProviderId === provider.id
+                  ? 'bg-primary/5 border-primary/50 shadow-sm'
+                  : 'border-transparent hover:bg-muted/50',
+              )}
+            >
+              {provider.icon ? (
+                <img
+                  src={provider.icon}
+                  alt={getProviderDisplayName(provider)}
+                  className={cn(
+                    'w-5 h-5 rounded',
+                    MONO_LOGO_PROVIDERS.has(provider.id) && 'dark:invert',
+                  )}
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = 'none';
+                  }}
+                />
+              ) : (
+                <Box className="h-5 w-5 text-muted-foreground" />
+              )}
+              <span className="font-medium text-sm flex-1 truncate">
+                {getProviderDisplayName(provider)}
               </span>
-            )}
-          </button>
-        ))}
+              {badgeKey && (
+                <span className="text-[10px] px-1 py-0 h-4 leading-4 rounded shrink-0 bg-muted text-muted-foreground">
+                  {t(badgeKey)}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* Add Provider Button */}

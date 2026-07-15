@@ -1,9 +1,4 @@
-import type {
-  ConceptEvidence,
-  LessonMemorySummary,
-  RevisitExamBlueprint,
-  UserConceptState,
-} from '@/lib/revisit/types';
+import type { ConceptEvidence, LessonMemorySummary, UserConceptState } from '@/lib/revisit/types';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -11,6 +6,7 @@ export const INITIAL_HALF_LIFE_DAYS = 4;
 export const MIN_HALF_LIFE_DAYS = 1;
 export const MAX_HALF_LIFE_DAYS = 180;
 export const REVIEW_RECALL_THRESHOLD = 0.55;
+export const LOW_BENEFIT_RECALL_THRESHOLD = 0.8;
 export const STABLE_HALF_LIFE_DAYS = 120;
 export const DEFAULT_STABLE_SUCCESSES_REQUIRED = 2;
 export const SUCCESS_Q_THRESHOLD = 0.75;
@@ -28,22 +24,31 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function daysBetween(fromMs: number, toMs: number, multiplier = 1): number {
+function daysBetween(fromMs: number, toMs: number): number {
   if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) return 0;
-  return Math.max(0, ((toMs - fromMs) / DAY_MS) * Math.max(0, multiplier));
+  return Math.max(0, (toMs - fromMs) / DAY_MS);
 }
 
-export function toDateKey(timestamp: number): string {
-  return new Date(timestamp).toISOString().slice(0, 10);
+export function toDateKey(
+  timestamp: number,
+  timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone,
+): string {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(timestamp);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
 }
 
 export function computeConceptRecall(
   state: Pick<UserConceptState, 'hDays' | 'lastRetrievalAt'>,
   now: number,
-  forgettingSpeedMultiplier = 1,
 ): number {
   const hDays = clamp(state.hDays, MIN_HALF_LIFE_DAYS, MAX_HALF_LIFE_DAYS);
-  const deltaDays = daysBetween(state.lastRetrievalAt, now, forgettingSpeedMultiplier);
+  const deltaDays = daysBetween(state.lastRetrievalAt, now);
   return Number(Math.pow(2, -deltaDays / hDays).toFixed(12));
 }
 
@@ -76,11 +81,12 @@ export function computeLessonMemory(
   states: UserConceptState[],
   now: number,
   options: {
-    forgettingSpeedMultiplier?: number;
     stableSuccessesRequired?: number;
   } = {},
 ): LessonMemorySummary {
-  const learnedStates = states.filter((state) => Number.isFinite(state.learnedAt));
+  const learnedStates = filterJudgedConceptStates(states).filter((state) =>
+    Number.isFinite(state.learnedAt),
+  );
   if (learnedStates.length === 0) {
     return {
       status: 'unlearned',
@@ -94,9 +100,7 @@ export function computeLessonMemory(
   const stableSuccessesRequired =
     options.stableSuccessesRequired ?? DEFAULT_STABLE_SUCCESSES_REQUIRED;
   const allStable = learnedStates.every((state) => isStableState(state, stableSuccessesRequired));
-  const recalls = learnedStates.map((state) =>
-    computeConceptRecall(state, now, options.forgettingSpeedMultiplier ?? 1),
-  );
+  const recalls = learnedStates.map((state) => computeConceptRecall(state, now));
   const { recall, meanRecall, minRecall } = computeLessonRecall(recalls);
 
   if (allStable) {
@@ -119,6 +123,76 @@ export function computeLessonMemory(
   };
 }
 
+export function computeLessonMemoryFromCompletion(
+  completedAt: number,
+  now: number,
+): LessonMemorySummary {
+  const recall = computeConceptRecall(
+    { hDays: INITIAL_HALF_LIFE_DAYS, lastRetrievalAt: completedAt },
+    now,
+  );
+  return {
+    status: recall < REVIEW_RECALL_THRESHOLD ? 'review' : 'fresh',
+    recall,
+    meanRecall: recall,
+    minRecall: recall,
+    color: revisitColorForRecall(recall),
+  };
+}
+
+export function getSuggestedReviewAt(args: {
+  completedAt?: number;
+  now: number;
+  states: UserConceptState[];
+  stableSuccessesRequired?: number;
+  unassessedConcepts?: Array<{ learnedAt?: number }>;
+}): number | null {
+  const unassessedReviewAt = (args.unassessedConcepts ?? []).reduce<number | null>(
+    (earliest, concept) => {
+      if (!Number.isFinite(concept.learnedAt)) return earliest;
+      const thresholdAt =
+        concept.learnedAt! - INITIAL_HALF_LIFE_DAYS * Math.log2(REVIEW_RECALL_THRESHOLD) * DAY_MS;
+      const candidate = thresholdAt <= args.now ? args.now : thresholdAt;
+      return earliest === null ? candidate : Math.min(earliest, candidate);
+    },
+    null,
+  );
+  const withUnassessed = (judgedReviewAt: number | null) => {
+    if (judgedReviewAt === null) return unassessedReviewAt;
+    if (unassessedReviewAt === null) return judgedReviewAt;
+    return Math.min(judgedReviewAt, unassessedReviewAt);
+  };
+  const judgedStates = filterJudgedConceptStates(args.states);
+  if (judgedStates.length === 0) {
+    if (!Number.isFinite(args.completedAt)) return unassessedReviewAt;
+    const current = computeLessonMemoryFromCompletion(args.completedAt!, args.now);
+    if (current.status === 'review') return withUnassessed(args.now);
+    const daysToThreshold = -INITIAL_HALF_LIFE_DAYS * Math.log2(REVIEW_RECALL_THRESHOLD);
+    const thresholdAt = args.completedAt! + daysToThreshold * DAY_MS;
+    return withUnassessed(thresholdAt <= args.now ? args.now : thresholdAt);
+  }
+
+  const current = computeLessonMemory(judgedStates, args.now, {
+    stableSuccessesRequired: args.stableSuccessesRequired,
+  });
+  if (current.status === 'review') return withUnassessed(args.now);
+  if (current.status === 'stable') return unassessedReviewAt;
+  let lo = args.now;
+  let hi = args.now + MAX_HALF_LIFE_DAYS * DAY_MS;
+  for (let i = 0; i < 32; i += 1) {
+    const mid = lo + (hi - lo) / 2;
+    const memory = computeLessonMemory(judgedStates, mid, {
+      stableSuccessesRequired: args.stableSuccessesRequired,
+    });
+    if ((memory.recall ?? 0) < REVIEW_RECALL_THRESHOLD) {
+      hi = mid;
+    } else {
+      lo = mid;
+    }
+  }
+  return withUnassessed(hi);
+}
+
 export function updateHalfLifeDays({
   currentHDays,
   q,
@@ -131,8 +205,11 @@ export function updateHalfLifeDays({
   const quality = clamp(q, 0.05, 0.98);
   const recall = clamp(retrievability, 0, 1);
 
-  const positiveEvidence = Math.max(quality - recall, 0);
-  const negativeEvidence = Math.max(recall - quality, 0);
+  const successfulRetrieval = quality >= SUCCESS_Q_THRESHOLD;
+  const positiveEvidence = successfulRetrieval ? Math.max(quality - recall, 0) : 0;
+  const negativeEvidence = successfulRetrieval
+    ? Math.max(recall - quality, 0)
+    : Math.max(recall - quality, SUCCESS_Q_THRESHOLD - quality);
   const deltaLog =
     etaPlus * positiveEvidence * (1 + lambda * (1 - recall)) - etaMinus * negativeEvidence;
 
@@ -147,19 +224,26 @@ export function isStableState(
   state: Pick<UserConceptState, 'hDays' | 'successChallengeDates' | 'stableAt'>,
   stableSuccessesRequired = DEFAULT_STABLE_SUCCESSES_REQUIRED,
 ): boolean {
-  if (state.stableAt) return true;
   const uniqueDates = new Set(state.successChallengeDates);
   return state.hDays > STABLE_HALF_LIFE_DAYS && uniqueDates.size >= stableSuccessesRequired;
 }
 
-export function createInitialConceptStates(
-  blueprint: RevisitExamBlueprint,
-  learnedAt: number,
-): UserConceptState[] {
-  return blueprint.concepts.map((concept) => ({
-    stageId: blueprint.stageId,
-    conceptId: concept.id,
-    label: concept.label,
+export function filterJudgedConceptStates(states: UserConceptState[]): UserConceptState[] {
+  return states.filter((state) => state.evidenceCount > 0);
+}
+
+export function createConceptStateFromEvidence(
+  evidence: ConceptEvidence,
+  options: { label?: string; learnedAt?: number } = {},
+): UserConceptState {
+  const learnedAt =
+    Number.isFinite(options.learnedAt) && options.learnedAt! <= evidence.timestamp
+      ? options.learnedAt!
+      : evidence.timestamp;
+  return {
+    stageId: evidence.stageId,
+    conceptId: evidence.conceptId,
+    label: options.label || evidence.conceptId,
     hDays: INITIAL_HALF_LIFE_DAYS,
     learnedAt,
     lastRetrievalAt: learnedAt,
@@ -167,7 +251,7 @@ export function createInitialConceptStates(
     successChallengeDates: [],
     createdAt: learnedAt,
     updatedAt: learnedAt,
-  }));
+  };
 }
 
 export function applyEvidenceToConceptState(
@@ -176,11 +260,10 @@ export function applyEvidenceToConceptState(
   options: {
     now?: number;
     stableSuccessesRequired?: number;
-    forgettingSpeedMultiplier?: number;
   } = {},
 ): UserConceptState {
   const now = options.now ?? evidence.timestamp;
-  const retrievability = computeConceptRecall(state, now, options.forgettingSpeedMultiplier ?? 1);
+  const retrievability = computeConceptRecall(state, now);
   const nextHDays = updateHalfLifeDays({
     currentHDays: state.hDays,
     q: evidence.q,
@@ -202,6 +285,8 @@ export function applyEvidenceToConceptState(
 
   if (isStableState(next, options.stableSuccessesRequired ?? DEFAULT_STABLE_SUCCESSES_REQUIRED)) {
     next.stableAt = next.stableAt ?? now;
+  } else {
+    next.stableAt = undefined;
   }
 
   return next;

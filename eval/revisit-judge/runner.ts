@@ -68,6 +68,7 @@ async function runScenario(
         text: result.text,
         attemptId: `${scenario.case_id}-${i + 1}`,
         stageId: scenario.blueprint.stageId,
+        blueprint: scenario.blueprint,
       }),
     );
   }
