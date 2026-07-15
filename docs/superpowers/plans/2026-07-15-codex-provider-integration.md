@@ -20,17 +20,31 @@
 
 ---
 
-### Task 1: Lock the Codex naming and login-state contracts
+### Task 1: Refine Codex naming, login state, and provider-style UI
 
 **Files:**
 - Modify: `tests/ai/codex-provider.test.ts`
 - Modify: `tests/i18n/codex-oauth-locales.test.ts`
 - Modify: `tests/settings/codex-oauth-client.test.ts`
 - Modify: `tests/settings/codex-settings-surface.test.ts`
+- Modify: `lib/ai/providers.ts`
+- Modify: `lib/client/codex-oauth.ts`
+- Modify: `components/settings/codex-provider-settings.tsx`
+- Modify: `components/settings/index.tsx`
+- Modify: `lib/i18n/locales/ar-SA.json`
+- Modify: `lib/i18n/locales/en-US.json`
+- Modify: `lib/i18n/locales/ja-JP.json`
+- Modify: `lib/i18n/locales/ko-KR.json`
+- Modify: `lib/i18n/locales/pt-BR.json`
+- Modify: `lib/i18n/locales/ru-RU.json`
+- Modify: `lib/i18n/locales/zh-CN.json`
+- Modify: `lib/i18n/locales/zh-TW.json`
+- Modify: `tests/store/settings-server-sync.test.ts`
+- Modify: `e2e/tests/codex-oauth-settings.spec.ts`
 
 **Interfaces:**
-- Consumes: `PROVIDERS['openai-codex']`, `CodexOAuthClientSnapshot`, locale JSON, settings source.
-- Produces: executable contracts for the `Codex` display name, `connectTitle` locale key, `startingMethod`, standard read-only model rows, and the hidden Save action.
+- Consumes: `PROVIDERS['openai-codex']`, `CodexOAuthClientSnapshot`, `CodexOAuthLoginMethod`, provider `ModelConfig`, locale JSON, settings source, and existing shared Button/Alert/Label styles.
+- Produces: `CodexOAuthClientSnapshot.startingMethod: CodexOAuthLoginMethod | null`, the `Codex` display name, `connectTitle` locale key, standard read-only model rows, and the hidden Save action.
 
 - [ ] **Step 1: Write failing provider and locale assertions**
 
@@ -63,49 +77,27 @@ pnpm vitest run tests/ai/codex-provider.test.ts tests/i18n/codex-oauth-locales.t
 
 Expected: failures for the old `ChatGPT Codex` name, absent `connectTitle`, absent `startingMethod`, and old panel/footer markup.
 
-### Task 2: Implement naming, OAuth status, and provider-style UI
-
-**Files:**
-- Modify: `lib/ai/providers.ts`
-- Modify: `lib/client/codex-oauth.ts`
-- Modify: `components/settings/codex-provider-settings.tsx`
-- Modify: `components/settings/index.tsx`
-- Modify: `lib/i18n/locales/ar-SA.json`
-- Modify: `lib/i18n/locales/en-US.json`
-- Modify: `lib/i18n/locales/ja-JP.json`
-- Modify: `lib/i18n/locales/ko-KR.json`
-- Modify: `lib/i18n/locales/pt-BR.json`
-- Modify: `lib/i18n/locales/ru-RU.json`
-- Modify: `lib/i18n/locales/zh-CN.json`
-- Modify: `lib/i18n/locales/zh-TW.json`
-- Modify: `tests/store/settings-server-sync.test.ts`
-- Modify: `e2e/tests/codex-oauth-settings.spec.ts`
-
-**Interfaces:**
-- Consumes: `CodexOAuthLoginMethod`, provider `ModelConfig`, existing shared Button/Alert/Label styles.
-- Produces: `CodexOAuthClientSnapshot.startingMethod: CodexOAuthLoginMethod | null` and the refined settings panel.
-
-- [ ] **Step 1: Rename the provider without changing auth copy**
+- [ ] **Step 5: Rename the provider without changing auth copy**
 
 Set the registry fallback and all eight `settings.providerNames.openai-codex` values to `Codex`. Update exact-name unit fixtures and E2E provider selectors. Do not change `signInBrowser`, `connected`, or quota/workspace strings.
 
-- [ ] **Step 2: Track the starting login method**
+- [ ] **Step 6: Track the starting login method**
 
 Add `startingMethod` to the snapshot interface and initial states. Publish `browser` before the browser POST, publish `device` before the device POST (including fallback), and clear it whenever the attempt is accepted, cancelled, completed, failed, or signed out.
 
-- [ ] **Step 3: Align the dedicated panel**
+- [ ] **Step 7: Align the dedicated panel**
 
 Use the shared header as the only provider title. Add a neutral `connectTitle`; render models in read-only bordered rows with capability/context metadata; render test results in the standard bordered success/error pattern; and apply destructive hover/text styling to Sign out.
 
-- [ ] **Step 4: Hide the irrelevant Save action**
+- [ ] **Step 8: Hide the irrelevant Save action**
 
 Compute whether the selected surface is Codex and render only Close in the footer for that surface. Leave Save unchanged for all other settings sections/providers.
 
-- [ ] **Step 5: Run focused tests to green**
+- [ ] **Step 9: Run focused tests to green**
 
 Run the Task 1 Vitest command. Expected: all tests pass.
 
-- [ ] **Step 6: Run the Codex Playwright settings test**
+- [ ] **Step 10: Run the Codex Playwright settings test**
 
 Run:
 
@@ -115,7 +107,7 @@ pnpm playwright test e2e/tests/codex-oauth-settings.spec.ts
 
 Expected: 3 tests pass, including popup fallback, device login, test feedback, and logout fallback.
 
-- [ ] **Step 7: Commit the clean-worktree refinement**
+- [ ] **Step 11: Commit the clean-worktree refinement**
 
 Stage only the design, plan, UI, locale, and test files changed by Tasks 1–2, then commit as:
 
@@ -123,7 +115,7 @@ Stage only the design, plan, UI, locale, and test files changed by Tasks 1–2, 
 git commit -m "feat(codex): align oauth provider settings"
 ```
 
-### Task 3: Import the verified feature into the live SpiralMAIC worktree
+### Task 2: Import the verified feature into the live SpiralMAIC worktree
 
 **Files:**
 - Modify/Create: every path in `git diff --name-only 83b69c8..codex/native-codex-oauth`
@@ -165,7 +157,7 @@ pnpm install --frozen-lockfile
 
 Expected: exit 0 without rewriting `pnpm-lock.yaml`.
 
-### Task 4: Verify the combined application and localhost:3000
+### Task 3: Verify the combined application and localhost:3000
 
 **Files:**
 - Runtime only: `/Users/yizuki/Workshop/Codes/SpiralMAIC/data/auth/openai-codex.json` after a fresh login.
