@@ -1,7 +1,6 @@
 export interface HomeSurfaceState {
   showPromptComposer: boolean;
   showSpiralLogo: boolean;
-  showEmptyCoursePrompt: boolean;
 }
 
 export type RevisitPanelSection = 'challenge' | 'materials' | 'demo';
@@ -16,14 +15,10 @@ const REVISIT_PANEL_SECTION_PARAM = 'spiralSection';
 
 export function resolveHomeSurfaceState(args: {
   reverseChallengeEnabled: boolean;
-  classroomsLoaded: boolean;
-  stageCount: number;
 }): HomeSurfaceState {
   return {
     showPromptComposer: !args.reverseChallengeEnabled,
     showSpiralLogo: args.reverseChallengeEnabled,
-    showEmptyCoursePrompt:
-      args.reverseChallengeEnabled && args.classroomsLoaded && args.stageCount === 0,
   };
 }
 

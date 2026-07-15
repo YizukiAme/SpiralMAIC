@@ -207,7 +207,6 @@ function HomePage() {
   const [themeOpen, setThemeOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [classrooms, setClassrooms] = useState<StageListItem[]>([]);
-  const [classroomsLoaded, setClassroomsLoaded] = useState(false);
   const [memorySummaries, setMemorySummaries] = useState<Record<string, LessonMemorySummary>>({});
   const [revisitPanelOpen, setRevisitPanelOpen] = useState(false);
   const [revisitPanelClassroom, setRevisitPanelClassroom] = useState<StageListItem | null>(null);
@@ -269,8 +268,6 @@ function HomePage() {
       }
     } catch (err) {
       log.error('Failed to load classrooms:', err);
-    } finally {
-      setClassroomsLoaded(true);
     }
   }, [replaceThumbnails]);
 
@@ -745,16 +742,7 @@ function HomePage() {
   };
 
   const canGenerate = !!form.requirement.trim() && hasUsableProvider;
-  const homeSurface = resolveHomeSurfaceState({
-    reverseChallengeEnabled,
-    classroomsLoaded,
-    stageCount: classrooms.length,
-  });
-
-  const handleGenerateFirstCourse = () => {
-    setReverseChallengeEnabled(false);
-    window.setTimeout(() => textareaRef.current?.focus(), 0);
-  };
+  const homeSurface = resolveHomeSurfaceState({ reverseChallengeEnabled });
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
@@ -1042,23 +1030,6 @@ function HomePage() {
                   </button>
                 </div>
               </div>
-            </motion.div>
-          ) : null}
-        </AnimatePresence>
-
-        <AnimatePresence initial={false}>
-          {homeSurface.showEmptyCoursePrompt ? (
-            <motion.div
-              key="spiral-empty-course"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              className="flex w-full max-w-sm flex-col items-center gap-4 rounded-2xl border border-emerald-200/60 bg-white/70 px-8 py-7 shadow-lg shadow-emerald-950/[0.03] backdrop-blur-xl dark:border-emerald-800/40 dark:bg-slate-900/70"
-            >
-              <p className="text-sm text-muted-foreground">{t('home.spiralEmptyCoursePrompt')}</p>
-              <Button type="button" onClick={handleGenerateFirstCourse}>
-                {t('home.generateFirstCourse')}
-              </Button>
             </motion.div>
           ) : null}
         </AnimatePresence>

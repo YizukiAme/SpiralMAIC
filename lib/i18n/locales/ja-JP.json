@@ -29,9 +29,7 @@
   },
   "home": {
     "slogan": "マルチエージェント対話型教室で生成的に学ぶ",
-    "greetingWithName": "こんにちは、{{name}}さん",
-    "spiralEmptyCoursePrompt": "まずコースを1つ生成してください",
-    "generateFirstCourse": "コースを生成"
+    "greetingWithName": "こんにちは、{{name}}さん"
   },
   "toolbar": {
     "pdfParser": "パーサー",

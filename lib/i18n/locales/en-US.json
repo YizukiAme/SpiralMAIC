@@ -29,9 +29,7 @@
   },
   "home": {
     "slogan": "Generative Learning in Multi-Agent Interactive Classroom",
-    "greetingWithName": "Hi, {{name}}",
-    "spiralEmptyCoursePrompt": "Generate a course before using Spiral",
-    "generateFirstCourse": "Generate a course"
+    "greetingWithName": "Hi, {{name}}"
   },
   "toolbar": {
     "pdfParser": "Parser",
