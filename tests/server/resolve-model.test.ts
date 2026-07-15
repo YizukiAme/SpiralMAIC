@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { deriveCodexUpstreamSessionId } from '@/lib/server/codex/logical-session';
+import type { ModelInfo } from '@/lib/types/provider';
 
 // Mock the heavy downstream of resolveModel so the test isolates the model
 // string *resolution order*: stage route > x-model > DEFAULT_MODEL > builtin.
@@ -16,7 +17,7 @@ const mocks = vi.hoisted(() => {
     getValidCredentials: vi.fn(async () => ({ accessToken: 'token', accountId: 'account' })),
   };
   const codexModelDiscovery = {
-    getModels: vi.fn(async () => [
+    getModels: vi.fn<() => Promise<ModelInfo[]>>(async () => [
       {
         id: 'gpt-5.4',
         name: 'GPT-5.4',
@@ -217,6 +218,11 @@ describe('resolveModel — per-stage resolution order', () => {
       providerId: 'openai-codex',
       modelId: 'gpt-5.4',
       apiKey: '',
+      modelInfo: {
+        id: 'gpt-5.4',
+        name: 'GPT-5.4',
+        capabilities: { serviceTiers: ['priority'] },
+      },
     });
     expect(resolved.baseUrl).toBeUndefined();
   });
@@ -286,9 +292,42 @@ describe('resolveModel — per-stage resolution order', () => {
       serviceTier: 'priority',
     });
 
-    expect(mocks.codexModelDiscovery.getModels).not.toHaveBeenCalled();
+    expect(mocks.codexModelDiscovery.getModels).toHaveBeenCalledTimes(1);
     expect(mocks.getModelCalls.at(-1)).not.toHaveProperty('serviceTier');
     expect(resolved.serviceTier).toBeUndefined();
+  });
+
+  it('returns dynamic Codex vision, thinking, and context metadata from discovery', async () => {
+    mocks.codexModelDiscovery.getModels.mockResolvedValueOnce([
+      {
+        id: 'gpt-dynamic',
+        name: 'GPT Dynamic',
+        contextWindow: 456_789,
+        capabilities: {
+          streaming: true,
+          tools: true,
+          vision: true,
+          thinking: {
+            control: 'effort',
+            requestAdapter: 'openai',
+            effortValues: ['low', 'high'],
+            defaultEffort: 'high',
+          },
+        },
+      },
+    ]);
+    const { resolveModel } = await import('@/lib/server/resolve-model');
+
+    const resolved = await resolveModel({ modelString: 'openai-codex:gpt-dynamic' });
+
+    expect(resolved.modelInfo).toMatchObject({
+      id: 'gpt-dynamic',
+      contextWindow: 456_789,
+      capabilities: {
+        vision: true,
+        thinking: { effortValues: ['low', 'high'], defaultEffort: 'high' },
+      },
+    });
   });
 
   it('only accepts the exact priority service-tier header', async () => {
@@ -303,7 +342,7 @@ describe('resolveModel — per-stage resolution order', () => {
         },
       }),
     );
-    expect(mocks.codexModelDiscovery.getModels).not.toHaveBeenCalled();
+    expect(mocks.codexModelDiscovery.getModels).toHaveBeenCalledTimes(1);
     expect(mocks.getModelCalls.at(-1)).not.toHaveProperty('serviceTier');
 
     await resolveModelFromHeaders(
@@ -314,7 +353,7 @@ describe('resolveModel — per-stage resolution order', () => {
         },
       }),
     );
-    expect(mocks.codexModelDiscovery.getModels).toHaveBeenCalledTimes(1);
+    expect(mocks.codexModelDiscovery.getModels).toHaveBeenCalledTimes(2);
     expect(mocks.getModelCalls.at(-1)).toMatchObject({ serviceTier: 'priority' });
   });
 

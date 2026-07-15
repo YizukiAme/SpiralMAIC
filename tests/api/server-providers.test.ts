@@ -38,6 +38,16 @@ describe('/api/server-providers Codex publication', () => {
     getCodexNativeServerProvider.mockResolvedValue({
       models: ['gpt-live'],
       fastModels: ['gpt-live'],
+      modelCatalog: [
+        {
+          id: 'gpt-live',
+          name: 'GPT Live',
+          contextWindow: 372_000,
+          capabilities: { streaming: true, tools: true, serviceTiers: ['priority'] },
+          source: 'probed',
+          prompt: 'must-not-leak',
+        },
+      ],
       accountId: 'must-not-leak',
       email: 'must-not-leak@example.com',
     });
@@ -48,7 +58,23 @@ describe('/api/server-providers Codex publication', () => {
 
     expect(body.providers).toEqual({
       openai: { models: ['gpt-5.4'] },
-      'openai-codex': { models: ['gpt-live'], fastModels: ['gpt-live'] },
+      'openai-codex': {
+        models: ['gpt-live'],
+        fastModels: ['gpt-live'],
+        modelCatalog: [
+          {
+            id: 'gpt-live',
+            name: 'GPT Live',
+            contextWindow: 372_000,
+            capabilities: {
+              streaming: true,
+              tools: true,
+              serviceTiers: ['priority'],
+            },
+            source: 'probed',
+          },
+        ],
+      },
     });
     expect(JSON.stringify(body)).not.toContain('must-not-leak');
   });

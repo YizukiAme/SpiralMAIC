@@ -41,6 +41,7 @@ import type {
 } from '@/lib/types/provider';
 import { applyModelMetadata, getCatalogThinkingCapability } from './model-metadata';
 import { findModelById } from './model-aliases';
+import { getBundledCodexModelCatalog } from './codex-catalog';
 import { getDefaultThinkingConfig, getThinkingMode, pickThinkingBudget } from './thinking-config';
 import { createLogger } from '@/lib/logger';
 import { normalizeAzureBaseUrl } from './azure';
@@ -225,32 +226,7 @@ export const PROVIDERS: Record<ProviderId, ProviderConfig> = {
     requiresApiKey: false,
     credentialMode: 'oauth',
     icon: '/logos/openai.svg',
-    models: [
-      {
-        id: 'gpt-5.6-sol',
-        name: 'GPT-5.6 Sol',
-        contextWindow: 272000,
-        capabilities: { streaming: true, tools: true, vision: true },
-        source: 'probed',
-      },
-      {
-        id: 'gpt-5.6-terra',
-        name: 'GPT-5.6 Terra',
-        contextWindow: 272000,
-        capabilities: { streaming: true, tools: true, vision: true },
-        source: 'probed',
-      },
-      {
-        id: 'gpt-5.6-luna',
-        name: 'GPT-5.6 Luna',
-        contextWindow: 272000,
-        capabilities: { streaming: true, tools: true, vision: true },
-        source: 'probed',
-      },
-      { id: 'gpt-5.5', name: 'GPT-5.5', source: 'probed' },
-      { id: 'gpt-5.4', name: 'GPT-5.4', source: 'probed' },
-      { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini', source: 'probed' },
-    ],
+    models: getBundledCodexModelCatalog(),
   },
 
   anthropic: {
@@ -1319,58 +1295,6 @@ export const PROVIDERS: Record<ProviderId, ProviderConfig> = {
 };
 
 applyModelMetadata(PROVIDERS);
-
-function cloneModelCapabilities(
-  capabilities: ModelInfo['capabilities'],
-): ModelInfo['capabilities'] {
-  if (!capabilities) return undefined;
-  const thinking = capabilities.thinking;
-  return {
-    ...capabilities,
-    ...(thinking
-      ? {
-          thinking: {
-            ...thinking,
-            ...(thinking.effortValues ? { effortValues: [...thinking.effortValues] } : {}),
-            ...(thinking.levelValues ? { levelValues: [...thinking.levelValues] } : {}),
-            ...(thinking.budgetRange ? { budgetRange: { ...thinking.budgetRange } } : {}),
-            ...(thinking.anthropicThinking
-              ? {
-                  anthropicThinking: {
-                    ...thinking.anthropicThinking,
-                    ...(thinking.anthropicThinking.budgetByEffort
-                      ? { budgetByEffort: { ...thinking.anthropicThinking.budgetByEffort } }
-                      : {}),
-                  },
-                }
-              : {}),
-          },
-        }
-      : {}),
-  };
-}
-
-// Codex discovery exposes only IDs and display names. Seed its fallback
-// registry from the canonical OpenAI catalog so settings sync preserves the
-// same final context/output limits and deeply-isolated capabilities for shared
-// model IDs.
-const openAIModelsById = new Map(PROVIDERS.openai.models.map((model) => [model.id, model]));
-PROVIDERS['openai-codex'].models = PROVIDERS['openai-codex'].models.map((fallback) => {
-  const catalogModel = openAIModelsById.get(fallback.id);
-  if (!catalogModel) return fallback;
-  const catalogCapabilities = cloneModelCapabilities(catalogModel.capabilities);
-  const fallbackCapabilities = cloneModelCapabilities(fallback.capabilities);
-  return {
-    ...catalogModel,
-    ...fallback,
-    capabilities: {
-      ...catalogCapabilities,
-      ...fallbackCapabilities,
-      thinking: fallbackCapabilities?.thinking ?? catalogCapabilities?.thinking,
-    },
-    source: 'probed',
-  };
-});
 
 /**
  * Get provider config (from built-in or unified config in localStorage)

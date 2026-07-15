@@ -67,10 +67,16 @@ describe('model metadata thinking capabilities', () => {
     );
   });
 
-  it('reuses matching OpenAI metadata for native Codex model IDs', () => {
-    expect(getCatalogThinkingCapability('openai-codex', 'gpt-5.4')).toEqual(
-      getCatalogThinkingCapability('openai', 'gpt-5.4'),
-    );
+  it('keeps native Codex metadata independent from public OpenAI model IDs', () => {
+    expect(getCatalogThinkingCapability('openai-codex', 'gpt-5.4')).toBeUndefined();
+    expect(getCatalogThinkingCapability('openai-codex', 'gpt-5.5')).toMatchObject({
+      effortValues: ['low', 'medium', 'high', 'xhigh'],
+      defaultEffort: 'medium',
+    });
+    expect(getCatalogThinkingCapability('openai-codex', 'gpt-5.2')).toMatchObject({
+      effortValues: ['low', 'medium', 'high', 'xhigh'],
+      defaultEffort: 'medium',
+    });
     expect(getCatalogThinkingCapability('openai-codex', 'unknown-codex-model')).toBeUndefined();
   });
 

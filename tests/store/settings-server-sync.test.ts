@@ -8,6 +8,7 @@
 
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { isProviderUsable } from '@/lib/store/settings-validation';
+import type { ModelInfo } from '@/lib/types/provider';
 
 // ---------------------------------------------------------------------------
 // Mocks — must be defined before importing the store
@@ -68,8 +69,7 @@ vi.mock('@/lib/ai/providers', () => ({
           },
         },
         { id: 'gpt-5.5', name: 'GPT-5.5' },
-        { id: 'gpt-5.4', name: 'GPT-5.4' },
-        { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini' },
+        { id: 'gpt-5.2', name: 'GPT-5.2' },
       ],
     },
     anthropic: {
@@ -227,7 +227,10 @@ vi.stubGlobal('window', { localStorage: localStorageStub });
 
 /** Full server response shape */
 interface MockServerResponse {
-  providers?: Record<string, { models?: string[]; fastModels?: string[]; baseUrl?: string }>;
+  providers?: Record<
+    string,
+    { models?: string[]; fastModels?: string[]; modelCatalog?: ModelInfo[]; baseUrl?: string }
+  >;
   tts?: Record<string, { baseUrl?: string; disabled?: boolean }>;
   asr?: Record<string, { baseUrl?: string }>;
   pdf?: Record<string, { baseUrl?: string }>;
@@ -423,8 +426,7 @@ describe('settings rehydrate — built-in provider models', () => {
       'gpt-5.6-terra',
       'gpt-5.6-luna',
       'gpt-5.5',
-      'gpt-5.4',
-      'gpt-5.4-mini',
+      'gpt-5.2',
     ]);
     expect(store.getState().providerId).not.toBe('openai-codex');
     expect(store.getState().modelId).not.toBe('stale-secret-model');
@@ -548,7 +550,7 @@ describe('fetchServerProviders — provider availability sync', () => {
 
     let codex = store.getState().providersConfig['openai-codex'];
     expect(codex.models.map((model) => model.id)).toEqual(['gpt-old', 'gpt-4o']);
-    expect(codex.models[1].name).toBe('GPT-4o');
+    expect(codex.models[1].name).toBe('gpt-4o');
     expect(codex.credentialMode).toBe('oauth');
 
     mockServerResponse({ providers: { 'openai-codex': { models: ['gpt-new'] } } });
@@ -596,6 +598,60 @@ describe('fetchServerProviders — provider availability sync', () => {
     const models = store.getState().providersConfig['openai-codex'].models;
     expect(models[0].capabilities?.serviceTiers).toEqual(['priority']);
     expect(models[1].capabilities?.serviceTiers).toBeUndefined();
+  });
+
+  it('treats a valid rich catalog as authoritative and never persists it in localStorage', async () => {
+    const store = await getStore();
+    mockServerResponse({
+      providers: {
+        'openai-codex': {
+          models: ['gpt-4o'],
+          fastModels: ['gpt-4o'],
+          modelCatalog: [
+            {
+              id: 'gpt-live',
+              name: 'GPT Live',
+              contextWindow: 456_789,
+              capabilities: {
+                streaming: true,
+                tools: true,
+                vision: true,
+                serviceTiers: ['priority'],
+                thinking: {
+                  control: 'effort',
+                  requestAdapter: 'openai',
+                  effortValues: ['low', 'high'],
+                  defaultEffort: 'high',
+                },
+              },
+              source: 'probed',
+            },
+          ],
+        },
+      },
+    });
+
+    await store.getState().fetchServerProviders();
+
+    expect(store.getState().providersConfig['openai-codex'].models).toMatchObject([
+      {
+        id: 'gpt-live',
+        name: 'GPT Live',
+        contextWindow: 456_789,
+        capabilities: {
+          vision: true,
+          serviceTiers: ['priority'],
+          thinking: { effortValues: ['low', 'high'], defaultEffort: 'high' },
+        },
+      },
+    ]);
+    expect(store.getState().providersConfig['openai-codex'].models).toHaveLength(1);
+    const persisted = JSON.parse(storage.get('settings-storage')!) as {
+      state: { providersConfig: Record<string, { models: ModelInfo[] }> };
+    };
+    expect(
+      persisted.state.providersConfig['openai-codex'].models.map((model) => model.id),
+    ).not.toContain('gpt-live');
   });
 
   it('clears discovered fast capabilities when native OAuth disappears', async () => {
@@ -654,8 +710,7 @@ describe('fetchServerProviders — provider availability sync', () => {
       'gpt-5.6-terra',
       'gpt-5.6-luna',
       'gpt-5.5',
-      'gpt-5.4',
-      'gpt-5.4-mini',
+      'gpt-5.2',
     ]);
   });
 

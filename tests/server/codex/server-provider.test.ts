@@ -37,10 +37,19 @@ describe('getCodexNativeServerProvider', () => {
       getModels: vi.fn(async () => [
         {
           id: 'gpt-fast',
-          capabilities: { serviceTiers: ['priority'] },
+          name: 'GPT Fast',
+          contextWindow: 372_000,
+          capabilities: {
+            vision: true,
+            thinking: {
+              effortValues: ['low', 'medium'],
+              defaultEffort: 'medium',
+            },
+            serviceTiers: ['priority'],
+          },
           accountId: 'model-account-secret',
         },
-        { id: 'gpt-standard' },
+        { id: 'gpt-standard', name: 'GPT Standard' },
       ]),
       invalidate: vi.fn(),
     };
@@ -52,6 +61,36 @@ describe('getCodexNativeServerProvider', () => {
     expect(result).toEqual({
       models: ['gpt-fast', 'gpt-standard'],
       fastModels: ['gpt-fast'],
+      modelCatalog: [
+        {
+          id: 'gpt-fast',
+          name: 'GPT Fast',
+          contextWindow: 372_000,
+          capabilities: {
+            streaming: true,
+            tools: true,
+            vision: true,
+            thinking: {
+              control: 'effort',
+              requestAdapter: 'openai',
+              defaultMode: 'enabled',
+              effortValues: ['low', 'medium'],
+              defaultEffort: 'medium',
+              toggleable: false,
+              budgetAdjustable: true,
+              defaultEnabled: true,
+            },
+            serviceTiers: ['priority'],
+          },
+          source: 'probed',
+        },
+        {
+          id: 'gpt-standard',
+          name: 'GPT Standard',
+          capabilities: { streaming: true, tools: true },
+          source: 'probed',
+        },
+      ],
     });
     expect(JSON.stringify(result)).not.toMatch(/access-secret|refresh-secret|account-secret/);
   });

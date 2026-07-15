@@ -1308,6 +1308,65 @@ describe('CodexLoginManager device flow', () => {
     }
   });
 
+  it('finishes a credential replacement only after the cache lifecycle hook settles', async () => {
+    let now = NOW;
+    const events: string[] = [];
+    const vault = new MemoryVault();
+    vault.current = {
+      version: 1,
+      accessToken: 'old-access',
+      refreshToken: 'old-refresh',
+      expiresAt: NOW + 60_000,
+      accountId: 'old-account',
+      updatedAt: NOW,
+    };
+    const originalSave = vault.save.bind(vault);
+    vault.save = async (next) => {
+      events.push('save');
+      await originalSave(next);
+    };
+    let hookFinished = false;
+    const verifier = 'replacement-verifier';
+    const manager = new CodexLoginManager({
+      vault,
+      clock: { now: () => now },
+      onCredentialsReplaced: async () => {
+        events.push('hook');
+        await Promise.resolve();
+        hookFinished = true;
+      },
+      oauthFetch: async (input) => {
+        if (input === CODEX_OAUTH_DEVICE_USERCODE_ENDPOINT) {
+          return jsonResponse({
+            device_auth_id: 'replacement-device',
+            user_code: 'REPLACE',
+            interval: 1,
+          });
+        }
+        if (input === CODEX_OAUTH_DEVICE_TOKEN_ENDPOINT) {
+          return jsonResponse({
+            authorization_code: 'replacement-code',
+            code_verifier: verifier,
+            code_challenge: pkceChallenge(verifier),
+          });
+        }
+        return jsonResponse({
+          access_token: unsignedJwt({ chatgpt_account_id: 'new-account' }),
+          refresh_token: 'new-refresh',
+          expires_in: 600,
+        });
+      },
+    } as ConstructorParameters<typeof CodexLoginManager>[0]);
+    managers.push(manager);
+
+    await manager.begin('device');
+    now += 1_000;
+    await expect(manager.poll()).resolves.toMatchObject({ status: 'complete' });
+
+    expect(events).toEqual(['save', 'hook']);
+    expect(hookFinished).toBe(true);
+  });
+
   it('coalesces concurrent due polls into one upstream request', async () => {
     let now = NOW;
     let pollRequestCount = 0;
