@@ -21,7 +21,7 @@ interface CreateCodexAuthRuntimeOptions {
   clock?: CodexClock;
 }
 
-const RUNTIME_KEY = Symbol.for('openmaic.codex.oauth.auth-runtime.v2');
+const RUNTIME_KEY = Symbol.for('openmaic.codex.oauth.auth-runtime.v3');
 const runtimeHost = globalThis as unknown as Record<PropertyKey, unknown>;
 
 function isCodexAuthRuntime(value: unknown): value is CodexAuthRuntime {
