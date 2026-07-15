@@ -1683,8 +1683,8 @@
     },
     "ttsBrowserNativeTimelineNotice": "浏览器内置 TTS 不支持编辑器时间轴的音频功能（试听、重新生成、全部配音）。切换到托管 TTS 提供方即可逐句生成和管理音频。",
     "revisit": {
-      "nav": "螺旋复习",
-      "title": "螺旋复习",
+      "nav": "Spiral",
+      "title": "Spiral",
       "reverseChallenge": "Reverse Challenge",
       "reverseChallengeDetail": "课件学完后，可进入给 AI 学生讲回去的复习挑战。",
       "stableSuccesses": "稳定所需成功次数",
