@@ -12,17 +12,58 @@ import {
 
 describe('home Spiral surface state', () => {
   it('keeps the prompt visible in normal OpenMAIC mode', () => {
-    expect(resolveHomeSurfaceState({ reverseChallengeEnabled: false })).toEqual({
+    expect(
+      resolveHomeSurfaceState({
+        reverseChallengeEnabled: false,
+        classroomsLoaded: true,
+        stageCount: 0,
+      }),
+    ).toEqual({
       showPromptComposer: true,
       showSpiralLogo: false,
+      showEmptyCoursePrompt: false,
     });
   });
 
   it('hides the prompt composer in Spiral mode', () => {
-    expect(resolveHomeSurfaceState({ reverseChallengeEnabled: true })).toEqual({
+    expect(
+      resolveHomeSurfaceState({
+        reverseChallengeEnabled: true,
+        classroomsLoaded: true,
+        stageCount: 1,
+      }),
+    ).toEqual({
       showPromptComposer: false,
       showSpiralLogo: true,
+      showEmptyCoursePrompt: false,
     });
+  });
+
+  it('waits for course hydration before showing the Spiral empty prompt', () => {
+    expect(
+      resolveHomeSurfaceState({
+        reverseChallengeEnabled: true,
+        classroomsLoaded: false,
+        stageCount: 0,
+      }).showEmptyCoursePrompt,
+    ).toBe(false);
+  });
+
+  it('shows the Spiral empty prompt only after an empty course list loads', () => {
+    expect(
+      resolveHomeSurfaceState({
+        reverseChallengeEnabled: true,
+        classroomsLoaded: true,
+        stageCount: 0,
+      }).showEmptyCoursePrompt,
+    ).toBe(true);
+    expect(
+      resolveHomeSurfaceState({
+        reverseChallengeEnabled: true,
+        classroomsLoaded: true,
+        stageCount: 1,
+      }).showEmptyCoursePrompt,
+    ).toBe(false);
   });
 
   it('does not open the revisit database while Spiral mode is off', () => {

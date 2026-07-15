@@ -29,7 +29,9 @@
   },
   "home": {
     "slogan": "Aprendizagem Generativa em Sala de Aula Interativa Multi-Agente",
-    "greetingWithName": "Olá, {{name}}"
+    "greetingWithName": "Olá, {{name}}",
+    "spiralEmptyCoursePrompt": "Crie um curso antes de usar o Spiral",
+    "generateFirstCourse": "Criar um curso"
   },
   "toolbar": {
     "pdfParser": "Analisador",

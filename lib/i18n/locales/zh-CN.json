@@ -29,7 +29,9 @@
   },
   "home": {
     "slogan": "Generative Learning in Multi-Agent Interactive Classroom",
-    "greetingWithName": "嗨，{{name}}"
+    "greetingWithName": "嗨，{{name}}",
+    "spiralEmptyCoursePrompt": "请先生成一节课程",
+    "generateFirstCourse": "去生成课程"
   },
   "toolbar": {
     "pdfParser": "解析器",
