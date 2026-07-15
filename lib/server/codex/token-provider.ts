@@ -3,7 +3,10 @@ import { codexCredentialsEqual, withCodexCredentialVaultMutation } from './vault
 import type { CodexCredentialVault, CodexOAuthCredentials } from './vault';
 
 export const CODEX_OAUTH_TOKEN_ENDPOINT = 'https://auth.openai.com/oauth/token';
+export const CODEX_OAUTH_REVOKE_ENDPOINT = 'https://auth.openai.com/oauth/revoke';
 export const CODEX_OAUTH_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
+export const CODEX_OAUTH_REQUEST_TIMEOUT_MS = 10_000;
+export const CODEX_OAUTH_REVOKE_TIMEOUT_MS = 10_000;
 
 const REFRESH_EARLY_MS = 60_000;
 
@@ -43,6 +46,77 @@ export class CodexOAuthError extends Error {
   }
 }
 
+export interface CodexOAuthRequestOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+const OAUTH_REQUEST_TIMEOUT_MARKER = Symbol.for('openmaic.codex.oauth.request-timeout-error.v1');
+
+class CodexOAuthRequestAbortError extends CodexOAuthError {
+  constructor(timedOut: boolean) {
+    super(CODEX_OAUTH_ERROR_CODES.NETWORK_ERROR, true);
+    this.name = 'CodexOAuthRequestAbortError';
+    if (timedOut) {
+      Object.defineProperty(this, OAUTH_REQUEST_TIMEOUT_MARKER, { value: true });
+    }
+  }
+}
+
+/** Recognize request-deadline expiry without exposing an abort reason. */
+export function isCodexOAuthRequestTimeoutError(error: unknown): boolean {
+  return Boolean(
+    error &&
+    typeof error === 'object' &&
+    (error as Record<PropertyKey, unknown>)[OAUTH_REQUEST_TIMEOUT_MARKER] === true,
+  );
+}
+
+/**
+ * Bound a complete OAuth request operation, including any response parsing.
+ * The explicit race guarantees settlement even for injected fetch functions
+ * that ignore AbortSignal.
+ */
+export async function withCodexOAuthRequestTimeout<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+  options: CodexOAuthRequestOptions = {},
+): Promise<T> {
+  const controller = new AbortController();
+  const timeoutMs = Math.max(0, options.timeoutMs ?? CODEX_OAUTH_REQUEST_TIMEOUT_MS);
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  let parentAbortListener: (() => void) | undefined;
+
+  const aborted = new Promise<never>((_resolve, reject) => {
+    const abort = (timedOut: boolean) => {
+      if (!controller.signal.aborted) controller.abort();
+      reject(new CodexOAuthRequestAbortError(timedOut));
+    };
+
+    if (options.signal) {
+      parentAbortListener = () => abort(false);
+      if (options.signal.aborted) parentAbortListener();
+      else options.signal.addEventListener('abort', parentAbortListener, { once: true });
+    }
+
+    if (!controller.signal.aborted) {
+      timeoutHandle = setTimeout(() => abort(true), timeoutMs);
+    }
+  });
+
+  try {
+    if (controller.signal.aborted) return await aborted;
+    return await Promise.race([
+      Promise.resolve().then(() => operation(controller.signal)),
+      aborted,
+    ]);
+  } finally {
+    if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+    if (options.signal && parentAbortListener) {
+      options.signal.removeEventListener('abort', parentAbortListener);
+    }
+  }
+}
+
 export interface CodexTokenProvider {
   getValidCredentials(options?: {
     forceRefresh?: boolean;
@@ -59,6 +133,9 @@ interface ManagedCodexTokenProviderOptions {
   vault: CodexCredentialVault;
   tokenExchangeFetch?: TokenExchangeFetch;
   clock?: CodexClock;
+  oauthRequestTimeoutMs?: number;
+  revokeTimeoutMs?: number;
+  onCredentialsCleared?: () => void | Promise<void>;
 }
 
 interface TokenResponse {
@@ -91,6 +168,7 @@ interface ConditionalCodexTokenProvider {
 interface ActiveCredentialOperation {
   state: CredentialOperationState;
   promise: Promise<ValidCredentials>;
+  abortController: AbortController;
 }
 
 interface SharedCredentialState {
@@ -110,7 +188,7 @@ function isSharedCredentialStateRegistry(value: unknown): value is SharedCredent
   return candidate.byCoordinationKey instanceof Map && candidate.byVault instanceof WeakMap;
 }
 
-const SHARED_STATE_REGISTRY_KEY = Symbol.for('openmaic.codex.oauth.shared-credential-state.v2');
+const SHARED_STATE_REGISTRY_KEY = Symbol.for('openmaic.codex.oauth.shared-credential-state.v3');
 const coordinatorHost = globalThis as unknown as Record<PropertyKey, unknown>;
 const existingSharedStateRegistry = coordinatorHost[SHARED_STATE_REGISTRY_KEY];
 const sharedStateRegistry = isSharedCredentialStateRegistry(existingSharedStateRegistry)
@@ -159,6 +237,30 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function nonEmptyString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
+
+function normalizedErrorCode(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim().toLowerCase();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function extractRefreshErrorCode(payload: unknown): string | undefined {
+  if (!isRecord(payload)) return undefined;
+  if (isRecord(payload.error)) {
+    const nested = normalizedErrorCode(payload.error.code);
+    if (nested) return nested;
+  }
+  const stringError = normalizedErrorCode(payload.error);
+  if (stringError) return stringError;
+  return normalizedErrorCode(payload.code);
+}
+
+const TERMINAL_REFRESH_ERROR_CODES = new Set([
+  'invalid_grant',
+  'refresh_token_expired',
+  'refresh_token_reused',
+  'refresh_token_invalidated',
+]);
 
 function expiresAtFromJwt(token: string): number | undefined {
   const exp = parseJwtPayload(token)?.exp;
@@ -233,12 +335,24 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
   private readonly tokenExchangeFetch: TokenExchangeFetch;
   private readonly clock: CodexClock;
   private readonly sharedState: SharedCredentialState;
+  private readonly oauthRequestTimeoutMs: number;
+  private readonly revokeTimeoutMs: number;
+  private readonly onCredentialsCleared?: () => void | Promise<void>;
 
   constructor(options: ManagedCodexTokenProviderOptions) {
     this.vault = options.vault;
     this.tokenExchangeFetch = options.tokenExchangeFetch ?? globalThis.fetch.bind(globalThis);
     this.clock = options.clock ?? { now: Date.now };
     this.sharedState = getSharedCredentialState(options.vault);
+    this.oauthRequestTimeoutMs = Math.max(
+      0,
+      options.oauthRequestTimeoutMs ?? CODEX_OAUTH_REQUEST_TIMEOUT_MS,
+    );
+    this.revokeTimeoutMs = Math.min(
+      CODEX_OAUTH_REVOKE_TIMEOUT_MS,
+      Math.max(0, options.revokeTimeoutMs ?? CODEX_OAUTH_REVOKE_TIMEOUT_MS),
+    );
+    this.onCredentialsCleared = options.onCredentialsCleared;
   }
 
   getValidCredentials(options?: { forceRefresh?: boolean }): Promise<ValidCredentials> {
@@ -302,9 +416,11 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
       source: null,
       expected,
     };
+    const abortController = new AbortController();
     const operation: ActiveCredentialOperation = {
       state,
-      promise: this.resolveCredentials(state, requestGeneration),
+      promise: this.resolveCredentials(state, requestGeneration, abortController.signal),
+      abortController,
     };
     this.sharedState.operationInFlight = operation;
     void operation.promise.then(
@@ -326,7 +442,9 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
     if (this.sharedState.logoutInFlight) return this.sharedState.logoutInFlight;
 
     this.sharedState.generation += 1;
-    const staleOperation = this.sharedState.operationInFlight?.promise ?? null;
+    const activeOperation = this.sharedState.operationInFlight;
+    const staleOperation = activeOperation?.promise ?? null;
+    activeOperation?.abortController.abort();
     const logout = this.finishLogout(staleOperation);
     this.sharedState.logoutInFlight = logout;
     void logout.then(
@@ -343,6 +461,7 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
   private async resolveCredentials(
     state: CredentialOperationState,
     requestGeneration: number,
+    signal: AbortSignal,
   ): Promise<ValidCredentials> {
     let credentials: CodexOAuthCredentials | null;
 
@@ -370,7 +489,12 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
     }
 
     state.refreshed = true;
-    const result = await this.refreshCredentials(credentials, requestGeneration, state.expected);
+    const result = await this.refreshCredentials(
+      credentials,
+      requestGeneration,
+      state.expected,
+      signal,
+    );
     state.refreshCommitted = result.committed;
     if (
       state.expected &&
@@ -382,15 +506,55 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
   }
 
   private async finishLogout(staleOperation: Promise<ValidCredentials> | null): Promise<void> {
-    await withCodexCredentialVaultMutation(this.vault, () => this.vault.clear()).catch(
-      () => undefined,
-    );
-    await staleOperation?.catch(() => undefined);
-
+    let captured: CodexOAuthCredentials | null;
     try {
-      await withCodexCredentialVaultMutation(this.vault, () => this.vault.clear());
+      captured = await withCodexCredentialVaultMutation(this.vault, async () => {
+        let current: CodexOAuthCredentials | null = null;
+        try {
+          current = await this.vault.load();
+        } catch {
+          // Clearing local credentials remains authoritative even if a corrupt
+          // or unavailable vault cannot provide a revocation snapshot.
+        }
+        await this.vault.clear();
+        return current;
+      });
     } catch {
       throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.STORAGE_ERROR, false);
+    }
+
+    await this.notifyCredentialsCleared();
+    await staleOperation?.catch(() => undefined);
+    if (!captured) return;
+
+    try {
+      await withCodexOAuthRequestTimeout(
+        async (signal) => {
+          await this.tokenExchangeFetch(CODEX_OAUTH_REVOKE_ENDPOINT, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              token: captured.refreshToken,
+              token_type_hint: 'refresh_token',
+              client_id: CODEX_OAUTH_CLIENT_ID,
+            }),
+            signal,
+          });
+        },
+        { timeoutMs: this.revokeTimeoutMs },
+      );
+    } catch {
+      // Revocation is best-effort. Local logout already committed and must not
+      // be rolled back or failed by network, timeout, or upstream status.
+    }
+  }
+
+  private async notifyCredentialsCleared(): Promise<void> {
+    try {
+      await this.onCredentialsCleared?.();
+    } catch {
+      // Lifecycle listeners are internal invalidation notifications. They must
+      // never restore credentials or turn a committed local clear into failure.
     }
   }
 
@@ -398,6 +562,7 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
     credentials: CodexOAuthCredentials,
     refreshGeneration: number,
     expected: ValidCredentials | null,
+    signal: AbortSignal,
   ): Promise<RefreshResult> {
     const body = new URLSearchParams({
       grant_type: 'refresh_token',
@@ -405,55 +570,66 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
       refresh_token: credentials.refreshToken,
     });
 
-    let response: Response;
+    let requestResult: { response: Response; payload: unknown };
     try {
-      response = await this.tokenExchangeFetch(CODEX_OAUTH_TOKEN_ENDPOINT, {
-        method: 'POST',
-        headers: { 'content-type': 'application/x-www-form-urlencoded' },
-        body,
-      });
+      requestResult = await withCodexOAuthRequestTimeout(
+        async (requestSignal) => {
+          const response = await this.tokenExchangeFetch(CODEX_OAUTH_TOKEN_ENDPOINT, {
+            method: 'POST',
+            headers: { 'content-type': 'application/x-www-form-urlencoded' },
+            body,
+            signal: requestSignal,
+          });
+          if (response.status === 401 || response.status >= 500) {
+            return { response, payload: null };
+          }
+          let payload: unknown = null;
+          try {
+            payload = await response.json();
+          } catch {
+            // Invalid bodies are classified below without retaining or exposing them.
+          }
+          return { response, payload };
+        },
+        { signal, timeoutMs: this.oauthRequestTimeoutMs },
+      );
     } catch {
       if (refreshGeneration !== this.sharedState.generation) throw signedOutError();
       throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.NETWORK_ERROR, true);
     }
 
     if (refreshGeneration !== this.sharedState.generation) throw signedOutError();
-
-    let payload: unknown = null;
-    try {
-      payload = await response.json();
-    } catch {
-      // Invalid bodies are classified below without retaining or exposing them.
-    }
-
-    if (refreshGeneration !== this.sharedState.generation) throw signedOutError();
+    const { response, payload } = requestResult;
 
     if (!response.ok) {
       if (response.status >= 500) {
         throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.UPSTREAM_ERROR, true, response.status);
       }
 
-      const errorCode = isRecord(payload) ? nonEmptyString(payload.error) : undefined;
-      if (errorCode === 'invalid_grant') {
-        let replacement: CodexOAuthCredentials | null;
+      const errorCode = extractRefreshErrorCode(payload);
+      if (response.status === 401 || (errorCode && TERMINAL_REFRESH_ERROR_CODES.has(errorCode))) {
+        let clearResult: { replacement: CodexOAuthCredentials | null; cleared: boolean };
         try {
-          replacement = await withCodexCredentialVaultMutation(this.vault, async () => {
+          clearResult = await withCodexCredentialVaultMutation(this.vault, async () => {
             if (refreshGeneration !== this.sharedState.generation) throw signedOutError();
             const current = await this.vault.load();
-            if (!codexCredentialsEqual(current, credentials)) return current;
+            if (!codexCredentialsEqual(current, credentials)) {
+              return { replacement: current, cleared: false };
+            }
             await this.vault.clear();
-            return null;
+            return { replacement: null, cleared: true };
           });
         } catch (error) {
           if (error instanceof CodexOAuthError) throw error;
           throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.STORAGE_ERROR, false);
         }
+        if (clearResult.cleared) await this.notifyCredentialsCleared();
         if (refreshGeneration !== this.sharedState.generation) throw signedOutError();
-        if (replacement) {
+        if (clearResult.replacement) {
           return {
             credentials: {
-              accessToken: replacement.accessToken,
-              accountId: replacement.accountId,
+              accessToken: clearResult.replacement.accessToken,
+              accountId: clearResult.replacement.accountId,
             },
             committed: false,
           };

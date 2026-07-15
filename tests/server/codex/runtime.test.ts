@@ -1,19 +1,37 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { CodexLoginManager } from '@/lib/server/codex/login-manager';
-import { CodexModelDiscovery } from '@/lib/server/codex/models';
-import { ManagedCodexTokenProvider } from '@/lib/server/codex/token-provider';
-import { FileCodexCredentialVault } from '@/lib/server/codex/vault';
-
 describe('Codex auth runtime', () => {
+  it('does not reuse the pre-hardening v2 runtime after a development reload', async () => {
+    vi.resetModules();
+    const legacyKey = Symbol.for('openmaic.codex.oauth.auth-runtime.v2');
+    const host = globalThis as unknown as Record<PropertyKey, unknown>;
+    const legacyRuntime = {
+      vault: {},
+      tokenProvider: {},
+      loginManager: {},
+      modelDiscovery: {},
+    };
+    Object.defineProperty(host, legacyKey, {
+      value: legacyRuntime,
+      configurable: true,
+    });
+
+    try {
+      const runtimeModule = await import('@/lib/server/codex/runtime');
+      expect(runtimeModule.getCodexAuthRuntime()).not.toBe(legacyRuntime);
+    } finally {
+      delete host[legacyKey];
+    }
+  });
+
   it('is lazy, survives module reload, and creates no callback listener on import', async () => {
     const runtimeModule = await import('@/lib/server/codex/runtime');
     const first = runtimeModule.getCodexAuthRuntime();
 
-    expect(first.vault).toBeInstanceOf(FileCodexCredentialVault);
-    expect(first.tokenProvider).toBeInstanceOf(ManagedCodexTokenProvider);
-    expect(first.loginManager).toBeInstanceOf(CodexLoginManager);
-    expect(first.modelDiscovery).toBeInstanceOf(CodexModelDiscovery);
+    expect(first.vault.constructor.name).toBe('FileCodexCredentialVault');
+    expect(first.tokenProvider.constructor.name).toBe('ManagedCodexTokenProvider');
+    expect(first.loginManager.constructor.name).toBe('CodexLoginManager');
+    expect(first.modelDiscovery.constructor.name).toBe('CodexModelDiscovery');
     expect(runtimeModule.getCodexAuthRuntime()).toBe(first);
 
     vi.resetModules();

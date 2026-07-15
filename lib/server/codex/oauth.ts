@@ -8,6 +8,7 @@ import {
   CodexOAuthError,
   type CodexClock,
   type TokenExchangeFetch,
+  withCodexOAuthRequestTimeout,
 } from './token-provider';
 import type { CodexOAuthCredentials } from './vault';
 
@@ -35,6 +36,8 @@ interface AuthorizationCodeExchangeOptions {
   redirectUri: string;
   tokenExchangeFetch?: TokenExchangeFetch;
   clock?: CodexClock;
+  signal?: AbortSignal;
+  timeoutMs?: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -79,67 +82,79 @@ export async function exchangeAuthorizationCode(
 ): Promise<CodexOAuthCredentials> {
   const tokenExchangeFetch = options.tokenExchangeFetch ?? globalThis.fetch.bind(globalThis);
   const clock = options.clock ?? { now: Date.now };
-  let response: Response;
   try {
-    response = await tokenExchangeFetch(CODEX_OAUTH_TOKEN_ENDPOINT, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'authorization_code',
-        client_id: CODEX_OAUTH_CLIENT_ID,
-        code: options.code,
-        redirect_uri: options.redirectUri,
-        code_verifier: options.verifier,
-      }),
-    });
-  } catch {
+    return await withCodexOAuthRequestTimeout(
+      async (signal) => {
+        const response = await tokenExchangeFetch(CODEX_OAUTH_TOKEN_ENDPOINT, {
+          method: 'POST',
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            grant_type: 'authorization_code',
+            client_id: CODEX_OAUTH_CLIENT_ID,
+            code: options.code,
+            redirect_uri: options.redirectUri,
+            code_verifier: options.verifier,
+          }),
+          signal,
+        });
+        if (!response.ok) {
+          throw new CodexOAuthError(
+            CODEX_OAUTH_ERROR_CODES.UPSTREAM_ERROR,
+            response.status >= 500,
+            response.status,
+          );
+        }
+
+        let payload: unknown;
+        try {
+          payload = await response.json();
+        } catch {
+          throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.INVALID_RESPONSE, false);
+        }
+        if (!isRecord(payload)) {
+          throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.INVALID_RESPONSE, false);
+        }
+
+        const accessToken = nonEmptyString(payload.access_token);
+        const refreshToken = nonEmptyString(payload.refresh_token);
+        const expiresIn = Number(payload.expires_in);
+        const idToken = nonEmptyString(payload.id_token);
+        const idIdentity = idToken ? extractCodexJwtIdentity(idToken) : {};
+        const accessIdentity = accessToken ? extractCodexJwtIdentity(accessToken) : {};
+        const identity = {
+          accountId: idIdentity.accountId ?? accessIdentity.accountId,
+          email: idIdentity.email ?? accessIdentity.email,
+        };
+        const now = clock.now();
+        const accessTokenExpiry = accessToken
+          ? Number(parseJwtPayload(accessToken)?.exp) * 1000
+          : NaN;
+        const expiresAt =
+          Number.isFinite(expiresIn) && expiresIn > 0 ? now + expiresIn * 1000 : accessTokenExpiry;
+        if (!accessToken || !refreshToken || !Number.isFinite(expiresAt) || expiresAt <= now) {
+          throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.INVALID_RESPONSE, false);
+        }
+        if (!identity.accountId) {
+          throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.INVALID_RESPONSE, false);
+        }
+
+        return {
+          version: 1,
+          accessToken,
+          refreshToken,
+          expiresAt,
+          accountId: identity.accountId,
+          ...(identity.email ? { email: identity.email } : {}),
+          updatedAt: now,
+        };
+      },
+      {
+        ...(options.signal ? { signal: options.signal } : {}),
+        ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+      },
+    );
+  } catch (error) {
+    if (error instanceof CodexOAuthError) throw error;
     throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.NETWORK_ERROR, true);
   }
-  if (!response.ok) {
-    throw new CodexOAuthError(
-      CODEX_OAUTH_ERROR_CODES.UPSTREAM_ERROR,
-      response.status >= 500,
-      response.status,
-    );
-  }
-  let payload: unknown;
-  try {
-    payload = await response.json();
-  } catch {
-    throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.INVALID_RESPONSE, false);
-  }
-  if (!isRecord(payload)) {
-    throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.INVALID_RESPONSE, false);
-  }
-
-  const accessToken = nonEmptyString(payload.access_token);
-  const refreshToken = nonEmptyString(payload.refresh_token);
-  const expiresIn = Number(payload.expires_in);
-  const idToken = nonEmptyString(payload.id_token);
-  const idIdentity = idToken ? extractCodexJwtIdentity(idToken) : {};
-  const accessIdentity = accessToken ? extractCodexJwtIdentity(accessToken) : {};
-  const identity = {
-    accountId: idIdentity.accountId ?? accessIdentity.accountId,
-    email: idIdentity.email ?? accessIdentity.email,
-  };
-  const now = clock.now();
-  const accessTokenExpiry = accessToken ? Number(parseJwtPayload(accessToken)?.exp) * 1000 : NaN;
-  const expiresAt =
-    Number.isFinite(expiresIn) && expiresIn > 0 ? now + expiresIn * 1000 : accessTokenExpiry;
-  if (!accessToken || !refreshToken || !Number.isFinite(expiresAt) || expiresAt <= now) {
-    throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.INVALID_RESPONSE, false);
-  }
-  if (!identity.accountId) {
-    throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.INVALID_RESPONSE, false);
-  }
-
-  return {
-    version: 1,
-    accessToken,
-    refreshToken,
-    expiresAt,
-    accountId: identity.accountId,
-    ...(identity.email ? { email: identity.email } : {}),
-    updatedAt: now,
-  };
 }
