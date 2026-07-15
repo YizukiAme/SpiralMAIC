@@ -96,6 +96,12 @@ import { createOrGetRevisitAttempt, listRevisitAttempts } from '@/lib/revisit/at
 import { resolveActiveRevisitScope } from '@/lib/revisit/clock';
 import { serializeRevisitScope } from '@/lib/revisit/scope';
 import { RevisitDemoBadge } from '@/components/revisit/demo-badge';
+import { FeaturedDemoCourseCard } from '@/components/demo/featured-demo-course-card';
+import {
+  FEATURED_DEMO_COURSE,
+  openFeaturedDemoCourse,
+  type FeaturedDemoPhase,
+} from '@/lib/demo/featured-course';
 
 const log = createLogger('Home');
 
@@ -213,6 +219,8 @@ function HomePage() {
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [featuredDemoPhase, setFeaturedDemoPhase] = useState<FeaturedDemoPhase>('idle');
+  const [featuredDemoError, setFeaturedDemoError] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchButtonRef = useRef<HTMLButtonElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
@@ -265,6 +273,23 @@ function HomePage() {
       setClassroomsLoaded(true);
     }
   }, [replaceThumbnails]);
+
+  const handleOpenFeaturedDemo = useCallback(async () => {
+    setFeaturedDemoError(null);
+    try {
+      const stageId = await openFeaturedDemoCourse({ onPhase: setFeaturedDemoPhase });
+      await loadClassrooms();
+      router.push(`/classroom/${stageId}`);
+    } catch (err) {
+      log.error('Failed to open featured demo course:', err);
+      const isQuotaError = err instanceof DOMException && err.name === 'QuotaExceededError';
+      setFeaturedDemoError(
+        isQuotaError ? '浏览器存储空间不足，请清理空间后重试' : '加载失败，点击重试',
+      );
+    } finally {
+      setFeaturedDemoPhase('idle');
+    }
+  }, [loadClassrooms, router]);
 
   useEffect(() => {
     if (
@@ -878,7 +903,7 @@ function HomePage() {
         className={cn(
           'relative z-20 w-full max-w-[800px] flex flex-col items-center',
           classrooms.length === 0
-            ? 'justify-center min-h-[calc(100dvh-8rem)]'
+            ? 'mt-[3vh]'
             : homeSurface.showPromptComposer
               ? 'mt-[10vh]'
               : 'mt-[6vh]',
@@ -1030,9 +1055,7 @@ function HomePage() {
               exit={{ opacity: 0, y: -8 }}
               className="flex w-full max-w-sm flex-col items-center gap-4 rounded-2xl border border-emerald-200/60 bg-white/70 px-8 py-7 shadow-lg shadow-emerald-950/[0.03] backdrop-blur-xl dark:border-emerald-800/40 dark:bg-slate-900/70"
             >
-              <p className="text-sm text-muted-foreground">
-                {t('home.spiralEmptyCoursePrompt')}
-              </p>
+              <p className="text-sm text-muted-foreground">{t('home.spiralEmptyCoursePrompt')}</p>
               <Button type="button" onClick={handleGenerateFirstCourse}>
                 {t('home.generateFirstCourse')}
               </Button>
@@ -1126,6 +1149,13 @@ function HomePage() {
           </div>
         )}
       </motion.div>
+
+      <FeaturedDemoCourseCard
+        course={FEATURED_DEMO_COURSE}
+        phase={featuredDemoPhase}
+        error={featuredDemoError}
+        onOpen={handleOpenFeaturedDemo}
+      />
 
       {/* ═══ Recent classrooms — collapsible ═══ */}
       {classrooms.length > 0 && (
