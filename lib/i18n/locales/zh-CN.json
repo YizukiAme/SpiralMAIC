@@ -37,6 +37,8 @@
     "removePdf": "移除文件",
     "documentExtractor": "文档解析器",
     "courseMaterialUpload": "上传课程材料",
+    "courseMaterialsSelected": "已选择 {{n}} 个材料",
+    "courseMaterialMergeOrder": "材料会按下方显示顺序合并。",
     "removeCourseMaterial": "移除文件",
     "webSearchOn": "已开启",
     "webSearchOff": "点击开启",
@@ -113,7 +115,9 @@
       "empty": "播放课程后，笔记将在此显示",
       "emptyHint": "点击播放按钮开始授课",
       "pageLabel": "第 {{n}} 页",
-      "currentPage": "当前页"
+      "currentPage": "当前页",
+      "jumpToLine": "Jump to this line",
+      "jumpUnavailable": "Jump unavailable for this line"
     },
     "badge": {
       "qa": "Q&A",
@@ -224,8 +228,8 @@
     },
     "insert": {
       "textBox": "文本框",
-      "expandToolbar": "展开插入工具",
-      "collapseToolbar": "收起插入工具",
+      "dragToolbar": "拖动工具栏",
+      "dragToolbarKeyboard": "移动工具栏：按回车或空格开始，再使用方向键移动",
       "image": "图片",
       "imageDrop": "拖入图片或点击选择文件",
       "imageOr": "或粘贴图片 URL",
@@ -283,7 +287,7 @@
       "commentPromptLabel": "评分指引",
       "commentPromptPlaceholder": "应如何评判这道主观题？",
       "empty": "暂无题目",
-      "emptyHint": "点击上方“添加题目”创建第一道题。",
+      "emptyHint": "点击“添加题目”创建第一道题。",
       "type": {
         "single": "单选",
         "multiple": "多选",
@@ -352,6 +356,10 @@
         "fixHtml": {
           "label": "修复互动页的 bug",
           "examples": "“开始按钮点了没反应”、“手机上排版重叠”"
+        },
+        "elements": {
+          "label": "微调页面元素",
+          "examples": "“把标题改成蓝色并上移一点”、“把这个图缩小”"
         }
       },
       "newConversation": "新对话",
@@ -446,6 +454,14 @@
       "reading": "读取中",
       "done": "已读取",
       "failed": "未读取"
+    },
+    "editElements": {
+      "title": "编辑元素",
+      "editing": "编辑中",
+      "applied": "已应用",
+      "notApplied": "未应用",
+      "applyFailed": "编辑器无法应用元素修改，未更改任何内容。",
+      "applyPartiallyFailed": "编辑器未能应用一项或多项元素修改，其他修改可能已应用。"
     }
   },
   "classroomComplete": {
@@ -525,6 +541,9 @@
     "autoPlay": "自动播放",
     "autoPlayOff": "关闭自动播放",
     "speed": "倍速",
+    "previousLine": "Previous line",
+    "nextLine": "Next line",
+    "lineProgress": "Line {{current}} / {{total}}",
     "voiceInput": "语音输入",
     "voiceInputDisabled": "语音输入已禁用",
     "textInput": "文字输入",
@@ -838,17 +857,19 @@
   },
   "upload": {
     "pdfSizeLimit": "支持最大50MB的PDF文件",
-    "courseMaterialSizeLimit": "支持最大 50MB 的 PDF、DOCX、PPTX、TXT 和 Markdown 文件",
+    "courseMaterialSizeLimit": "支持文档、演示、表格、图像、纯文本，最大 50MB（具体支持格式随所选解析器而定）",
     "generateFailed": "生成课堂失败，请重试",
     "requirementPlaceholder": "输入你想学的任何内容，例如：\n「从零学 Python，30 分钟写出第一个程序」\n「用白板给我讲解傅里叶变换」\n「阿瓦隆桌游怎么玩」",
     "requirementRequired": "请输入课程需求",
     "fileTooLarge": "文件过大，请选择小于 50MB 的文件",
-    "unsupportedCourseMaterial": "不支持的课程材料类型，请上传 PDF、DOCX、PPTX、TXT 或 Markdown 文件"
+    "courseMaterialCountLimit": "最多可上传 5 个课程材料文件",
+    "courseMaterialTotalSizeLimit": "课程材料总大小需小于 150MB",
+    "unsupportedCourseMaterial": "当前解析器不支持该格式，请切换解析器或选择其他文件"
   },
   "generation": {
     "pdfLoadFailed": "无法加载 PDF 文件，请重试",
     "pdfParseFailed": "PDF 解析失败",
-    "analyzingCourseMaterial": "解析 {{type}} 文件",
+    "analyzingCourseMaterial": "解析文档",
     "analyzingCourseMaterialDesc": "正在提取文档结构和内容...",
     "courseMaterialLoadFailed": "无法加载课程材料，请重试",
     "courseMaterialParseFailed": "课程材料解析失败",
@@ -861,11 +882,6 @@
     "generatingActionsDesc": "正在编排讲解、聚焦和互动流程...",
     "generationComplete": "生成完成！",
     "generationFailed": "生成失败",
-    "generatingCourse": "正在生成课程",
-    "openingClassroom": "即将打开课堂...",
-    "outlineReady": "课程大纲已生成",
-    "generatingFirstPage": "首页内容生成中...",
-    "firstPageReady": "首页已就绪！正在打开课堂...",
     "speechFailed": "语音合成失败",
     "retryScene": "重试生成",
     "retryingScene": "正在重新生成...",
@@ -886,6 +902,10 @@
     "outlineEmptyResponse": "模型未返回有效的大纲内容，请检查模型配置后重试",
     "outlineGenerateFailed": "大纲生成失败，请稍后重试",
     "sceneGenerateFailed": "场景生成失败，请稍后重试",
+    "sceneGenerateAuthFailed": "场景生成失败：模型服务拒绝了当前凭据。请检查模型配置。",
+    "sceneGenerateRateLimited": "场景生成触发限流，请稍后重试。",
+    "sceneGenerateProviderUnavailable": "模型服务暂时不可用，请稍后重试。",
+    "sceneGenerateInvalidResponse": "模型未返回有效的场景内容，请更换模型或调整课程需求后重试。",
     "reviewOutlineTitle": "审阅课程大纲",
     "reviewOutlineDesc": "可在生成内容前编辑、重排、删除或新增场景。",
     "reviewOutlineAutoContinue": "如不审阅，大纲生成后会自动继续生成课程内容。",
@@ -954,7 +974,8 @@
     "webSearchingDesc": "正在搜索网络获取最新资料",
     "webSearchFailed": "网络搜索失败",
     "outlinesReadyCount": "{{ready}} / {{total}} 章节就绪",
-    "jumpToBlankTitle": "跳到待补充标题的章节"
+    "jumpToBlankTitle": "跳到待补充标题的章节",
+    "analyzingMediaMaterial": "解析音视频内容"
   },
   "settings": {
     "title": "设置",
@@ -1035,6 +1056,7 @@
     "addProviderDescription": "添加自定义模型提供方以扩展可用的AI模型",
     "providerNames": {
       "openai": "OpenAI",
+      "azure": "Azure OpenAI",
       "anthropic": "Claude",
       "google": "Gemini",
       "deepseek": "DeepSeek",
@@ -1053,10 +1075,12 @@
       "tavily": "Tavily",
       "bocha": "博查",
       "brave": "Brave Search",
-      "baidu": "百度"
+      "baidu": "百度",
+      "searxng": "SearXNG"
     },
     "providerTypes": {
       "openai": "OpenAI 协议",
+      "azure": "Azure OpenAI",
       "anthropic": "Claude 协议",
       "google": "Gemini 协议"
     },
@@ -1075,6 +1099,7 @@
     "importFromClipboard": "从剪贴板导入",
     "apiSecret": "API 密钥",
     "apiHost": "Base URL",
+    "azureDeploymentHint": "请在上方填写 Azure OpenAI Endpoint，并将每个 Azure Deployment 名称添加为模型。",
     "baseUrlRegion": {
       "china": "国内站",
       "international": "国际站",
@@ -1085,6 +1110,14 @@
     },
     "requestUrl": "请求地址",
     "models": "模型",
+    "comfyuiWorkflows": "工作流",
+    "comfyuiRefresh": "刷新",
+    "comfyuiNoWorkflowsFoundPrefix": "未在",
+    "comfyuiAddWorkflowPrefix": "添加一个",
+    "comfyuiAddWorkflowSuffix": "文件即可开始。",
+    "comfyuiFolderHintPrefix": "请将工作流 JSON 文件放入",
+    "comfyuiFolderHintMiddle": "文件夹。文件名将作为显示名称，例如",
+    "comfyuiLoadError": "加载工作流失败：{error}",
     "addModel": "添加",
     "reset": "重置",
     "fetch": "获取",
@@ -1469,6 +1502,9 @@
     "lang_af-ZA": "Afrikaans (Suid-Afrika)",
     "lang_uk-UA": "Українська (Україна)",
     "pdfSettings": "PDF 解析",
+    "documentParsingSettings": "文档解析",
+    "supportedFormats": "支持的格式",
+    "mineruSelfHostFormatsNote": "解析 PDF 和图片需要 MinerU 服务器安装 mineru[pipeline] 或 mineru[core] 依赖。轻量版 mineru-api 可能仅支持 Office 文档。",
     "pdfParsingSettings": "PDF 解析设置",
     "pdfDescription": "选择 PDF 解析引擎，支持文本提取、图片处理和表格识别",
     "pdfProvider": "PDF 解析器",
@@ -1503,6 +1539,7 @@
     "providerNanoBanana": "Nano Banana（Gemini）",
     "providerMiniMaxImage": "MiniMax 图像",
     "providerGrokImage": "Grok Image（xAI）",
+    "providerComfyUIImage": "ComfyUI Image",
     "providerLemonadeImage": "Lemonade 图像（本地）",
     "testImageGeneration": "测试图像生成",
     "testImageConnectivity": "测试连接",
@@ -1570,6 +1607,7 @@
     "webSearchApiKeyPlaceholderServer": "已配置服务端密钥，可选填覆盖",
     "webSearchApiKeyHint": "从所选搜索服务商获取 API Key，用于网络搜索",
     "webSearchApiKeyOptional": "API Key 为可选项。未填写时将通过公开页面抓取获取结果。",
+    "searxngServerOnlyNotice": "SearXNG 须由服务端配置。请设置 SEARXNG_BASE_URL 环境变量（或在 server-providers.yml 的 web-search 段中配置）。不接受客户端自行填写实例地址。",
     "baiduSubSources": "百度搜索源",
     "baiduSubSourcesDescription": "选择至少一个百度数据源参与搜索。",
     "baiduSubSourceWeb": "网页搜索",
@@ -1645,7 +1683,9 @@
       "demoArea": "演示区",
       "acceleratedClock": "加速时钟",
       "gateSkip": "跳过页门控"
-    }
+    },
+    "alidocmindAccessKeyId": "AccessKey ID",
+    "alidocmindAccessKeySecret": "AccessKey Secret"
   },
   "profile": {
     "title": "个人资料",

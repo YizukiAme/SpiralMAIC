@@ -15,11 +15,26 @@ import type { SceneOutline } from '@/lib/types/generation';
 import { createLogger } from '@/lib/logger';
 import { useCanvasStore } from '@/lib/store/canvas';
 import { migrateScene } from '@/lib/edit/slide-schema';
+import { preparePBLScenesForDocumentPersistence } from '@/lib/pbl/v2/runtime/document-persistence';
+import { hydratePBLScenesFromRuntime } from '@/lib/pbl/v2/runtime/hydration';
 
 const log = createLogger('StageStore');
 
 /** Virtual scene ID used when the user navigates to a page still being generated */
 export const PENDING_SCENE_ID = '__pending__';
+
+export type StageSceneLoadToken = number;
+
+let latestStageSceneLoadToken = 0;
+
+export function claimStageSceneLoadToken(): StageSceneLoadToken {
+  latestStageSceneLoadToken += 1;
+  return latestStageSceneLoadToken;
+}
+
+export function isCurrentStageSceneLoadToken(token: StageSceneLoadToken): boolean {
+  return token === latestStageSceneLoadToken;
+}
 
 // ==================== Debounce Helper ====================
 
@@ -126,8 +141,20 @@ interface StageState {
 
   // Storage
   saveToStorage: () => Promise<boolean>;
-  loadFromStorage: (stageId: string) => Promise<void>;
+  loadFromStorage: (stageId: string, loadToken?: StageSceneLoadToken) => Promise<void>;
   clearStore: () => void;
+}
+
+function isDeckComplete({
+  outlines,
+  scenes,
+  failedOutlines,
+}: Pick<StageState, 'outlines' | 'scenes' | 'failedOutlines'>): boolean {
+  return (
+    outlines.length > 0 &&
+    failedOutlines.length === 0 &&
+    outlines.every((o) => scenes.some((s) => s.order === o.order))
+  );
 }
 
 const useStageStoreBase = create<StageState>()((set, get) => ({
@@ -148,6 +175,7 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
 
   // Actions
   setStage: (stage) => {
+    claimStageSceneLoadToken();
     set((s) => ({
       stage,
       scenes: [],
@@ -236,11 +264,8 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
     // flag existed, or edited without a reload so loadFromStorage's self-heal
     // never ran. Without this, the deletion breaks the scenes===outlines count
     // and the "Course complete" page disappears.
-    const wasComplete =
-      !get().generationComplete &&
-      get().outlines.length > 0 &&
-      get().failedOutlines.length === 0 &&
-      get().outlines.every((o) => get().scenes.some((s) => s.order === o.order));
+    const state = get();
+    const wasComplete = !state.generationComplete && isDeckComplete(state);
 
     const scenes = get().scenes.filter((scene) => scene.id !== sceneId);
     const currentSceneId = get().currentSceneId;
@@ -344,11 +369,7 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
   markGenerationCompleteIfDone: () => {
     const { outlines, scenes, failedOutlines, generationComplete } = get();
     if (generationComplete) return;
-    const done =
-      outlines.length > 0 &&
-      failedOutlines.length === 0 &&
-      outlines.every((o) => scenes.some((s) => s.order === o.order));
-    if (done) get().setGenerationComplete(true);
+    if (isDeckComplete({ outlines, scenes, failedOutlines })) get().setGenerationComplete(true);
   },
 
   setGenerationStatus: (generationStatus) => set({ generationStatus }),
@@ -397,10 +418,11 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
     }
 
     try {
+      const persistedScenes = await preparePBLScenesForDocumentPersistence(stage.id, scenes);
       const { saveStageData } = await import('@/lib/utils/stage-storage');
       await saveStageData(stage.id, {
         stage,
-        scenes,
+        scenes: persistedScenes,
         currentSceneId,
         chats,
       });
@@ -412,8 +434,9 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
     }
   },
 
-  loadFromStorage: async (stageId: string) => {
+  loadFromStorage: async (stageId: string, loadToken?: StageSceneLoadToken) => {
     try {
+      const token = loadToken ?? claimStageSceneLoadToken();
       // Skip IndexedDB load if the store already has this stage with scenes
       // (e.g. navigated from generation-preview with fresh in-memory data)
       const currentState = get();
@@ -435,22 +458,39 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
         // Normalize legacy slide content (missing schemaVersion) at the load
         // boundary, same as setScenes/addScene — IndexedDB snapshots predate
         // the schema field, so they must be migrated on the way in.
-        const migrated = data.scenes.map(migrateScene);
+        const migrated = await hydratePBLScenesFromRuntime(stageId, data.scenes.map(migrateScene));
+        if (!isCurrentStageSceneLoadToken(token)) {
+          log.info('Newer stage load started during IndexedDB hydration, skipping load:', stageId);
+          return;
+        }
+        const latestState = get();
+        if (latestState.stage?.id === stageId && latestState.scenes.length > 0) {
+          log.info('Stage appeared in memory during IndexedDB hydration, skipping load:', stageId);
+          return;
+        }
 
         // Self-heal decks generated before generationComplete was tracked: if
-        // every outline already has a matching scene, generation must have
-        // finished, so treat the deck as complete and persist the flag. This
-        // prevents a pre-existing finished deck from regenerating a slide the
-        // user deletes before the flag was ever recorded.
+        // every outline already has a matching scene and none failed,
+        // generation must have finished, so treat the deck as complete and
+        // persist the flag. This prevents a pre-existing finished deck from
+        // regenerating a slide the user deletes before the flag was ever
+        // recorded.
         //
         // Matching is by `order`, consistent with the rest of the resume
         // pipeline. For a never-edited deck order is a faithful key; the only
         // way it diverges is Pro-mode insert/reorder, which is blocked while
         // outlines are still pending (see stage-mode edit gating), so an
         // interrupted deck cannot be edited into a false "all materialized".
-        const allMaterialized =
-          outlines.length > 0 && outlines.every((o) => migrated.some((s) => s.order === o.order));
-        const generationComplete = persistedComplete || allMaterialized;
+        const inMemoryState = get();
+        const failedOutlines =
+          inMemoryState.stage?.id === stageId ? inMemoryState.failedOutlines : [];
+        const generationComplete =
+          persistedComplete ||
+          isDeckComplete({
+            outlines,
+            scenes: migrated,
+            failedOutlines,
+          });
         if (generationComplete && !persistedComplete) {
           db.stageOutlines.put({
             stageId,
@@ -494,6 +534,7 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
   },
 
   clearStore: () => {
+    claimStageSceneLoadToken();
     set((s) => ({
       stage: null,
       scenes: [],

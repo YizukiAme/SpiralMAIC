@@ -8,6 +8,7 @@ import { persist } from 'zustand/middleware';
 import type { ProviderId } from '@/lib/ai/providers';
 import type { ProvidersConfig } from '@/lib/types/settings';
 import { PROVIDERS } from '@/lib/ai/providers';
+import { findModelById, getCanonicalModelId } from '@/lib/ai/model-aliases';
 import type { ThinkingConfig } from '@/lib/types/provider';
 import { getThinkingConfigKey, supportsConfigurableThinking } from '@/lib/ai/thinking-config';
 import type { TTSProviderId, ASRProviderId, BuiltInTTSProviderId } from '@/lib/audio/types';
@@ -20,7 +21,7 @@ import type { PDFProviderId } from '@/lib/pdf/types';
 import type { ImageProviderId, VideoProviderId } from '@/lib/media/types';
 import { IMAGE_PROVIDERS } from '@/lib/media/image-providers';
 import { VIDEO_PROVIDERS } from '@/lib/media/video-providers';
-import { WEB_SEARCH_PROVIDERS } from '@/lib/web-search/constants';
+import { WEB_SEARCH_PROVIDERS, buildWebSearchFallbackOrder } from '@/lib/web-search/constants';
 import type { BaiduSubSources, WebSearchProviderId } from '@/lib/web-search/types';
 import { createLogger } from '@/lib/logger';
 import {
@@ -124,6 +125,10 @@ export interface SettingsState {
       enabled: boolean;
       requiresApiKey?: boolean;
       isServerConfigured?: boolean;
+      /** Aliyun AccessKey ID (AliDocMind). */
+      accessKeyId?: string;
+      /** Aliyun AccessKey Secret (AliDocMind). */
+      accessKeySecret?: string;
     }
   >;
   baiduSubSources: BaiduSubSources;
@@ -224,7 +229,6 @@ export interface SettingsState {
   chatAreaWidth: number;
   editRailCollapsed: boolean;
   editRailWidth: number;
-  editInsertToolbarCollapsed: boolean;
 
   // Actions
   setModel: (providerId: ProviderId, modelId: string) => void;
@@ -252,7 +256,6 @@ export interface SettingsState {
   setChatAreaCollapsed: (collapsed: boolean) => void;
   setChatAreaWidth: (width: number) => void;
   setEditRailCollapsed: (collapsed: boolean) => void;
-  setEditInsertToolbarCollapsed: (collapsed: boolean) => void;
   setEditRailWidth: (width: number) => void;
 
   // Audio actions
@@ -308,7 +311,13 @@ export interface SettingsState {
   setPDFProvider: (providerId: PDFProviderId) => void;
   setPDFProviderConfig: (
     providerId: PDFProviderId,
-    config: Partial<{ apiKey: string; baseUrl: string; enabled: boolean }>,
+    config: Partial<{
+      apiKey: string;
+      baseUrl: string;
+      enabled: boolean;
+      accessKeyId: string;
+      accessKeySecret: string;
+    }>,
   ) => void;
 
   // Image Generation actions
@@ -407,9 +416,26 @@ function resolveLLMSelection(
     ? currentProviderId
     : ((Object.keys(config) as ProviderId[]).find(isUsable) ?? ('' as ProviderId));
   const modelId = providerId
-    ? resolveSelectedModel(currentModelId, config[providerId]?.models ?? [])
+    ? resolveSelectedLLMModel(providerId, currentModelId, config[providerId]?.models ?? [])
     : '';
   return { providerId, modelId };
+}
+
+/** Keep the caller's wire model ID when it resolves to a known catalog alias. */
+function resolveSelectedLLMModel(
+  providerId: ProviderId,
+  currentModelId: string,
+  availableModels: Array<{ id: string }>,
+): string {
+  if (availableModels.some((model) => model.id === currentModelId)) return currentModelId;
+  const canonicalModelId = getCanonicalModelId(providerId, currentModelId);
+  if (
+    canonicalModelId !== currentModelId &&
+    availableModels.some((model) => model.id === canonicalModelId)
+  ) {
+    return currentModelId;
+  }
+  return availableModels[0]?.id ?? '';
 }
 
 function resolveMediaModels<T extends { id: string; name: string }>(
@@ -485,7 +511,17 @@ const getDefaultPDFConfig = () => ({
     unpdf: { apiKey: '', baseUrl: '', enabled: true },
     mineru: { apiKey: '', baseUrl: '', enabled: false },
     'mineru-cloud': { apiKey: '', baseUrl: '', enabled: false },
-  } as Record<PDFProviderId, { apiKey: string; baseUrl: string; enabled: boolean }>,
+    alidocmind: { apiKey: '', baseUrl: '', enabled: false, accessKeyId: '', accessKeySecret: '' },
+  } as Record<
+    PDFProviderId,
+    {
+      apiKey: string;
+      baseUrl: string;
+      enabled: boolean;
+      accessKeyId?: string;
+      accessKeySecret?: string;
+    }
+  >,
 });
 
 // Initialize default Image config
@@ -499,6 +535,7 @@ const getDefaultImageConfig = () => ({
     'nano-banana': { apiKey: '', baseUrl: '', enabled: false },
     'minimax-image': { apiKey: '', baseUrl: '', enabled: false },
     'grok-image': { apiKey: '', baseUrl: '', enabled: false },
+    'comfyui-image': { apiKey: '', baseUrl: '', enabled: false },
     lemonade: { apiKey: '', baseUrl: '', enabled: false },
   } as Record<ImageProviderId, { apiKey: string; baseUrl: string; enabled: boolean }>,
 });
@@ -542,6 +579,12 @@ const getDefaultWebSearchConfig = () => ({
       baseUrl: WEB_SEARCH_PROVIDERS.doubao.defaultBaseUrl || '',
       enabled: true,
       requiresApiKey: true,
+    },
+    searxng: {
+      apiKey: '',
+      baseUrl: '',
+      enabled: true,
+      requiresApiKey: false,
     },
   } as Record<
     WebSearchProviderId,
@@ -708,6 +751,23 @@ function ensureBuiltInImageProviders(state: Partial<SettingsState>): void {
     const providerId = pid as ImageProviderId;
     if (!state.imageProvidersConfig![providerId]) {
       state.imageProvidersConfig![providerId] = defaultConfig[providerId];
+    }
+  });
+}
+
+/**
+ * Backfill built-in PDF/document providers into persisted state. Without this,
+ * a provider added after a user's persisted state was written (e.g. AliDocMind)
+ * never appears in `pdfProvidersConfig`, so it can't be selected and never
+ * picks up its server-configured flag on rehydrate.
+ */
+function ensureBuiltInPDFProviders(state: Partial<SettingsState>): void {
+  if (!state.pdfProvidersConfig) return;
+  const defaultConfig = getDefaultPDFConfig().pdfProvidersConfig;
+  Object.keys(PDF_PROVIDERS).forEach((pid) => {
+    const providerId = pid as PDFProviderId;
+    if (!state.pdfProvidersConfig![providerId]) {
+      state.pdfProvidersConfig![providerId] = defaultConfig[providerId];
     }
   });
 }
@@ -888,7 +948,6 @@ export const useSettingsStore = create<SettingsState>()(
         chatAreaWidth: 320,
         editRailCollapsed: false,
         editRailWidth: 220,
-        editInsertToolbarCollapsed: false,
 
         // Audio settings (use defaults)
         ...defaultAudioConfig,
@@ -1020,8 +1079,6 @@ export const useSettingsStore = create<SettingsState>()(
         setChatAreaCollapsed: (collapsed) => set({ chatAreaCollapsed: collapsed }),
         setEditRailCollapsed: (collapsed) => set({ editRailCollapsed: collapsed }),
         setEditRailWidth: (width) => set({ editRailWidth: width }),
-        setEditInsertToolbarCollapsed: (collapsed) =>
-          set({ editInsertToolbarCollapsed: collapsed }),
         setChatAreaWidth: (width) => set({ chatAreaWidth: width }),
 
         // Audio actions
@@ -1408,9 +1465,27 @@ export const useSettingsStore = create<SettingsState>()(
                   const currentModels = newProvidersConfig[key].models;
                   // When server specifies allowed models, filter the models list
                   // while preserving custom IDs from env/YAML in server order.
-                  const currentModelMap = new Map(currentModels.map((m) => [m.id, m]));
                   const filteredModels = info.models?.length
-                    ? info.models.map((id) => currentModelMap.get(id) ?? { id, name: id })
+                    ? info.models.map((id) => {
+                        const currentModel = findModelById(key, currentModels, id);
+                        const builtInModel = findModelById(key, PROVIDERS[key]?.models, id);
+                        const model =
+                          currentModel && builtInModel
+                            ? {
+                                ...builtInModel,
+                                ...currentModel,
+                                name:
+                                  currentModel.name === currentModel.id
+                                    ? builtInModel.name
+                                    : currentModel.name,
+                                capabilities: {
+                                  ...builtInModel.capabilities,
+                                  ...currentModel.capabilities,
+                                },
+                              }
+                            : (currentModel ?? builtInModel);
+                        return model ? { ...model, id, name: model.name || id } : { id, name: id };
+                      })
                     : currentModels;
                   newProvidersConfig[key] = {
                     ...newProvidersConfig[key],
@@ -1575,7 +1650,7 @@ export const useSettingsStore = create<SettingsState>()(
               const pdfFallback = buildFallback<PDFProviderId>(newPDFConfig);
               const imageFallback = buildFallback<ImageProviderId>(newImageConfig);
               const videoFallback = buildFallback<VideoProviderId>(newVideoConfig);
-              const webSearchFallback = buildFallback<WebSearchProviderId>(newWebSearchConfig);
+              const webSearchFallback = buildWebSearchFallbackOrder(newWebSearchConfig);
 
               let validLLMProvider = validateProvider(
                 state.providerId,
@@ -1638,7 +1713,7 @@ export const useSettingsStore = create<SettingsState>()(
                 ? (newProvidersConfig[validLLMProvider as ProviderId]?.models ?? [])
                 : [];
               const validLLMModel = validLLMProvider
-                ? resolveSelectedModel(state.modelId, llmModels)
+                ? resolveSelectedLLMModel(validLLMProvider as ProviderId, state.modelId, llmModels)
                 : '';
               const imageModels = validImageProvider
                 ? resolveMediaModels(
@@ -1855,6 +1930,7 @@ export const useSettingsStore = create<SettingsState>()(
         // Ensure image/video configs have all built-in providers
         ensureBuiltInImageProviders(state);
         ensureBuiltInVideoProviders(state);
+        ensureBuiltInPDFProviders(state);
 
         // Migrate from old ttsModel to new ttsProviderId
         if (state.ttsModel && !state.ttsProviderId) {
@@ -2019,6 +2095,18 @@ export const useSettingsStore = create<SettingsState>()(
               enabled: true,
               requiresApiKey: true,
             },
+            doubao: {
+              apiKey: '',
+              baseUrl: WEB_SEARCH_PROVIDERS.doubao.defaultBaseUrl || '',
+              enabled: true,
+              requiresApiKey: true,
+            },
+            searxng: {
+              apiKey: '',
+              baseUrl: '',
+              enabled: true,
+              requiresApiKey: false,
+            },
           } as SettingsState['webSearchProvidersConfig'];
           delete stateRecord.webSearchApiKey;
           delete stateRecord.webSearchIsServerConfigured;
@@ -2050,12 +2138,18 @@ export const useSettingsStore = create<SettingsState>()(
       // Custom merge: always sync built-in providers on every rehydrate,
       // so newly added providers/models appear without clearing cache.
       merge: (persistedState, currentState) => {
-        const merged = { ...currentState, ...(persistedState as object) };
+        // The insert toolbar is draggable and no longer collapses. Sanitize
+        // this retired property on every rehydrate instead of bumping the
+        // storage version and replaying unrelated legacy migrations.
+        const persisted = { ...(persistedState as object) } as Record<string, unknown>;
+        delete persisted.editInsertToolbarCollapsed;
+        const merged = { ...currentState, ...persisted };
         ensureBuiltInProviders(merged as Partial<SettingsState>);
         promoteLegacyCustomProviderBaseUrls(merged as Partial<SettingsState>);
         ensureBuiltInAudioProviders(merged as Partial<SettingsState>);
         ensureBuiltInImageProviders(merged as Partial<SettingsState>);
         ensureBuiltInVideoProviders(merged as Partial<SettingsState>);
+        ensureBuiltInPDFProviders(merged as Partial<SettingsState>);
         ensureBuiltInWebSearchProviders(merged as Partial<SettingsState>);
         ensureValidProviderSelections(merged as Partial<SettingsState>);
         stripLegacyServerBaseUrl(merged as Partial<SettingsState>);

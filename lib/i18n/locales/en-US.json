@@ -37,6 +37,8 @@
     "removePdf": "Remove file",
     "documentExtractor": "Extractor",
     "courseMaterialUpload": "Upload course material",
+    "courseMaterialsSelected": "{{n}} materials selected",
+    "courseMaterialMergeOrder": "Materials are merged in the order shown below.",
     "removeCourseMaterial": "Remove file",
     "webSearchOn": "Enabled",
     "webSearchOff": "Click to enable",
@@ -113,7 +115,9 @@
       "empty": "Notes will appear here after lecture playback",
       "emptyHint": "Press play to start the lecture",
       "pageLabel": "Page {{n}}",
-      "currentPage": "Current"
+      "currentPage": "Current",
+      "jumpToLine": "Jump to this line",
+      "jumpUnavailable": "Jump unavailable for this line"
     },
     "badge": {
       "qa": "Q&A",
@@ -224,8 +228,8 @@
     },
     "insert": {
       "textBox": "Text box",
-      "expandToolbar": "Show insert tools",
-      "collapseToolbar": "Hide insert tools",
+      "dragToolbar": "Move insert tools",
+      "dragToolbarKeyboard": "Move insert tools: press Enter or Space, then use the arrow keys",
       "image": "Image",
       "imageDrop": "Drop an image or click to choose a file",
       "imageOr": "or paste an image URL",
@@ -283,7 +287,7 @@
       "commentPromptLabel": "Grading guidance",
       "commentPromptPlaceholder": "How should this open response be graded?",
       "empty": "No questions yet",
-      "emptyHint": "Use the “Add question” button above to create the first one.",
+      "emptyHint": "Use “Add question” to create the first one.",
       "type": {
         "single": "Single choice",
         "multiple": "Multiple choice",
@@ -352,6 +356,10 @@
         "fixHtml": {
           "label": "Fix a bug on the page",
           "examples": "“The start button does nothing”, “Panels overlap on mobile”"
+        },
+        "elements": {
+          "label": "Tweak selected elements",
+          "examples": "“Make the title blue and move it up”, “Make this figure smaller”"
         }
       },
       "newConversation": "New conversation",
@@ -446,6 +454,14 @@
       "reading": "Reading",
       "done": "Read",
       "failed": "Not read"
+    },
+    "editElements": {
+      "title": "Edit elements",
+      "editing": "Editing",
+      "applied": "Applied",
+      "notApplied": "Not applied",
+      "applyFailed": "The editor could not apply the element edit. Nothing was changed.",
+      "applyPartiallyFailed": "The editor could not apply one or more element edits. Other edits may have been applied."
     }
   },
   "classroomComplete": {
@@ -525,6 +541,9 @@
     "autoPlay": "Auto-play",
     "autoPlayOff": "Stop auto-play",
     "speed": "Speed",
+    "previousLine": "Previous line",
+    "nextLine": "Next line",
+    "lineProgress": "Line {{current}} / {{total}}",
     "voiceInput": "Voice input",
     "voiceInputDisabled": "Voice input disabled",
     "textInput": "Text input",
@@ -838,17 +857,19 @@
   },
   "upload": {
     "pdfSizeLimit": "Supports PDF files up to 50MB",
-    "courseMaterialSizeLimit": "Supports PDF, DOCX, PPTX, TXT, and Markdown files up to 50MB",
+    "courseMaterialSizeLimit": "Documents, slides, spreadsheets, images, and plain text — up to 50MB (accepted formats depend on the selected extractor)",
     "generateFailed": "Failed to generate classroom, please try again",
     "requirementPlaceholder": "Tell me anything you want to learn, e.g.\n\"Teach me Python from scratch in 30 minutes\"\n\"Explain Fourier Transform on the whiteboard\"\n\"How to play the board game Avalon\"",
     "requirementRequired": "Please enter course requirements",
     "fileTooLarge": "File too large. Please select a file smaller than 50MB",
-    "unsupportedCourseMaterial": "Unsupported course material type. Please upload PDF, DOCX, PPTX, TXT, or Markdown."
+    "courseMaterialCountLimit": "You can upload up to 5 course material files",
+    "courseMaterialTotalSizeLimit": "Total course material size must be under 150MB",
+    "unsupportedCourseMaterial": "This format isn't supported by the current extractor. Switch the extractor or pick a different file."
   },
   "generation": {
     "pdfLoadFailed": "Failed to load PDF file, please try again",
     "pdfParseFailed": "PDF parsing failed",
-    "analyzingCourseMaterial": "Analyzing {{type}} file",
+    "analyzingCourseMaterial": "Analyzing documents",
     "analyzingCourseMaterialDesc": "Extracting document structure and content...",
     "courseMaterialLoadFailed": "Failed to load course material, please try again",
     "courseMaterialParseFailed": "Course material parsing failed",
@@ -861,11 +882,6 @@
     "generatingActionsDesc": "Orchestrating narration, spotlights, and interactions...",
     "generationComplete": "Generation complete!",
     "generationFailed": "Generation failed",
-    "generatingCourse": "Generating course",
-    "openingClassroom": "Opening classroom...",
-    "outlineReady": "Course outline generated",
-    "generatingFirstPage": "Generating first page...",
-    "firstPageReady": "First page ready! Opening classroom...",
     "speechFailed": "Speech generation failed",
     "retryScene": "Retry",
     "retryingScene": "Regenerating...",
@@ -886,6 +902,10 @@
     "outlineEmptyResponse": "Model returned no valid outlines. Please check model configuration and try again",
     "outlineGenerateFailed": "Outline generation failed, please try again later",
     "sceneGenerateFailed": "Scene generation failed, please try again later",
+    "sceneGenerateAuthFailed": "Scene generation failed because the model provider rejected the credentials. Please check your model configuration.",
+    "sceneGenerateRateLimited": "Scene generation is rate limited. Please wait a moment and try again.",
+    "sceneGenerateProviderUnavailable": "The model provider is temporarily unavailable. Please try again later.",
+    "sceneGenerateInvalidResponse": "The model did not return valid scene content. Please try a different model or adjust the course requirements.",
     "reviewOutlineTitle": "Review your outline",
     "reviewOutlineDesc": "Edit, reorder, remove, or add scenes before content generation begins.",
     "reviewOutlineAutoContinue": "Generation will continue automatically unless you review the outline.",
@@ -954,7 +974,8 @@
     "webSearchingDesc": "Searching the web for up-to-date information",
     "webSearchFailed": "Web search failed",
     "outlinesReadyCount": "{{ready}} / {{total}} sections ready",
-    "jumpToBlankTitle": "Jump to a section that still needs a title"
+    "jumpToBlankTitle": "Jump to a section that still needs a title",
+    "analyzingMediaMaterial": "Analyzing audio/video"
   },
   "settings": {
     "title": "Settings",
@@ -1035,6 +1056,7 @@
     "addProviderDescription": "Add custom model providers to extend available AI models",
     "providerNames": {
       "openai": "OpenAI",
+      "azure": "Azure OpenAI",
       "anthropic": "Claude",
       "google": "Gemini",
       "deepseek": "DeepSeek",
@@ -1053,10 +1075,12 @@
       "tavily": "Tavily",
       "bocha": "Bocha",
       "brave": "Brave Search",
-      "baidu": "Baidu"
+      "baidu": "Baidu",
+      "searxng": "SearXNG"
     },
     "providerTypes": {
       "openai": "OpenAI Protocol",
+      "azure": "Azure OpenAI",
       "anthropic": "Claude Protocol",
       "google": "Gemini Protocol"
     },
@@ -1075,6 +1099,7 @@
     "importFromClipboard": "Import from Clipboard",
     "apiSecret": "API Key",
     "apiHost": "Base URL",
+    "azureDeploymentHint": "Enter your Azure OpenAI endpoint above, then add each Azure deployment name as a model.",
     "baseUrlRegion": {
       "china": "China",
       "international": "International",
@@ -1085,6 +1110,14 @@
     },
     "requestUrl": "Request URL",
     "models": "Models",
+    "comfyuiWorkflows": "Workflows",
+    "comfyuiRefresh": "Refresh",
+    "comfyuiNoWorkflowsFoundPrefix": "No workflow JSON files found in",
+    "comfyuiAddWorkflowPrefix": "Add a",
+    "comfyuiAddWorkflowSuffix": "file to get started.",
+    "comfyuiFolderHintPrefix": "Place workflow JSON files in your",
+    "comfyuiFolderHintMiddle": "folder. The filename becomes the display name — e.g.",
+    "comfyuiLoadError": "Failed to load workflows: {error}",
     "addModel": "Add",
     "reset": "Reset",
     "fetch": "Fetch",
@@ -1469,6 +1502,9 @@
     "lang_af-ZA": "Afrikaans (Suid-Afrika)",
     "lang_uk-UA": "Українська (Україна)",
     "pdfSettings": "PDF Parsing",
+    "documentParsingSettings": "Document Parsing",
+    "supportedFormats": "Supported Formats",
+    "mineruSelfHostFormatsNote": "PDF and image parsing require the mineru[pipeline] or mineru[core] extras on your MinerU server. Lightweight mineru-api installs may only handle Office documents.",
     "pdfParsingSettings": "PDF Parsing Settings",
     "pdfDescription": "Choose PDF parsing engine with support for text extraction, image processing, and table recognition",
     "pdfProvider": "PDF Parser",
@@ -1503,6 +1539,7 @@
     "providerNanoBanana": "Nano Banana (Gemini)",
     "providerMiniMaxImage": "MiniMax Image",
     "providerGrokImage": "Grok Image (xAI)",
+    "providerComfyUIImage": "ComfyUI Image",
     "providerLemonadeImage": "Lemonade Image (Local)",
     "testImageGeneration": "Test Image Generation",
     "testImageConnectivity": "Test Connection",
@@ -1570,6 +1607,7 @@
     "webSearchApiKeyPlaceholderServer": "Server key configured, optionally override",
     "webSearchApiKeyHint": "Get an API key from the selected search provider",
     "webSearchApiKeyOptional": "API key is optional. Without one, public page scraping will be used as a fallback.",
+    "searxngServerOnlyNotice": "SearXNG must be configured on the server. Set the SEARXNG_BASE_URL environment variable (or the web-search section in server-providers.yml). Client-supplied instance URLs are not accepted.",
     "baiduSubSources": "Baidu Search Sources",
     "baiduSubSourcesDescription": "Choose at least one Baidu source to query.",
     "baiduSubSourceWeb": "Web Search",
@@ -1645,7 +1683,9 @@
       "demoArea": "Demo",
       "acceleratedClock": "Accelerated clock",
       "gateSkip": "Skip page gates"
-    }
+    },
+    "alidocmindAccessKeyId": "AccessKey ID",
+    "alidocmindAccessKeySecret": "AccessKey Secret"
   },
   "profile": {
     "title": "Profile",

@@ -37,6 +37,8 @@
     "removePdf": "إزالة الملف",
     "documentExtractor": "مستخرج المستندات",
     "courseMaterialUpload": "رفع مادة المقرر",
+    "courseMaterialsSelected": "تم تحديد {{n}} مواد",
+    "courseMaterialMergeOrder": "سيتم دمج المواد بالترتيب المعروض أدناه.",
     "removeCourseMaterial": "إزالة الملف",
     "webSearchOn": "مُفعّل",
     "webSearchOff": "انقر للتفعيل",
@@ -113,7 +115,9 @@
       "empty": "ستظهر الملاحظات هنا بعد تشغيل المحاضرة",
       "emptyHint": "اضغط تشغيل لبدء المحاضرة",
       "pageLabel": "الصفحة {{n}}",
-      "currentPage": "الحالية"
+      "currentPage": "الحالية",
+      "jumpToLine": "Jump to this line",
+      "jumpUnavailable": "Jump unavailable for this line"
     },
     "badge": {
       "qa": "أسئلة",
@@ -224,8 +228,8 @@
     },
     "insert": {
       "textBox": "مربع نص",
-      "expandToolbar": "إظهار أدوات الإدراج",
-      "collapseToolbar": "إخفاء أدوات الإدراج",
+      "dragToolbar": "نقل أدوات الإدراج",
+      "dragToolbarKeyboard": "نقل أدوات الإدراج: اضغط Enter أو مسافة، ثم استخدم مفاتيح الأسهم",
       "image": "صورة",
       "imageDrop": "أفلِت صورة أو انقر لاختيار ملف",
       "imageOr": "أو الصق رابط صورة",
@@ -283,7 +287,7 @@
       "commentPromptLabel": "إرشادات التصحيح",
       "commentPromptPlaceholder": "كيف ينبغي تقييم هذه الإجابة المفتوحة؟",
       "empty": "لا توجد أسئلة بعد",
-      "emptyHint": "استخدم «إضافة سؤال» أعلاه لإنشاء أول سؤال.",
+      "emptyHint": "استخدم «إضافة سؤال» لإنشاء أول سؤال.",
       "type": {
         "single": "اختيار واحد",
         "multiple": "اختيار متعدد",
@@ -346,6 +350,10 @@
         "fixHtml": {
           "examples": "«زر البدء لا يفعل شيئًا»، «تتداخل اللوحات على الجوال»",
           "label": "إصلاح خطأ في الصفحة"
+        },
+        "elements": {
+          "label": "تعديل العناصر",
+          "examples": "«اجعل العنوان أزرق وحرّكه للأعلى»، «صغّر هذا الشكل»"
         }
       },
       "newConversation": "New conversation",
@@ -446,6 +454,14 @@
       "fixing": "جارٍ الإصلاح",
       "notFixed": "لم يُصلَح",
       "title": "إصلاح الصفحة التفاعلية"
+    },
+    "editElements": {
+      "title": "تحرير العناصر",
+      "editing": "جارٍ التحرير",
+      "applied": "تم التطبيق",
+      "notApplied": "لم يُطبَّق",
+      "applyFailed": "تعذر على المحرر تطبيق تعديل العنصر. لم يتم تغيير أي محتوى.",
+      "applyPartiallyFailed": "تعذر على المحرر تطبيق تعديل واحد أو أكثر للعناصر. ربما تم تطبيق تعديلات أخرى."
     }
   },
   "classroomComplete": {
@@ -525,6 +541,9 @@
     "autoPlay": "تشغيل تلقائي",
     "autoPlayOff": "إيقاف التشغيل التلقائي",
     "speed": "السرعة",
+    "previousLine": "Previous line",
+    "nextLine": "Next line",
+    "lineProgress": "Line {{current}} / {{total}}",
     "voiceInput": "إدخال صوتي",
     "voiceInputDisabled": "الإدخال الصوتي معطّل",
     "textInput": "إدخال نصي",
@@ -838,17 +857,19 @@
   },
   "upload": {
     "pdfSizeLimit": "يدعم ملفات PDF حتى 50 ميغابايت",
-    "courseMaterialSizeLimit": "يدعم ملفات PDF وDOCX وPPTX وTXT وMarkdown حتى 50 ميغابايت",
+    "courseMaterialSizeLimit": "المستندات والعروض التقديمية وجداول البيانات والصور والنصوص العادية — حتى 50 ميغابايت (تعتمد الصيغ المقبولة على المستخرج المحدد)",
     "generateFailed": "فشل توليد الفصل، يرجى المحاولة مرة أخرى",
     "requirementPlaceholder": "أخبرني بأي شيء تريد تعلمه، مثلاً:\n\"علمني بايثون من الصفر في 30 دقيقة\"\n\"اشرح تحويل فورييه على السبورة\"\n\"كيف تلعب لعبة أفالون\"",
     "requirementRequired": "يرجى إدخال متطلبات المقرر",
     "fileTooLarge": "الملف كبير جدًا. يرجى اختيار ملف أصغر من 50 ميغابايت",
-    "unsupportedCourseMaterial": "نوع مادة المقرر غير مدعوم. يرجى رفع PDF أو DOCX أو PPTX أو TXT أو Markdown."
+    "courseMaterialCountLimit": "يمكنك رفع ما يصل إلى 5 ملفات لمواد المقرر",
+    "courseMaterialTotalSizeLimit": "يجب أن يكون الحجم الإجمالي لمواد المقرر أقل من 150 ميغابايت",
+    "unsupportedCourseMaterial": "المستخرج الحالي لا يدعم هذه الصيغة. غيّر المستخرج أو اختر ملفًا آخر."
   },
   "generation": {
     "pdfLoadFailed": "فشل تحميل ملف PDF، يرجى المحاولة مرة أخرى",
     "pdfParseFailed": "فشل تحليل PDF",
-    "analyzingCourseMaterial": "تحليل ملف {{type}}",
+    "analyzingCourseMaterial": "تحليل المستندات",
     "analyzingCourseMaterialDesc": "جارٍ استخراج هيكل المستند ومحتواه...",
     "courseMaterialLoadFailed": "فشل تحميل مادة المقرر، يرجى المحاولة مرة أخرى",
     "courseMaterialParseFailed": "فشل تحليل مادة المقرر",
@@ -861,11 +882,6 @@
     "generatingActionsDesc": "جارٍ تنسيق السرد والتسليط والتفاعلات...",
     "generationComplete": "اكتمل التوليد!",
     "generationFailed": "فشل التوليد",
-    "generatingCourse": "جارٍ توليد المقرر",
-    "openingClassroom": "جارٍ فتح الفصل...",
-    "outlineReady": "تم توليد مخطط المقرر",
-    "generatingFirstPage": "جارٍ توليد الصفحة الأولى...",
-    "firstPageReady": "الصفحة الأولى جاهزة! جارٍ فتح الفصل...",
     "speechFailed": "فشل توليد الكلام",
     "retryScene": "إعادة المحاولة",
     "retryingScene": "جارٍ إعادة التوليد...",
@@ -886,6 +902,10 @@
     "outlineEmptyResponse": "لم يُرجع النموذج مخططات صالحة. يرجى التحقق من تكوين النموذج والمحاولة مرة أخرى",
     "outlineGenerateFailed": "فشل توليد المخطط، يرجى المحاولة لاحقًا",
     "sceneGenerateFailed": "فشل توليد المشهد، يرجى المحاولة لاحقًا",
+    "sceneGenerateAuthFailed": "فشل توليد المشهد لأن مزود النموذج رفض بيانات الاعتماد. يرجى التحقق من إعدادات النموذج.",
+    "sceneGenerateRateLimited": "تم تقييد توليد المشهد بمعدل الطلبات. انتظر قليلًا ثم حاول مرة أخرى.",
+    "sceneGenerateProviderUnavailable": "مزود النموذج غير متاح مؤقتًا. يرجى المحاولة لاحقًا.",
+    "sceneGenerateInvalidResponse": "لم يُرجع النموذج محتوى مشهد صالحًا. جرّب نموذجًا آخر أو عدّل متطلبات المقرر.",
     "reviewOutlineTitle": "مراجعة مخطط المقرر",
     "reviewOutlineDesc": "يمكنك تعديل المشاهد أو إعادة ترتيبها أو حذفها أو إضافتها قبل توليد المحتوى.",
     "reviewOutlineAutoContinue": "سيستمر توليد المحتوى تلقائيًا ما لم تراجع المخطط.",
@@ -954,7 +974,8 @@
     "webSearchingDesc": "جارٍ البحث في الإنترنت عن معلومات محدّثة",
     "webSearchFailed": "فشل البحث في الإنترنت",
     "outlinesReadyCount": "{{ready}} / {{total}} أقسام جاهزة",
-    "jumpToBlankTitle": "الانتقال إلى قسم بحاجة إلى عنوان"
+    "jumpToBlankTitle": "الانتقال إلى قسم بحاجة إلى عنوان",
+    "analyzingMediaMaterial": "تحليل الصوت/الفيديو"
   },
   "settings": {
     "title": "الإعدادات",
@@ -1035,6 +1056,7 @@
     "addProviderDescription": "أضف مزوّدي نماذج مخصصين لتوسيع نماذج الذكاء الاصطناعي المتاحة",
     "providerNames": {
       "openai": "OpenAI",
+      "azure": "Azure OpenAI",
       "anthropic": "Claude",
       "google": "Gemini",
       "deepseek": "DeepSeek",
@@ -1053,10 +1075,12 @@
       "tavily": "Tavily",
       "bocha": "Bocha",
       "brave": "Brave Search",
-      "baidu": "Baidu"
+      "baidu": "Baidu",
+      "searxng": "SearXNG"
     },
     "providerTypes": {
       "openai": "بروتوكول OpenAI",
+      "azure": "Azure OpenAI",
       "anthropic": "بروتوكول Claude",
       "google": "بروتوكول Gemini"
     },
@@ -1075,6 +1099,7 @@
     "importFromClipboard": "استيراد من الحافظة",
     "apiSecret": "مفتاح API",
     "apiHost": "العنوان الأساسي",
+    "azureDeploymentHint": "أدخل نقطة نهاية Azure OpenAI أعلاه، ثم أضف اسم كل عملية نشر في Azure كنموذج.",
     "baseUrlRegion": {
       "china": "الصين",
       "international": "دولي",
@@ -1085,6 +1110,14 @@
     },
     "requestUrl": "عنوان الطلب",
     "models": "النماذج",
+    "comfyuiWorkflows": "سير العمل",
+    "comfyuiRefresh": "تحديث",
+    "comfyuiNoWorkflowsFoundPrefix": "لم يتم العثور على ملفات JSON لسير العمل في",
+    "comfyuiAddWorkflowPrefix": "أضف ملف",
+    "comfyuiAddWorkflowSuffix": "للبدء.",
+    "comfyuiFolderHintPrefix": "ضع ملفات JSON الخاصة بسير العمل في مجلد",
+    "comfyuiFolderHintMiddle": "الخاص بك. يصبح اسم الملف هو الاسم المعروض — على سبيل المثال",
+    "comfyuiLoadError": "فشل تحميل سير العمل: {error}",
     "addModel": "جديد",
     "reset": "إعادة تعيين",
     "fetch": "جلب",
@@ -1469,6 +1502,9 @@
     "lang_af-ZA": "Afrikaans (Suid-Afrika)",
     "lang_uk-UA": "Українська (Україна)",
     "pdfSettings": "تحليل PDF",
+    "documentParsingSettings": "تحليل المستندات",
+    "supportedFormats": "الصيغ المدعومة",
+    "mineruSelfHostFormatsNote": "يتطلب تحليل ملفات PDF والصور تثبيت الإضافات mineru[pipeline] أو mineru[core] على خادم MinerU. قد تدعم عمليات تثبيت mineru-api الخفيفة مستندات Office فقط.",
     "pdfParsingSettings": "إعدادات تحليل PDF",
     "pdfDescription": "اختر محرك تحليل PDF مع دعم استخراج النص ومعالجة الصور والتعرف على الجداول",
     "pdfProvider": "محلل PDF",
@@ -1503,6 +1539,7 @@
     "providerNanoBanana": "Nano Banana (Gemini)",
     "providerMiniMaxImage": "MiniMax Image",
     "providerGrokImage": "Grok Image (xAI)",
+    "providerComfyUIImage": "ComfyUI Image",
     "providerLemonadeImage": "Lemonade Image (محلي)",
     "testImageGeneration": "اختبار توليد الصور",
     "testImageConnectivity": "اختبار الاتصال",
@@ -1570,6 +1607,7 @@
     "webSearchApiKeyPlaceholderServer": "تم تكوين مفتاح الخادم، يمكنك التجاوز اختياريًا",
     "webSearchApiKeyHint": "احصل على مفتاح API من مزود البحث المحدد",
     "webSearchApiKeyOptional": "مفتاح API اختياري. بدونه، سيتم استخدام استخراج الصفحة العامة كبديل.",
+    "searxngServerOnlyNotice": "يجب تكوين SearXNG على الخادم. عيّن متغير البيئة SEARXNG_BASE_URL (أو قسم web-search في server-providers.yml). لا يُقبل عناوين URL للمثيلات المقدمة من العميل.",
     "baiduSubSources": "مصادر بحث Baidu",
     "baiduSubSourcesDescription": "اختر مصدر Baidu واحدًا على الأقل.",
     "baiduSubSourceWeb": "بحث الويب",
@@ -1645,7 +1683,9 @@
       "demoArea": "عرض تجريبي",
       "acceleratedClock": "ساعة مسرعة",
       "gateSkip": "تخطي بوابات الصفحات"
-    }
+    },
+    "alidocmindAccessKeyId": "AccessKey ID",
+    "alidocmindAccessKeySecret": "AccessKey Secret"
   },
   "profile": {
     "title": "الملف الشخصي",

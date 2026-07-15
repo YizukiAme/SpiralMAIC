@@ -37,6 +37,8 @@
     "removePdf": "Удалить файл",
     "documentExtractor": "Экстрактор",
     "courseMaterialUpload": "Загрузить материал курса",
+    "courseMaterialsSelected": "Выбрано материалов: {{n}}",
+    "courseMaterialMergeOrder": "Материалы объединяются в порядке, показанном ниже.",
     "removeCourseMaterial": "Удалить файл",
     "webSearchOn": "Включено",
     "webSearchOff": "Нажмите для включения",
@@ -113,7 +115,9 @@
       "empty": "Заметки появятся здесь после воспроизведения лекции",
       "emptyHint": "Нажмите воспроизведение для начала лекции",
       "pageLabel": "Страница {{n}}",
-      "currentPage": "Текущая"
+      "currentPage": "Текущая",
+      "jumpToLine": "Jump to this line",
+      "jumpUnavailable": "Jump unavailable for this line"
     },
     "badge": {
       "qa": "Вопросы",
@@ -224,8 +228,8 @@
     },
     "insert": {
       "textBox": "Текстовое поле",
-      "expandToolbar": "Показать инструменты вставки",
-      "collapseToolbar": "Скрыть инструменты вставки",
+      "dragToolbar": "Переместить инструменты вставки",
+      "dragToolbarKeyboard": "Переместить инструменты: нажмите Enter или пробел, затем используйте стрелки",
       "image": "Изображение",
       "imageDrop": "Перетащите изображение или нажмите, чтобы выбрать файл",
       "imageOr": "или вставьте URL изображения",
@@ -283,7 +287,7 @@
       "commentPromptLabel": "Указания по оценке",
       "commentPromptPlaceholder": "Как оценивать этот развёрнутый ответ?",
       "empty": "Пока нет вопросов",
-      "emptyHint": "Нажмите «Добавить вопрос» выше, чтобы создать первый.",
+      "emptyHint": "Нажмите «Добавить вопрос», чтобы создать первый.",
       "type": {
         "single": "Один выбор",
         "multiple": "Несколько вариантов",
@@ -346,6 +350,10 @@
         "fixHtml": {
           "examples": "«Кнопка запуска не работает», «Панели накладываются на мобильном»",
           "label": "Исправить ошибку на странице"
+        },
+        "elements": {
+          "label": "Подправить элементы",
+          "examples": "«Сделай заголовок синим и подними», «Уменьши эту фигуру»"
         }
       },
       "newConversation": "New conversation",
@@ -446,6 +454,14 @@
       "fixing": "Исправляю",
       "notFixed": "Не исправлено",
       "title": "Исправить интерактивную страницу"
+    },
+    "editElements": {
+      "title": "Правка элементов",
+      "editing": "Редактирование",
+      "applied": "Применено",
+      "notApplied": "Не применено",
+      "applyFailed": "Редактору не удалось применить изменение элемента. Ничего не изменено.",
+      "applyPartiallyFailed": "Редактору не удалось применить одно или несколько изменений. Другие изменения могли быть применены."
     }
   },
   "classroomComplete": {
@@ -525,6 +541,9 @@
     "autoPlay": "Автовоспр.",
     "autoPlayOff": "Остановить",
     "speed": "Скорость",
+    "previousLine": "Previous line",
+    "nextLine": "Next line",
+    "lineProgress": "Line {{current}} / {{total}}",
     "voiceInput": "Голосовой ввод",
     "voiceInputDisabled": "Голосовой ввод отключён",
     "textInput": "Текстовый ввод",
@@ -838,17 +857,19 @@
   },
   "upload": {
     "pdfSizeLimit": "Поддержка PDF до 50 МБ",
-    "courseMaterialSizeLimit": "Поддержка PDF, DOCX, PPTX, TXT и Markdown до 50 МБ",
+    "courseMaterialSizeLimit": "Документы, презентации, таблицы, изображения, текст — до 50 МБ (список форматов зависит от выбранного парсера)",
     "generateFailed": "Ошибка генерации, попробуйте снова",
     "requirementPlaceholder": "Расскажите, что вы хотите изучить, например:\n\"Научи меня Python с нуля за 30 минут\"\n\"Объясни преобразование Фурье на доске\"\n\"Как играть в настольную игру Авалон\"",
     "requirementRequired": "Пожалуйста, укажите требования к курсу",
     "fileTooLarge": "Файл слишком большой. Выберите файл до 50 МБ",
-    "unsupportedCourseMaterial": "Неподдерживаемый тип материала. Загрузите PDF, DOCX, PPTX, TXT или Markdown."
+    "courseMaterialCountLimit": "Можно загрузить до 5 файлов материалов курса",
+    "courseMaterialTotalSizeLimit": "Общий размер материалов курса должен быть меньше 150 МБ",
+    "unsupportedCourseMaterial": "Текущий парсер не поддерживает этот формат. Смените парсер или выберите другой файл."
   },
   "generation": {
     "pdfLoadFailed": "Не удалось загрузить PDF, попробуйте снова",
     "pdfParseFailed": "Ошибка обработки PDF",
-    "analyzingCourseMaterial": "Анализ файла {{type}}",
+    "analyzingCourseMaterial": "Анализ документов",
     "analyzingCourseMaterialDesc": "Извлечение структуры и содержимого документа...",
     "courseMaterialLoadFailed": "Не удалось загрузить материал курса, попробуйте снова",
     "courseMaterialParseFailed": "Ошибка обработки материала курса",
@@ -861,11 +882,6 @@
     "generatingActionsDesc": "Подготовка нарратива, внимания и взаимодействий...",
     "generationComplete": "Генерация завершена!",
     "generationFailed": "Ошибка генерации",
-    "generatingCourse": "Генерация курса",
-    "openingClassroom": "Открытие класса...",
-    "outlineReady": "Структура курса сгенерирована",
-    "generatingFirstPage": "Генерация первой страницы...",
-    "firstPageReady": "Первая страница готова! Открываю класс...",
     "speechFailed": "Ошибка генерации речи",
     "retryScene": "Повторить",
     "retryingScene": "Перегенерация...",
@@ -886,6 +902,10 @@
     "outlineEmptyResponse": "Модель не вернула валидную структуру. Проверьте настройки модели и попробуйте снова",
     "outlineGenerateFailed": "Ошибка генерации структуры, попробуйте позже",
     "sceneGenerateFailed": "Не удалось сгенерировать сцену, попробуйте позже",
+    "sceneGenerateAuthFailed": "Не удалось сгенерировать сцену: провайдер модели отклонил учетные данные. Проверьте настройки модели.",
+    "sceneGenerateRateLimited": "Генерация сцены ограничена лимитом запросов. Подождите немного и попробуйте снова.",
+    "sceneGenerateProviderUnavailable": "Провайдер модели временно недоступен. Попробуйте позже.",
+    "sceneGenerateInvalidResponse": "Модель не вернула корректное содержимое сцены. Попробуйте другую модель или измените требования курса.",
     "reviewOutlineTitle": "Проверьте план курса",
     "reviewOutlineDesc": "До создания содержимого можно редактировать, переставлять, удалять и добавлять сцены.",
     "reviewOutlineAutoContinue": "Если вы не откроете проверку, генерация содержимого продолжится автоматически.",
@@ -954,7 +974,8 @@
     "webSearchingDesc": "Поиск актуальной информации в сети",
     "webSearchFailed": "Ошибка веб-поиска",
     "outlinesReadyCount": "Готово разделов: {{ready}} / {{total}}",
-    "jumpToBlankTitle": "Перейти к разделу без заголовка"
+    "jumpToBlankTitle": "Перейти к разделу без заголовка",
+    "analyzingMediaMaterial": "Анализ аудио/видео"
   },
   "settings": {
     "title": "Настройки",
@@ -1035,6 +1056,7 @@
     "addProviderDescription": "Добавьте провайдеров моделей для расширения доступных AI-моделей",
     "providerNames": {
       "openai": "OpenAI",
+      "azure": "Azure OpenAI",
       "anthropic": "Claude",
       "google": "Gemini",
       "deepseek": "DeepSeek",
@@ -1053,10 +1075,12 @@
       "tavily": "Tavily",
       "bocha": "Bocha",
       "brave": "Brave Search",
-      "baidu": "Baidu"
+      "baidu": "Baidu",
+      "searxng": "SearXNG"
     },
     "providerTypes": {
       "openai": "Протокол OpenAI",
+      "azure": "Azure OpenAI",
       "anthropic": "Протокол Claude",
       "google": "Протокол Gemini"
     },
@@ -1075,6 +1099,7 @@
     "importFromClipboard": "Импорт из буфера",
     "apiSecret": "API-ключ",
     "apiHost": "Base URL",
+    "azureDeploymentHint": "Укажите конечную точку Azure OpenAI выше, затем добавьте имя каждого развертывания Azure как модель.",
     "baseUrlRegion": {
       "china": "Китай",
       "international": "Международный",
@@ -1085,6 +1110,14 @@
     },
     "requestUrl": "URL запроса",
     "models": "Модели",
+    "comfyuiWorkflows": "Рабочие процессы",
+    "comfyuiRefresh": "Обновить",
+    "comfyuiNoWorkflowsFoundPrefix": "JSON-файлы рабочих процессов не найдены в",
+    "comfyuiAddWorkflowPrefix": "Добавьте файл",
+    "comfyuiAddWorkflowSuffix": "чтобы начать.",
+    "comfyuiFolderHintPrefix": "Поместите JSON-файлы рабочих процессов в папку",
+    "comfyuiFolderHintMiddle": "Имя файла становится отображаемым именем — например",
+    "comfyuiLoadError": "Не удалось загрузить рабочие процессы: {error}",
     "addModel": "Добавить",
     "reset": "Сброс",
     "fetch": "Получить",
@@ -1469,6 +1502,9 @@
     "lang_af-ZA": "Afrikaans (Suid-Afrika)",
     "lang_uk-UA": "Українська (Україна)",
     "pdfSettings": "Обработка PDF",
+    "documentParsingSettings": "Обработка документов",
+    "supportedFormats": "Поддерживаемые форматы",
+    "mineruSelfHostFormatsNote": "Для обработки PDF и изображений на сервере MinerU требуются дополнительные пакеты mineru[pipeline] или mineru[core]. Облегчённые установки mineru-api могут обрабатывать только документы Office.",
     "pdfParsingSettings": "Настройки обработки PDF",
     "pdfDescription": "Выберите движок для обработки PDF с поддержкой извлечения текста, изображений и таблиц",
     "pdfProvider": "PDF-парсер",
@@ -1503,6 +1539,7 @@
     "providerNanoBanana": "Nano Banana (Gemini)",
     "providerMiniMaxImage": "MiniMax Image",
     "providerGrokImage": "Grok Image (xAI)",
+    "providerComfyUIImage": "ComfyUI Image",
     "providerLemonadeImage": "Lemonade Image (Локальный)",
     "testImageGeneration": "Тест генерации изображений",
     "testImageConnectivity": "Тест подключения",
@@ -1570,6 +1607,7 @@
     "webSearchApiKeyPlaceholderServer": "Серверный ключ настроен, можно ввести свой",
     "webSearchApiKeyHint": "Получите API-ключ у выбранного поискового провайдера",
     "webSearchApiKeyOptional": "API-ключ необязателен. Без него будет использоваться парсинг публичной страницы.",
+    "searxngServerOnlyNotice": "SearXNG должен быть настроен на сервере. Установите переменную окружения SEARXNG_BASE_URL (или раздел web-search в server-providers.yml). URL экземпляра от клиента не принимаются.",
     "baiduSubSources": "Источники поиска Baidu",
     "baiduSubSourcesDescription": "Выберите хотя бы один источник Baidu.",
     "baiduSubSourceWeb": "Веб-поиск",
@@ -1645,7 +1683,9 @@
       "demoArea": "Демо",
       "acceleratedClock": "Ускоренные часы",
       "gateSkip": "Пропуск проверок страниц"
-    }
+    },
+    "alidocmindAccessKeyId": "AccessKey ID",
+    "alidocmindAccessKeySecret": "AccessKey Secret"
   },
   "profile": {
     "title": "Профиль",
