@@ -42,6 +42,7 @@ interface CodexLoginManagerOptions {
   randomBytes?: (size: number) => Buffer;
   scheduler?: CodexLoginScheduler;
   oauthRequestTimeoutMs?: number;
+  onCredentialsReplaced?: () => void | Promise<void>;
 }
 
 interface CodexLoginScheduler {
@@ -136,6 +137,7 @@ export class CodexLoginManager {
   private readonly randomBytes?: (size: number) => Buffer;
   private readonly scheduler: CodexLoginScheduler;
   private readonly oauthRequestTimeoutMs: number;
+  private readonly onCredentialsReplaced?: () => void | Promise<void>;
   private activeAttempt: ActiveAttempt | null = null;
   private provisionalBrowserAttempt: BrowserAttempt | null = null;
   private provisionalDeviceAttempt: ProvisionalDeviceAttempt | null = null;
@@ -153,6 +155,7 @@ export class CodexLoginManager {
       clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
     };
     this.oauthRequestTimeoutMs = options.oauthRequestTimeoutMs ?? CODEX_OAUTH_REQUEST_TIMEOUT_MS;
+    this.onCredentialsReplaced = options.onCredentialsReplaced;
   }
 
   async begin(method: CodexOAuthLoginMethod): Promise<CodexLoginAttempt> {
@@ -241,7 +244,9 @@ export class CodexLoginManager {
     const attempt = this.activeAttempt;
     if (!attempt) return null;
     if (attempt.method !== 'device' || attempt.status !== 'pending') {
-      if (attempt.status === 'expired') await this.waitForCredentialWrites();
+      if (attempt.status === 'expired' || attempt.status === 'complete') {
+        await this.waitForCredentialWrites();
+      }
       return toPublicAttempt(attempt);
     }
 
@@ -315,22 +320,40 @@ export class CodexLoginManager {
     attempt: BrowserAttempt | DeviceAttempt,
     credentials: CodexOAuthCredentials,
   ): Promise<boolean> {
-    const write = withCodexCredentialVaultMutation(this.vault, async () => {
-      if (!this.isAttemptCommitEligible(attempt)) return false;
-      const previous = await this.vault.load();
-      if (!this.isAttemptCommitEligible(attempt)) return false;
-      await this.vault.save(credentials);
-      if (this.isAttemptCommitEligible(attempt)) {
-        attempt.status = 'complete';
-        return true;
-      }
+    const write = (async () => {
+      const result = await withCodexCredentialVaultMutation(this.vault, async () => {
+        if (!this.isAttemptCommitEligible(attempt)) {
+          return { committed: false, replaced: false };
+        }
+        const previous = await this.vault.load();
+        if (!this.isAttemptCommitEligible(attempt)) {
+          return { committed: false, replaced: false };
+        }
+        await this.vault.save(credentials);
+        if (this.isAttemptCommitEligible(attempt)) {
+          attempt.status = 'complete';
+          return { committed: true, replaced: previous !== null };
+        }
 
-      const current = await this.vault.load();
-      if (!codexCredentialsEqual(current, credentials)) return false;
-      if (previous) await this.vault.save(previous);
-      else await this.vault.clear();
-      return false;
-    });
+        const current = await this.vault.load();
+        if (!codexCredentialsEqual(current, credentials)) {
+          return { committed: false, replaced: false };
+        }
+        if (previous) await this.vault.save(previous);
+        else await this.vault.clear();
+        return { committed: false, replaced: false };
+      });
+      if (result.committed && result.replaced) {
+        try {
+          await this.onCredentialsReplaced?.();
+        } catch {
+          // The new credentials are already committed. Cache invalidation is
+          // best effort and account scoping prevents an older account's LKG
+          // from being selected if local storage is temporarily unavailable.
+        }
+      }
+      return result.committed;
+    })();
     this.credentialWrites.add(write);
     try {
       return await write;

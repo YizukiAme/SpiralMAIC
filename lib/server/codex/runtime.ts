@@ -1,11 +1,16 @@
 import { CodexLoginManager } from './login-manager';
+import { FileCodexModelCatalogStore, type CodexModelCatalogStore } from './model-cache-store';
 import { CodexModelDiscovery, getCodexCredentialGeneration } from './models';
 import {
   ManagedCodexTokenProvider,
   type CodexClock,
   type TokenExchangeFetch,
 } from './token-provider';
-import { FileCodexCredentialVault, type CodexCredentialVault } from './vault';
+import {
+  FileCodexCredentialVault,
+  withCodexCredentialVaultMutation,
+  type CodexCredentialVault,
+} from './vault';
 
 export interface CodexAuthRuntime {
   vault: CodexCredentialVault;
@@ -18,10 +23,11 @@ interface CreateCodexAuthRuntimeOptions {
   vault?: CodexCredentialVault;
   oauthFetch?: TokenExchangeFetch;
   modelsFetch?: typeof globalThis.fetch;
+  catalogStore?: CodexModelCatalogStore;
   clock?: CodexClock;
 }
 
-const RUNTIME_KEY = Symbol.for('openmaic.codex.oauth.auth-runtime.v3');
+const RUNTIME_KEY = Symbol.for('openmaic.codex.oauth.auth-runtime.v4');
 const runtimeHost = globalThis as unknown as Record<PropertyKey, unknown>;
 
 function isCodexAuthRuntime(value: unknown): value is CodexAuthRuntime {
@@ -36,19 +42,28 @@ export function createCodexAuthRuntime(
   options: CreateCodexAuthRuntimeOptions = {},
 ): CodexAuthRuntime {
   const vault = options.vault ?? new FileCodexCredentialVault();
-  const tokenProvider = new ManagedCodexTokenProvider({
+  const catalogStore = options.catalogStore ?? new FileCodexModelCatalogStore();
+  const clearModelCatalog = (): Promise<void> => modelDiscovery.clear();
+  const tokenProvider: ManagedCodexTokenProvider = new ManagedCodexTokenProvider({
     vault,
+    onCredentialsCleared: clearModelCatalog,
     ...(options.oauthFetch ? { tokenExchangeFetch: options.oauthFetch } : {}),
     ...(options.clock ? { clock: options.clock } : {}),
   });
   const loginManager = new CodexLoginManager({
     vault,
+    onCredentialsReplaced: clearModelCatalog,
     ...(options.oauthFetch ? { oauthFetch: options.oauthFetch } : {}),
     ...(options.clock ? { clock: options.clock } : {}),
   });
-  const modelDiscovery = new CodexModelDiscovery({
+  const modelDiscovery: CodexModelDiscovery = new CodexModelDiscovery({
     tokenProvider,
     credentialGeneration: () => getCodexCredentialGeneration(vault),
+    credentialAccountId: async () => {
+      const credentials = await withCodexCredentialVaultMutation(vault, () => vault.load());
+      return credentials?.accountId ?? null;
+    },
+    catalogStore,
     ...(options.modelsFetch ? { upstreamFetch: options.modelsFetch } : {}),
     ...(options.clock ? { clock: options.clock } : {}),
   });

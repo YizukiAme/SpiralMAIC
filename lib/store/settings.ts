@@ -9,6 +9,7 @@ import type { ProviderId } from '@/lib/ai/providers';
 import type { ProvidersConfig } from '@/lib/types/settings';
 import { PROVIDERS } from '@/lib/ai/providers';
 import { findModelById, getCanonicalModelId } from '@/lib/ai/model-aliases';
+import { rebuildCodexModelCatalog } from '@/lib/ai/codex-catalog';
 import type { ModelServiceTier, ThinkingConfig } from '@/lib/types/provider';
 import { getThinkingConfigKey, supportsConfigurableThinking } from '@/lib/ai/thinking-config';
 import type { TTSProviderId, ASRProviderId, BuiltInTTSProviderId } from '@/lib/audio/types';
@@ -1472,7 +1473,10 @@ export const useSettingsStore = create<SettingsState>()(
             // Managed providers expose only their allowed model list (LLM/image)
             // and presence (the "managed" flag) — never a base URL.
             const data = (await res.json()) as {
-              providers: Record<string, { models?: string[]; fastModels?: string[] }>;
+              providers: Record<
+                string,
+                { models?: string[]; fastModels?: string[]; modelCatalog?: unknown }
+              >;
               // TTS additionally carries an optional `disabled` flag for
               // admin/server-level force-off (#665).
               tts: Record<string, { disabled?: boolean }>;
@@ -1517,37 +1521,44 @@ export const useSettingsStore = create<SettingsState>()(
                 const key = pid as ProviderId;
                 if (newProvidersConfig[key]) {
                   const currentModels = newProvidersConfig[key].models;
-                  const catalogModels =
-                    key === 'openai-codex'
-                      ? [...(PROVIDERS[key]?.models ?? []), ...PROVIDERS.openai.models]
-                      : PROVIDERS[key]?.models;
+                  const hasRichCodexCatalog =
+                    key === 'openai-codex' &&
+                    Object.prototype.hasOwnProperty.call(info, 'modelCatalog');
+                  const richCodexCatalog = hasRichCodexCatalog
+                    ? rebuildCodexModelCatalog(info.modelCatalog)
+                    : null;
+                  const catalogModels = PROVIDERS[key]?.models;
                   // When server specifies allowed models, filter the models list
                   // while preserving custom IDs from env/YAML in server order.
-                  const filteredModels = info.models?.length
-                    ? info.models.map((id) => {
-                        const currentModel = findModelById(key, currentModels, id);
-                        const builtInModel = findModelById(key, catalogModels, id);
-                        const model =
-                          currentModel && builtInModel
-                            ? {
-                                ...builtInModel,
-                                ...currentModel,
-                                name:
-                                  currentModel.name === currentModel.id
-                                    ? builtInModel.name
-                                    : currentModel.name,
-                                capabilities: {
-                                  ...builtInModel.capabilities,
-                                  ...currentModel.capabilities,
-                                },
-                              }
-                            : (currentModel ?? builtInModel);
-                        return model ? { ...model, id, name: model.name || id } : { id, name: id };
-                      })
-                    : currentModels;
-                  const fastModelIds = new Set(info.fastModels ?? []);
+                  const filteredModels = hasRichCodexCatalog
+                    ? (richCodexCatalog ?? [])
+                    : info.models?.length
+                      ? info.models.map((id) => {
+                          const currentModel = findModelById(key, currentModels, id);
+                          const builtInModel = findModelById(key, catalogModels, id);
+                          const model =
+                            currentModel && builtInModel
+                              ? {
+                                  ...builtInModel,
+                                  ...currentModel,
+                                  name:
+                                    currentModel.name === currentModel.id
+                                      ? builtInModel.name
+                                      : currentModel.name,
+                                  capabilities: {
+                                    ...builtInModel.capabilities,
+                                    ...currentModel.capabilities,
+                                  },
+                                }
+                              : (currentModel ?? builtInModel);
+                          return model
+                            ? { ...model, id, name: model.name || id }
+                            : { id, name: id };
+                        })
+                      : currentModels;
+                  const fastModelIds = new Set(hasRichCodexCatalog ? [] : (info.fastModels ?? []));
                   const models =
-                    key === 'openai-codex'
+                    key === 'openai-codex' && !hasRichCodexCatalog
                       ? filteredModels.map((model) => {
                           if (fastModelIds.has(model.id)) {
                             return {
@@ -1571,7 +1582,9 @@ export const useSettingsStore = create<SettingsState>()(
                   newProvidersConfig[key] = {
                     ...newProvidersConfig[key],
                     isServerConfigured: true,
-                    serverModels: info.models,
+                    serverModels: hasRichCodexCatalog
+                      ? (richCodexCatalog?.map((model) => model.id) ?? [])
+                      : info.models,
                     models,
                   };
                 }
@@ -2002,6 +2015,21 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: 'settings-storage',
       version: 5,
+      // A rich Codex catalog is account-scoped server truth. Keep it in live
+      // UI state, but persist only the audited bundled snapshot so browser
+      // storage can never become a second last-known-good cache.
+      partialize: (state) => ({
+        ...state,
+        providersConfig: {
+          ...state.providersConfig,
+          'openai-codex': {
+            ...state.providersConfig['openai-codex'],
+            models: PROVIDERS['openai-codex'].models,
+            isServerConfigured: false,
+            serverModels: undefined,
+          },
+        },
+      }),
       // Migrate persisted state
       migrate: (persistedState: unknown, version: number) => {
         const state = persistedState as Partial<SettingsState>;

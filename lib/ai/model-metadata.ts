@@ -262,6 +262,16 @@ const THINKING_CAPABILITIES: Record<string, ThinkingCapability> = {
     ['low', 'medium', 'high', 'xhigh', 'max'],
     'medium',
   ),
+  [getModelMetadataKey('openai-codex', 'gpt-5.5')]: effortCapability(
+    'openai',
+    ['low', 'medium', 'high', 'xhigh'],
+    'medium',
+  ),
+  [getModelMetadataKey('openai-codex', 'gpt-5.2')]: effortCapability(
+    'openai',
+    ['low', 'medium', 'high', 'xhigh'],
+    'medium',
+  ),
   [getModelMetadataKey('openai', 'gpt-5.5')]: effortCapability(
     'openai',
     ['low', 'medium', 'high', 'xhigh'],
@@ -443,10 +453,6 @@ export function getCatalogThinkingCapability(
   const canonicalModelId = getCanonicalModelId(providerId, modelId);
   const exact = THINKING_CAPABILITIES[getModelMetadataKey(providerId, canonicalModelId)];
   if (exact) return exact;
-
-  if (providerId === 'openai-codex') {
-    return THINKING_CAPABILITIES[getModelMetadataKey('openai', modelId)];
-  }
 
   if (providerId === 'lemonade') {
     return lemonadeToggleBudget;

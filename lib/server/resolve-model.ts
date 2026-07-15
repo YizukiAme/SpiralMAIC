@@ -8,6 +8,7 @@
 import type { NextRequest } from 'next/server';
 import { getModel, parseModelString, type ModelWithInfo } from '@/lib/ai/providers';
 import type { ModelServiceTier, ThinkingConfig } from '@/lib/types/provider';
+import { rebuildCodexModelInfo } from '@/lib/ai/codex-catalog';
 import {
   isServerConfiguredProvider,
   resolveApiKey,
@@ -89,17 +90,17 @@ export async function resolveModel(params: {
 
     const { tokenProvider, modelDiscovery } = getCodexAuthRuntime();
     await tokenProvider.getValidCredentials();
+    const discoveredModels = await modelDiscovery.getModels();
+    const discoveredModel = rebuildCodexModelInfo(
+      discoveredModels.find((model) => model.id === modelId),
+    );
+    if (!discoveredModel) {
+      throw new Error('Codex model is unavailable for the connected account');
+    }
     let serviceTier: ModelServiceTier | undefined;
     if (!stageModel && params.serviceTier === 'priority') {
-      try {
-        const discoveredModels = await modelDiscovery.getModels();
-        const discoveredModel = discoveredModels.find((model) => model.id === modelId);
-        if (discoveredModel?.capabilities?.serviceTiers?.includes('priority')) {
-          serviceTier = 'priority';
-        }
-      } catch {
-        // Capability discovery is an allowlist check. Failure safely falls back
-        // to the standard tier without making the underlying model unavailable.
+      if (discoveredModel.capabilities?.serviceTiers?.includes('priority')) {
+        serviceTier = 'priority';
       }
     }
     const transport = createCodexResponsesTransport({
@@ -108,7 +109,7 @@ export async function resolveModel(params: {
         params.logicalSession ?? createEphemeralCodexLogicalSession(),
       ),
     });
-    const { model, modelInfo } = getModel({
+    const { model } = getModel({
       providerId,
       modelId,
       apiKey: '',
@@ -118,7 +119,7 @@ export async function resolveModel(params: {
 
     return {
       model,
-      modelInfo,
+      modelInfo: discoveredModel,
       modelString,
       providerId,
       modelId,
