@@ -5,6 +5,7 @@ import {
   CodexResponsesTransportError,
   createCodexResponsesTransport,
 } from '@/lib/server/codex/transport';
+import { deriveCodexUpstreamSessionId } from '@/lib/server/codex/logical-session';
 import {
   CODEX_OAUTH_ERROR_CODES,
   CodexOAuthError,
@@ -107,7 +108,13 @@ describe('Codex Responses transport boundary', () => {
   it('normalizes body and replaces caller-controlled identity headers', async () => {
     const tokenProvider = createTokenProvider();
     const upstreamFetch = vi.fn(async () => successfulResponse());
-    const transport = createCodexResponsesTransport({ tokenProvider, upstreamFetch });
+    const logicalSession = { kind: 'chat', id: 'classroom-session-1' } as const;
+    const expectedSessionId = deriveCodexUpstreamSessionId(logicalSession);
+    const transport = createCodexResponsesTransport({
+      tokenProvider,
+      upstreamFetch,
+      sessionId: expectedSessionId,
+    });
 
     const response = await transport(CODEX_RESPONSES_ENDPOINT, {
       method: 'POST',
@@ -116,11 +123,13 @@ describe('Codex Responses transport boundary', () => {
         'chatgpt-account-id': 'attacker-account',
         'content-type': 'application/json',
         originator: 'attacker',
-        'session-id': 'account-id',
+        'session-id': 'attacker-session',
+        'thread-id': 'attacker-thread',
         'user-agent': 'attacker-agent',
       },
       body: JSON.stringify({
         store: true,
+        prompt_cache_key: 'attacker-cache-key',
         input: [
           { role: 'system', content: [{ type: 'input_text', text: 'OpenMAIC prompt' }] },
           { role: 'user', content: [{ type: 'input_text', text: 'Hello' }] },
@@ -154,8 +163,8 @@ describe('Codex Responses transport boundary', () => {
     expect(headers.get('chatgpt-account-id')).toBe('account-id');
     expect(headers.get('originator')).toBe('openmaic');
     expect(headers.get('user-agent')).toMatch(/^OpenMAIC\/0\.3\.0/);
-    expect(headers.get('session-id')).toBeTruthy();
-    expect(headers.get('session-id')).not.toBe('account-id');
+    expect(headers.get('session-id')).toBe(expectedSessionId);
+    expect(headers.get('thread-id')).toBeNull();
     expect(headers.get('content-type')).toBe('application/json');
 
     const body = JSON.parse(init.body as string) as Record<string, unknown> & {
@@ -163,6 +172,7 @@ describe('Codex Responses transport boundary', () => {
       include: string[];
     };
     expect(body.store).toBe(false);
+    expect(body.prompt_cache_key).toBe(expectedSessionId);
     expect(body.input[0]).toMatchObject({ role: 'developer' });
     expect(body.input[0].content).toEqual([{ type: 'input_text', text: 'OpenMAIC prompt' }]);
     expect(body.include).toEqual(
@@ -186,7 +196,30 @@ describe('Codex Responses transport boundary', () => {
     }
   });
 
-  it('uses one process-stable session id across transport instances', async () => {
+  it('uses one deterministic session id across transport instances for the same logical context', async () => {
+    const upstreamFetch = vi.fn<typeof fetch>(async () => successfulResponse());
+    const logicalSession = { kind: 'revisit-attempt', id: 'attempt-1' } as const;
+    const first = createCodexResponsesTransport({
+      tokenProvider: createTokenProvider(),
+      upstreamFetch,
+      sessionId: deriveCodexUpstreamSessionId(logicalSession),
+    });
+    const second = createCodexResponsesTransport({
+      tokenProvider: createTokenProvider(),
+      upstreamFetch,
+      sessionId: deriveCodexUpstreamSessionId({ ...logicalSession }),
+    });
+
+    await first(CODEX_RESPONSES_ENDPOINT, { method: 'POST', body: '{}' });
+    await second(CODEX_RESPONSES_ENDPOINT, { method: 'POST', body: '{}' });
+
+    const firstHeaders = new Headers(upstreamFetch.mock.calls[0]?.[1]?.headers);
+    const secondHeaders = new Headers(upstreamFetch.mock.calls[1]?.[1]?.headers);
+    expect(firstHeaders.get('session-id')).toBeTruthy();
+    expect(secondHeaders.get('session-id')).toBe(firstHeaders.get('session-id'));
+  });
+
+  it('uses a fresh ephemeral session id for independent transports without logical context', async () => {
     const upstreamFetch = vi.fn<typeof fetch>(async () => successfulResponse());
     const first = createCodexResponsesTransport({
       tokenProvider: createTokenProvider(),
@@ -198,12 +231,101 @@ describe('Codex Responses transport boundary', () => {
     });
 
     await first(CODEX_RESPONSES_ENDPOINT, { method: 'POST', body: '{}' });
+    await first(CODEX_RESPONSES_ENDPOINT, { method: 'POST', body: '{}' });
     await second(CODEX_RESPONSES_ENDPOINT, { method: 'POST', body: '{}' });
 
-    const firstHeaders = new Headers(upstreamFetch.mock.calls[0]?.[1]?.headers);
-    const secondHeaders = new Headers(upstreamFetch.mock.calls[1]?.[1]?.headers);
-    expect(firstHeaders.get('session-id')).toBeTruthy();
-    expect(secondHeaders.get('session-id')).toBe(firstHeaders.get('session-id'));
+    const firstRequest = new Headers(upstreamFetch.mock.calls[0]?.[1]?.headers).get('session-id');
+    const repeatedRequest = new Headers(upstreamFetch.mock.calls[1]?.[1]?.headers).get(
+      'session-id',
+    );
+    const secondResolution = new Headers(upstreamFetch.mock.calls[2]?.[1]?.headers).get(
+      'session-id',
+    );
+    expect(repeatedRequest).toBe(firstRequest);
+    expect(secondResolution).not.toBe(firstRequest);
+  });
+
+  it('strips only replay item ids without mutating encrypted reasoning or tool call pairing', async () => {
+    const tokenProvider = createTokenProvider();
+    const upstreamFetch = vi.fn<typeof fetch>(async () => successfulResponse());
+    const transport = createCodexResponsesTransport({
+      tokenProvider,
+      upstreamFetch,
+      sessionId: deriveCodexUpstreamSessionId({ kind: 'agent-edit', id: 'editor-session-1' }),
+    });
+    const original = {
+      input: [
+        {
+          id: 'reasoning-item-1',
+          type: 'reasoning',
+          encrypted_content: 'ciphertext-1',
+          summary: [{ type: 'summary_text', text: 'safe summary' }],
+        },
+        {
+          id: 'function-item-1',
+          type: 'function_call',
+          call_id: 'call-1',
+          name: 'lookup',
+          arguments: '{"city":"Paris"}',
+        },
+        {
+          id: 'result-item-1',
+          type: 'function_call_output',
+          call_id: 'call-1',
+          output: 'sunny',
+        },
+      ],
+    };
+
+    await transport(CODEX_RESPONSES_ENDPOINT, {
+      method: 'POST',
+      body: JSON.stringify(original),
+    });
+
+    const normalized = JSON.parse(upstreamFetch.mock.calls[0]?.[1]?.body as string) as {
+      input: Array<Record<string, unknown>>;
+    };
+    expect(normalized.input).toEqual([
+      {
+        type: 'reasoning',
+        encrypted_content: 'ciphertext-1',
+        summary: [{ type: 'summary_text', text: 'safe summary' }],
+      },
+      {
+        type: 'function_call',
+        call_id: 'call-1',
+        name: 'lookup',
+        arguments: '{"city":"Paris"}',
+      },
+      {
+        type: 'function_call_output',
+        call_id: 'call-1',
+        output: 'sunny',
+      },
+    ]);
+    expect(original.input.map((item) => item.id)).toEqual([
+      'reasoning-item-1',
+      'function-item-1',
+      'result-item-1',
+    ]);
+  });
+
+  it('drops caller-supplied thread identity fields', async () => {
+    const upstreamFetch = vi.fn<typeof fetch>(async () => successfulResponse());
+    const transport = createCodexResponsesTransport({
+      tokenProvider: createTokenProvider(),
+      upstreamFetch,
+      sessionId: deriveCodexUpstreamSessionId({ kind: 'chat', id: 'chat-1' }),
+    });
+
+    await transport(CODEX_RESPONSES_ENDPOINT, {
+      method: 'POST',
+      body: JSON.stringify({ thread_id: 'thread-snake', 'thread-id': 'thread-hyphen' }),
+    });
+
+    const normalized = JSON.parse(upstreamFetch.mock.calls[0]?.[1]?.body as string);
+    expect(normalized).not.toHaveProperty('thread_id');
+    expect(normalized).not.toHaveProperty('thread-id');
   });
 });
 
@@ -369,6 +491,13 @@ describe('Codex Responses transport failures', () => {
     expect(new Headers(upstreamFetch.mock.calls[1]?.[1]?.headers).get('authorization')).toBe(
       'Bearer new-token',
     );
+    const firstHeaders = new Headers(upstreamFetch.mock.calls[0]?.[1]?.headers);
+    const secondHeaders = new Headers(upstreamFetch.mock.calls[1]?.[1]?.headers);
+    expect(secondHeaders.get('session-id')).toBe(firstHeaders.get('session-id'));
+    expect(upstreamFetch.mock.calls[1]?.[1]?.body).toBe(upstreamFetch.mock.calls[0]?.[1]?.body);
+    const replayBody = JSON.parse(upstreamFetch.mock.calls[1]?.[1]?.body as string);
+    expect(replayBody.prompt_cache_key).toBe(secondHeaders.get('session-id'));
+    expect(replayBody.store).toBe(false);
   });
 
   it.each([

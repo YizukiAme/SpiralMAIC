@@ -685,6 +685,7 @@ export default function RevisitChallengePage() {
     try {
       const modelConfig = getCurrentModelConfig();
       const request = createRevisitChatRequest({
+        attemptId,
         stage: classroom.stage,
         scenes: skeletonScenes,
         blueprint,

@@ -152,6 +152,31 @@ describe('runRevisitAgentLoop', () => {
     expect(fetchChat.mock.calls[0]?.[0]).toMatchObject({ serviceTier: 'priority' });
   });
 
+  test('forwards the persisted attempt identity to the shared chat loop', async () => {
+    const fetchChat = vi.fn().mockResolvedValueOnce(
+      sse([
+        {
+          type: 'done',
+          data: { totalActions: 0, totalAgents: 0, agentHadContent: false },
+        },
+      ]),
+    );
+
+    await runRevisitAgentLoop({
+      request: {
+        ...request,
+        session: { kind: 'revisit-attempt', id: 'attempt-1' },
+      },
+      agentIds,
+      fetchChat,
+      callbacks: {},
+    });
+
+    expect(fetchChat.mock.calls[0]?.[0]).toMatchObject({
+      session: { kind: 'revisit-attempt', id: 'attempt-1' },
+    });
+  });
+
   test('forces a cue back to the teacher after one agent turn in one revisit round', async () => {
     const fetchChat = vi.fn().mockResolvedValueOnce(
       sse([

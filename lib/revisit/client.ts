@@ -108,6 +108,7 @@ export async function loadRevisitAdaptiveContext(
 }
 
 export async function ensureRevisitBlueprint(args: {
+  attemptId?: string;
   stage: Stage;
   scenes: Scene[];
   modelConfig?: ModelConfig;
@@ -138,6 +139,7 @@ export async function ensureRevisitBlueprint(args: {
       modelConfig,
       args.adaptiveContext,
       args.signal,
+      args.attemptId,
     );
   } catch (error) {
     if (isAbortError(error)) throw error;
@@ -155,6 +157,7 @@ export async function ensureRevisitBlueprint(args: {
 }
 
 export async function generateRevisitStudyArtifact<K extends StudyArtifactKind>(args: {
+  jobId?: string;
   stage: Stage;
   scenes: Scene[];
   kind: K;
@@ -192,6 +195,7 @@ export async function generateRevisitStudyArtifact<K extends StudyArtifactKind>(
   let draft: Extract<StudyArtifactDraft, { kind: K }>;
   try {
     draft = await requestStudyArtifactFromApi({
+      jobId: args.jobId,
       stage: args.stage,
       scenes: args.scenes,
       kind: args.kind,
@@ -290,6 +294,7 @@ async function requestBlueprintFromApi(
   modelConfig: ModelConfig,
   adaptiveContext?: RevisitAdaptiveContext,
   signal?: AbortSignal,
+  attemptId?: string,
 ): Promise<RevisitExamBlueprint> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -301,6 +306,7 @@ async function requestBlueprintFromApi(
     headers,
     signal,
     body: JSON.stringify({
+      ...(attemptId ? { attemptId } : {}),
       stage,
       scenes,
       targetProbeCount: 4,
@@ -321,6 +327,7 @@ async function requestBlueprintFromApi(
 }
 
 async function requestStudyArtifactFromApi<K extends StudyArtifactKind>(args: {
+  jobId?: string;
   stage: Stage;
   scenes: Scene[];
   kind: K;
@@ -339,6 +346,7 @@ async function requestStudyArtifactFromApi<K extends StudyArtifactKind>(args: {
     headers,
     signal: args.signal,
     body: JSON.stringify({
+      ...(args.jobId ? { jobId: args.jobId } : {}),
       stage: args.stage,
       scenes: args.scenes,
       kind: args.kind,

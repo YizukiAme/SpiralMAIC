@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { wrapCodexLanguageModel } from '@/lib/ai/codex-model';
+import { toModelMessages } from '@/lib/agent/runtime/stream-fn';
+import { OPENAI_REASONING_SIGNATURE_PREFIX } from '@/lib/agent/runtime/provider-metadata';
 
 type LanguageModelV3 = Parameters<typeof wrapCodexLanguageModel>[0];
 type ModelCallOptions = Parameters<LanguageModelV3['doStream']>[0];
@@ -160,6 +162,167 @@ describe('Codex language model middleware', () => {
       reasoningEffort: 'high',
       serviceTier: 'priority',
     });
+  });
+
+  it('strips only decoded OpenAI item ids at Codex egress without mutating replay metadata', async () => {
+    const doStream = vi.fn(async (_options: ModelCallOptions) => ({
+      stream: createStream([
+        { type: 'stream-start', warnings: [] },
+        {
+          type: 'finish',
+          usage: USAGE,
+          finishReason: { unified: 'stop', raw: 'completed' },
+        },
+      ]) as never,
+    }));
+    const model = wrapCodexLanguageModel(createLanguageModel({ doStream }));
+    const prompt = [
+      {
+        role: 'assistant' as const,
+        content: [
+          {
+            type: 'reasoning',
+            text: 'summary',
+            providerOptions: {
+              openai: {
+                itemId: 'reasoning-item-1',
+                reasoningEncryptedContent: 'ciphertext-1',
+                retained: 'openai-sibling',
+              },
+              google: { thoughtSignature: 'reasoning-google-signature' },
+            },
+          },
+          {
+            type: 'tool-call',
+            toolCallId: 'call-1',
+            toolName: 'lookup',
+            input: { city: 'Paris' },
+            providerOptions: {
+              openai: { itemId: 'tool-item-1', retained: 'tool-sibling' },
+              google: { thoughtSignature: 'tool-google-signature' },
+            },
+          },
+        ],
+      },
+      {
+        role: 'tool' as const,
+        content: [
+          {
+            type: 'tool-result',
+            toolCallId: 'call-1',
+            toolName: 'lookup',
+            output: { type: 'text', value: 'sunny' },
+          },
+        ],
+      },
+    ];
+    const originalPrompt = structuredClone(prompt);
+
+    await model.doStream({ prompt: prompt as ModelCallOptions['prompt'] });
+
+    const replay = doStream.mock.calls[0]?.[0].prompt as Array<Record<string, unknown>>;
+    expect(replay).toEqual([
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'reasoning',
+            text: 'summary',
+            providerOptions: {
+              openai: {
+                reasoningEncryptedContent: 'ciphertext-1',
+                retained: 'openai-sibling',
+              },
+              google: { thoughtSignature: 'reasoning-google-signature' },
+            },
+          },
+          {
+            type: 'tool-call',
+            toolCallId: 'call-1',
+            toolName: 'lookup',
+            input: { city: 'Paris' },
+            providerOptions: {
+              openai: { retained: 'tool-sibling' },
+              google: { thoughtSignature: 'tool-google-signature' },
+            },
+          },
+        ],
+      },
+      {
+        role: 'tool',
+        content: [
+          {
+            type: 'tool-result',
+            toolCallId: 'call-1',
+            toolName: 'lookup',
+            output: { type: 'text', value: 'sunny' },
+          },
+        ],
+      },
+    ]);
+    expect(prompt).toEqual(originalPrompt);
+  });
+
+  it('drops empty OpenAI replay metadata from a legacy itemId-only signature', async () => {
+    const doStream = vi.fn(async (_options: ModelCallOptions) => ({
+      stream: createStream([
+        { type: 'stream-start', warnings: [] },
+        {
+          type: 'finish',
+          usage: USAGE,
+          finishReason: { unified: 'stop', raw: 'completed' },
+        },
+      ]) as never,
+    }));
+    const model = wrapCodexLanguageModel(createLanguageModel({ doStream }));
+    const prompt = toModelMessages([
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'thinking',
+            thinking: 'legacy summary',
+            thinkingSignature: `${OPENAI_REASONING_SIGNATURE_PREFIX}{"itemId":"legacy-reasoning-item"}`,
+          },
+        ],
+        api: 'unknown',
+        provider: 'unknown',
+        model: 'test',
+        usage: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+        stopReason: 'stop',
+        timestamp: 0,
+      } as never,
+    ]);
+    expect(prompt).toEqual([
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'reasoning',
+            text: 'legacy summary',
+            providerOptions: { openai: { itemId: 'legacy-reasoning-item' } },
+          },
+        ],
+      },
+    ]);
+
+    await model.doStream({
+      prompt: prompt as ModelCallOptions['prompt'],
+    });
+
+    expect(doStream.mock.calls[0]?.[0].prompt).toEqual([
+      {
+        role: 'assistant',
+        content: [{ type: 'reasoning', text: 'legacy summary' }],
+      },
+    ]);
   });
 
   it('implements generate by aggregating the raw stream without losing metadata', async () => {

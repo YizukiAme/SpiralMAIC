@@ -46,6 +46,7 @@ import {
   migrateLegacyThread,
   rememberActiveSession,
   recallActiveSession,
+  prepareStageSessionRequest,
 } from './agent-thread-store';
 import { deriveSessionTitle, type AgentEditSessionRecord } from './agent-edit-session-types';
 import { serializeThread, deserializeThread, type SerializedMessage } from './serialize-thread';
@@ -122,6 +123,7 @@ export function useAgentRuntime(opts: UseAgentRuntimeOptions) {
   // the second is deduped, and a quick switch-away-and-back still reloads.
   const startedStageRef = useRef<string | undefined>(undefined);
   const activeSessionIdRef = useRef<string | undefined>(undefined);
+  const activeSessionStageIdRef = useRef<string | undefined>(undefined);
   const [sessions, setSessions] = useState<AgentEditSessionRecord[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>(undefined);
 
@@ -153,6 +155,7 @@ export function useAgentRuntime(opts: UseAgentRuntimeOptions) {
       messagesRef.current = [];
       setMessages([]);
       activeSessionIdRef.current = undefined;
+      activeSessionStageIdRef.current = undefined;
       setActiveSessionId(undefined);
       setSessions([]);
       useRegenSnapshots.getState().clearAll();
@@ -176,8 +179,12 @@ export function useAgentRuntime(opts: UseAgentRuntimeOptions) {
         // Reuse an id the settle-save effect may already have created/saved during
         // this load window; only mint a new one if none exists. Otherwise we'd
         // remember an unsaved id and strand the actually-saved conversation.
-        const sid = activeSessionIdRef.current ?? createSession(stageId).id;
+        const sid =
+          activeSessionStageIdRef.current === stageId
+            ? (activeSessionIdRef.current ?? createSession(stageId).id)
+            : createSession(stageId).id;
         activeSessionIdRef.current = sid;
+        activeSessionStageIdRef.current = stageId;
         setActiveSessionId(sid);
         rememberActiveSession(stageId, sid);
         return;
@@ -188,24 +195,28 @@ export function useAgentRuntime(opts: UseAgentRuntimeOptions) {
       const rememberedRec = remembered ? list.find((s) => s.id === remembered) : undefined;
       if (rememberedRec) {
         activeSessionIdRef.current = rememberedRec.id;
+        activeSessionStageIdRef.current = stageId;
         setActiveSessionId(rememberedRec.id);
         setMessages(deserializeThread(rememberedRec.messages));
         reseedReasoningTimers(rememberedRec.messages);
       } else if (remembered) {
         // Remembered an empty/unsaved (or pruned) session → keep the clean slate.
         activeSessionIdRef.current = remembered;
+        activeSessionStageIdRef.current = stageId;
         setActiveSessionId(remembered);
         setMessages([]);
       } else {
         const recent = list[0];
         if (recent) {
           activeSessionIdRef.current = recent.id;
+          activeSessionStageIdRef.current = stageId;
           setActiveSessionId(recent.id);
           setMessages(deserializeThread(recent.messages));
           reseedReasoningTimers(recent.messages);
         } else {
           const s = createSession(stageId);
           activeSessionIdRef.current = s.id;
+          activeSessionStageIdRef.current = stageId;
           setActiveSessionId(s.id);
           setMessages([]);
         }
@@ -221,11 +232,13 @@ export function useAgentRuntime(opts: UseAgentRuntimeOptions) {
     if (isRunning || messages.length === 0) return;
     const sid = useStageStore.getState().stage?.id;
     if (!sid) return;
-    let sessionId = activeSessionIdRef.current;
+    let sessionId =
+      activeSessionStageIdRef.current === sid ? activeSessionIdRef.current : undefined;
     if (!sessionId) {
       const s = createSession(sid);
       sessionId = s.id;
       activeSessionIdRef.current = s.id;
+      activeSessionStageIdRef.current = sid;
       setActiveSessionId(s.id);
     }
     rememberActiveSession(sid, sessionId);
@@ -281,6 +294,7 @@ export function useAgentRuntime(opts: UseAgentRuntimeOptions) {
       // so a refresh keeps the clean slate instead of reloading the old chat.
       const s = createSession(sid);
       activeSessionIdRef.current = s.id;
+      activeSessionStageIdRef.current = sid;
       setActiveSessionId(s.id);
       rememberActiveSession(sid, s.id);
     }
@@ -309,6 +323,7 @@ export function useAgentRuntime(opts: UseAgentRuntimeOptions) {
       useRegenSnapshots.getState().clearAll();
       useThinkingTimers.getState().clear();
       activeSessionIdRef.current = rec.id;
+      activeSessionStageIdRef.current = rec.stageId;
       setActiveSessionId(rec.id);
       rememberActiveSession(rec.stageId, rec.id);
       const restored = deserializeThread(rec.messages);
@@ -488,9 +503,38 @@ export function useAgentRuntime(opts: UseAgentRuntimeOptions) {
       const userText = extractText(message);
       if (!userText) return;
 
-      // Prior conversation (text turns) captured BEFORE this turn's messages are
-      // appended — sent to the server so the agent has multi-turn memory.
-      const history = toHistory(messagesRef.current);
+      // Capture the persisted editor conversation identity before this request.
+      // The async hydration path normally establishes it; a very early first send
+      // mints the same record id that the settle-save effect will persist later.
+      const currentStageId = useStageStore.getState().stage?.id;
+      let editorSessionId: string | undefined;
+      let history: HistoryTurn[] = [];
+      if (currentStageId) {
+        const activeIdentity =
+          activeSessionIdRef.current && activeSessionStageIdRef.current
+            ? {
+                stageId: activeSessionStageIdRef.current,
+                id: activeSessionIdRef.current,
+              }
+            : undefined;
+        // A stage switch can reach this callback before the passive hydration
+        // effect clears refs. Scope both identity and prior text history here so
+        // the first request for the new stage cannot inherit the old stage.
+        const requestContext = prepareStageSessionRequest(
+          activeIdentity,
+          currentStageId,
+          toHistory(messagesRef.current),
+        );
+        const { identity } = requestContext;
+        editorSessionId = identity.id;
+        history = requestContext.history;
+        if (identity !== activeIdentity) {
+          activeSessionIdRef.current = identity.id;
+          activeSessionStageIdRef.current = identity.stageId;
+          setActiveSessionId(identity.id);
+          rememberActiveSession(identity.stageId, identity.id);
+        }
+      }
 
       const turnId = `t-${Date.now()}`;
       const assistantId = `a-${turnId}`;
@@ -563,6 +607,7 @@ export function useAgentRuntime(opts: UseAgentRuntimeOptions) {
             ...buildModelRequestHeaders(cfg),
           },
           body: JSON.stringify({
+            ...(editorSessionId ? { sessionId: editorSessionId } : {}),
             message: userText,
             scene: opts.scene,
             history,
