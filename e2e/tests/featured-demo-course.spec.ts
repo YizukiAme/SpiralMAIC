@@ -23,6 +23,30 @@ async function countFeaturedDemoStages(page: import('@playwright/test').Page) {
   );
 }
 
+async function findFeaturedDemoStageId(page: import('@playwright/test').Page) {
+  return page.evaluate(
+    () =>
+      new Promise<string>((resolve, reject) => {
+        const request = indexedDB.open('MAIC-Database');
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const database = request.result;
+          const transaction = database.transaction('stages', 'readonly');
+          const stagesRequest = transaction.objectStore('stages').getAll();
+          stagesRequest.onerror = () => reject(stagesRequest.error);
+          stagesRequest.onsuccess = () => {
+            const stage = stagesRequest.result.find(
+              (candidate) => candidate.featuredDemoId === 'firmicutes-obesity',
+            );
+            database.close();
+            if (stage) resolve(stage.id);
+            else reject(new Error('Featured demo stage was not found'));
+          };
+        };
+      }),
+  );
+}
+
 async function inspectImportedDemoMedia(page: import('@playwright/test').Page, stageId: string) {
   return page.evaluate(async (importedStageId) => {
     const records = await new Promise<{
@@ -72,7 +96,8 @@ async function inspectImportedDemoMedia(page: import('@playwright/test').Page, s
   }, stageId);
 }
 
-test('loads the featured demo once and reopens the same classroom', async ({ page }) => {
+test('imports the featured demo into recent learning and dismisses its card', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('locale', 'zh-CN'));
   await page.goto('/');
 
   const demo = page.getByRole('region', { name: '演示课程' });
@@ -82,9 +107,12 @@ test('loads the featured demo once and reopens the same classroom', async ({ pag
   expect(demoBounds).not.toBeNull();
   expect(demoBounds!.y + demoBounds!.height).toBeLessThanOrEqual(viewportHeight);
   await demo.getByRole('button', { name: '打开演示课程：厚壁菌门与肥胖' }).click();
-  await expect(page).toHaveURL(/\/classroom\/[^/]+$/);
-  const firstClassroomUrl = page.url();
-  const stageId = decodeURIComponent(new URL(firstClassroomUrl).pathname.split('/').pop()!);
+  await expect(page.getByText('最近学习')).toBeVisible();
+  await expect(page.getByText('厚壁菌门与肥胖', { exact: true })).toBeVisible();
+  await expect.poll(() => new URL(page.url()).pathname).toBe('/');
+  await expect(page.getByRole('region', { name: '演示课程' })).toHaveCount(0);
+
+  const stageId = await findFeaturedDemoStageId(page);
   const decodedMedia = await inspectImportedDemoMedia(page, stageId);
   expect(decodedMedia).toMatchObject({
     sceneCount: 12,
@@ -94,12 +122,24 @@ test('loads the featured demo once and reopens the same classroom', async ({ pag
   expect(decodedMedia.audioDuration).toBeGreaterThan(0);
   expect(decodedMedia.imageWidth).toBeGreaterThan(0);
 
-  await page.goto('/');
-  await page
-    .getByRole('region', { name: '演示课程' })
-    .getByRole('button', { name: '打开演示课程：厚壁菌门与肥胖' })
-    .click();
-
-  await expect(page).toHaveURL(firstClassroomUrl);
+  await page.reload();
+  await expect(page.getByRole('region', { name: '演示课程' })).toHaveCount(0);
+  await expect(page.getByText('厚壁菌门与肥胖', { exact: true })).toBeVisible();
   await expect.poll(() => countFeaturedDemoStages(page)).toBe(1);
+
+  await page.getByText('厚壁菌门与肥胖', { exact: true }).click();
+  await expect(page).toHaveURL(`/classroom/${encodeURIComponent(stageId)}`);
+});
+
+test('keeps the featured card available when its download fails', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('locale', 'zh-CN'));
+  await page.route('**/demo/firmicutes-obesity.maic.zip', (route) => route.abort());
+  await page.goto('/');
+
+  const demo = page.getByRole('region', { name: '演示课程' });
+  await demo.getByRole('button', { name: '打开演示课程：厚壁菌门与肥胖' }).click();
+
+  await expect(demo).toBeVisible();
+  await expect(demo.getByText('加载失败，点击重试')).toBeVisible();
+  await expect.poll(() => countFeaturedDemoStages(page)).toBe(0);
 });
