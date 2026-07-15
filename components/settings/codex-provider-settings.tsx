@@ -23,6 +23,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import {
   CodexOAuthClient,
   syncCodexProviderAndSelect,
@@ -51,6 +52,8 @@ type TestState = {
 export function CodexProviderSettings() {
   const { t } = useI18n();
   const models = useSettingsStore((state) => state.providersConfig['openai-codex']?.models ?? []);
+  const codexFastMode = useSettingsStore((state) => state.codexFastMode);
+  const setCodexFastMode = useSettingsStore((state) => state.setCodexFastMode);
   const [snapshot, setSnapshot] = useState<CodexOAuthClientSnapshot>(INITIAL_SNAPSHOT);
   const [copied, setCopied] = useState(false);
   const [testState, setTestState] = useState<TestState>({ status: 'idle', messageKey: null });
@@ -105,6 +108,9 @@ export function CodexProviderSettings() {
   const supportsBrowser = auth?.methods.includes('browser') ?? false;
   const supportsDevice = auth?.methods.includes('device') ?? false;
   const deviceAttempt = attempt?.method === 'device' && isPending ? attempt : null;
+  const hasFastModel = models.some((model) =>
+    model.capabilities?.serviceTiers?.includes('priority'),
+  );
 
   const startBrowser = () => {
     setCopied(false);
@@ -169,12 +175,6 @@ export function CodexProviderSettings() {
 
   return (
     <div className="max-w-3xl space-y-5">
-      <Alert>
-        <KeyRound aria-hidden="true" />
-        <AlertTitle>{t('settings.codexOAuth.connectTitle')}</AlertTitle>
-        <AlertDescription>{t('settings.codexOAuth.experimental')}</AlertDescription>
-      </Alert>
-
       {auth?.connected ? (
         <Card size="sm">
           <CardHeader>
@@ -191,6 +191,23 @@ export function CodexProviderSettings() {
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
+            {hasFastModel && (
+              <div className="flex items-center justify-between gap-4 rounded-lg border border-border/50 bg-muted/20 p-3">
+                <div className="space-y-1">
+                  <Label htmlFor="codex-fast-mode">{t('settings.codexOAuth.fastMode')}</Label>
+                  <p id="codex-fast-mode-description" className="text-xs text-muted-foreground">
+                    {t('settings.codexOAuth.fastModeDescription')}
+                  </p>
+                </div>
+                <Switch
+                  id="codex-fast-mode"
+                  aria-label={t('settings.codexOAuth.fastMode')}
+                  aria-describedby="codex-fast-mode-description"
+                  checked={codexFastMode}
+                  onCheckedChange={setCodexFastMode}
+                />
+              </div>
+            )}
             <div className="space-y-2">
               <Label>{t('settings.codexOAuth.models')}</Label>
               <div className="space-y-1.5" aria-label={t('settings.codexOAuth.models')}>
@@ -201,8 +218,19 @@ export function CodexProviderSettings() {
                     className="flex items-center justify-between rounded-lg border border-border/50 bg-card p-3"
                   >
                     <div className="flex-1">
-                      <div className="mb-1.5 font-mono text-sm font-medium">
-                        {model.name || model.id}
+                      <div className="mb-1.5 flex items-center gap-2">
+                        <span className="font-mono text-sm font-medium">
+                          {model.name || model.id}
+                        </span>
+                        {model.capabilities?.serviceTiers?.includes('priority') && (
+                          <Badge
+                            data-codex-fast-supported
+                            variant="secondary"
+                            className="h-4 px-1.5 text-[10px]"
+                          >
+                            {t('settings.codexOAuth.fastMode')}
+                          </Badge>
+                        )}
                       </div>
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
                         <div className="flex items-center gap-1">

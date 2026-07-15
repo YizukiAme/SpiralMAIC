@@ -219,6 +219,34 @@ describe('Codex provider and OpenAI SDK integration', () => {
       input: [{ role: 'user', content: [{ type: 'input_text', text: 'Hello' }] }],
       include: ['reasoning.encrypted_content'],
     });
+    expect(JSON.parse(init?.body as string)).not.toHaveProperty('service_tier');
+  });
+
+  it('maps the Codex priority option to the real Responses service_tier field', async () => {
+    const tokenProvider = {
+      getValidCredentials: vi.fn(async () => ({
+        accessToken: 'access-token',
+        accountId: 'account-id',
+      })),
+    } satisfies CodexTokenProvider;
+    const upstreamFetch = vi.fn<typeof fetch>(async () => new Response(null, { status: 403 }));
+    const customFetch = createCodexResponsesTransport({ tokenProvider, upstreamFetch });
+    const { model } = getModel({
+      providerId: 'openai-codex',
+      modelId: 'gpt-5.4',
+      apiKey: '',
+      customFetch,
+      serviceTier: 'priority',
+    });
+
+    await Promise.resolve(
+      (model as LanguageModelV3).doStream({
+        prompt: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }],
+      }),
+    ).catch(() => undefined);
+
+    const [, init] = upstreamFetch.mock.calls[0]!;
+    expect(JSON.parse(init?.body as string)).toMatchObject({ service_tier: 'priority' });
   });
 
   it.each(['stream', 'generate'] as const)(

@@ -1,4 +1,5 @@
 import { wrapLanguageModel, type LanguageModelMiddleware } from 'ai';
+import type { ModelServiceTier } from '@/lib/types/provider';
 
 type LanguageModelV3 = Parameters<typeof wrapLanguageModel>[0]['model'];
 type CodexStreamResult = Awaited<ReturnType<LanguageModelV3['doStream']>>;
@@ -76,8 +77,10 @@ function normalizeProviderOptions(
   providerOptions: Parameters<
     NonNullable<LanguageModelMiddleware['transformParams']>
   >[0]['params']['providerOptions'],
+  serviceTier?: ModelServiceTier,
 ) {
   const existingOpenAI = isRecord(providerOptions?.openai) ? providerOptions.openai : {};
+  const { serviceTier: _callerServiceTier, ...safeExistingOpenAI } = existingOpenAI;
   const existingInclude = Array.isArray(existingOpenAI.include)
     ? existingOpenAI.include.filter((value): value is string => typeof value === 'string')
     : [];
@@ -88,11 +91,12 @@ function normalizeProviderOptions(
   return {
     ...providerOptions,
     openai: {
-      ...existingOpenAI,
+      ...safeExistingOpenAI,
       store: false,
       include,
       systemMessageMode: 'developer',
       forceReasoning: true,
+      ...(serviceTier ? { serviceTier } : {}),
     },
   } as NonNullable<
     Parameters<
@@ -396,36 +400,48 @@ export async function aggregateCodexStream(
   }
 }
 
-export const codexLanguageModelMiddleware: LanguageModelMiddleware = {
-  specificationVersion: 'v3',
-  transformParams: async ({ params }) => {
-    const normalized = { ...params };
-    delete normalized.maxOutputTokens;
-    delete normalized.temperature;
-    delete normalized.topP;
-    delete normalized.topK;
-    delete normalized.presencePenalty;
-    delete normalized.frequencyPenalty;
-    delete normalized.seed;
-    normalized.providerOptions = normalizeProviderOptions(params.providerOptions);
-    return normalized;
-  },
-  wrapGenerate: async ({ doStream }) => {
-    try {
-      return await aggregateCodexStream(await doStream());
-    } catch (error) {
-      throw createCodexStreamError(error);
-    }
-  },
-  wrapStream: async ({ doStream }) => {
-    try {
-      return sanitizeCodexStream(await doStream());
-    } catch (error) {
-      throw createCodexStreamError(error);
-    }
-  },
-};
+function createCodexLanguageModelMiddleware(
+  serviceTier?: ModelServiceTier,
+): LanguageModelMiddleware {
+  return {
+    specificationVersion: 'v3',
+    transformParams: async ({ params }) => {
+      const normalized = { ...params };
+      delete normalized.maxOutputTokens;
+      delete normalized.temperature;
+      delete normalized.topP;
+      delete normalized.topK;
+      delete normalized.presencePenalty;
+      delete normalized.frequencyPenalty;
+      delete normalized.seed;
+      normalized.providerOptions = normalizeProviderOptions(params.providerOptions, serviceTier);
+      return normalized;
+    },
+    wrapGenerate: async ({ doStream }) => {
+      try {
+        return await aggregateCodexStream(await doStream());
+      } catch (error) {
+        throw createCodexStreamError(error);
+      }
+    },
+    wrapStream: async ({ doStream }) => {
+      try {
+        return sanitizeCodexStream(await doStream());
+      } catch (error) {
+        throw createCodexStreamError(error);
+      }
+    },
+  };
+}
 
-export function wrapCodexLanguageModel(model: LanguageModelV3): LanguageModelV3 {
-  return wrapLanguageModel({ model, middleware: codexLanguageModelMiddleware });
+export const codexLanguageModelMiddleware = createCodexLanguageModelMiddleware();
+
+export function wrapCodexLanguageModel(
+  model: LanguageModelV3,
+  options: { serviceTier?: ModelServiceTier } = {},
+): LanguageModelV3 {
+  return wrapLanguageModel({
+    model,
+    middleware: createCodexLanguageModelMiddleware(options.serviceTier),
+  });
 }

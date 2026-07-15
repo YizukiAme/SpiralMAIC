@@ -12,7 +12,7 @@
  */
 
 import type { StatelessEvent, DirectorState } from '@/lib/types/chat';
-import type { ThinkingConfig } from '@/lib/types/provider';
+import type { ModelServiceTier, ThinkingConfig } from '@/lib/types/provider';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('AgentLoop');
@@ -58,6 +58,7 @@ export interface AgentLoopRequest {
   model?: string;
   providerType?: string;
   thinkingConfig?: ThinkingConfig;
+  serviceTier?: ModelServiceTier;
 }
 
 /** Per-iteration outcome extracted from the done event */
@@ -153,6 +154,7 @@ export async function runAgentLoop(
       model: request.model,
       providerType: request.providerType,
       thinkingConfig: request.thinkingConfig,
+      serviceTier: request.serviceTier,
     };
 
     // Fetch

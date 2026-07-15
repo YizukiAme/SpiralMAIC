@@ -8,7 +8,7 @@ import { persist } from 'zustand/middleware';
 import type { ProviderId } from '@/lib/ai/providers';
 import type { ProvidersConfig } from '@/lib/types/settings';
 import { PROVIDERS } from '@/lib/ai/providers';
-import type { ThinkingConfig } from '@/lib/types/provider';
+import type { ModelServiceTier, ThinkingConfig } from '@/lib/types/provider';
 import { getThinkingConfigKey, supportsConfigurableThinking } from '@/lib/ai/thinking-config';
 import type { TTSProviderId, ASRProviderId, BuiltInTTSProviderId } from '@/lib/audio/types';
 import type { AgentVoiceOverride } from '@/lib/audio/voice-resolver';
@@ -60,6 +60,7 @@ export interface SettingsState {
   providerId: ProviderId;
   modelId: string;
   thinkingConfigs: Record<string, ThinkingConfig>;
+  codexFastMode: boolean;
 
   // Provider configurations (unified JSON storage)
   providersConfig: ProvidersConfig;
@@ -228,6 +229,7 @@ export interface SettingsState {
 
   // Actions
   setModel: (providerId: ProviderId, modelId: string) => void;
+  setCodexFastMode: (enabled: boolean) => void;
   setThinkingConfig: (
     providerId: ProviderId,
     modelId: string,
@@ -899,6 +901,7 @@ export const useSettingsStore = create<SettingsState>()(
           migratedData?.thinkingConfigs || {},
           initialProvidersConfig,
         ),
+        codexFastMode: false,
         providersConfig: initialProvidersConfig,
         ttsModel: migratedData?.ttsModel || 'openai-tts',
         selectedAgentIds: migratedData?.selectedAgentIds || ['default-1', 'default-2', 'default-3'],
@@ -961,6 +964,8 @@ export const useSettingsStore = create<SettingsState>()(
 
         // Actions
         setModel: (providerId, modelId) => set({ providerId, modelId }),
+
+        setCodexFastMode: (enabled) => set({ codexFastMode: enabled }),
 
         setThinkingConfig: (providerId, modelId, config) =>
           set((state) => {
@@ -1406,7 +1411,7 @@ export const useSettingsStore = create<SettingsState>()(
             // Managed providers expose only their allowed model list (LLM/image)
             // and presence (the "managed" flag) — never a base URL.
             const data = (await res.json()) as {
-              providers: Record<string, { models?: string[] }>;
+              providers: Record<string, { models?: string[]; fastModels?: string[] }>;
               // TTS additionally carries an optional `disabled` flag for
               // admin/server-level force-off (#665).
               tts: Record<string, { disabled?: boolean }>;
@@ -1462,11 +1467,34 @@ export const useSettingsStore = create<SettingsState>()(
                   const filteredModels = info.models?.length
                     ? info.models.map((id) => currentModelMap.get(id) ?? { id, name: id })
                     : currentModels;
+                  const fastModelIds = new Set(info.fastModels ?? []);
+                  const models =
+                    key === 'openai-codex'
+                      ? filteredModels.map((model) => {
+                          if (fastModelIds.has(model.id)) {
+                            return {
+                              ...model,
+                              capabilities: {
+                                ...model.capabilities,
+                                serviceTiers: ['priority'] as ModelServiceTier[],
+                              },
+                            };
+                          }
+                          if (!model.capabilities?.serviceTiers) return model;
+                          const { serviceTiers: _serviceTiers, ...capabilities } =
+                            model.capabilities;
+                          return {
+                            ...model,
+                            capabilities:
+                              Object.keys(capabilities).length > 0 ? capabilities : undefined,
+                          };
+                        })
+                      : filteredModels;
                   newProvidersConfig[key] = {
                     ...newProvidersConfig[key],
                     isServerConfigured: true,
                     serverModels: info.models,
-                    models: filteredModels,
+                    models,
                   };
                 }
               }

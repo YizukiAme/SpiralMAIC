@@ -1,7 +1,7 @@
 import packageMetadata from '../../../package.json';
 import { createHash } from 'node:crypto';
 
-import type { ModelInfo } from '@/lib/types/provider';
+import type { ModelInfo, ModelServiceTier } from '@/lib/types/provider';
 
 import { refreshCodexCredentialsIfCurrent, type CodexTokenProvider } from './token-provider';
 import { withCodexCredentialVaultMutation, type CodexCredentialVault } from './vault';
@@ -118,6 +118,18 @@ function numericPriority(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
 }
 
+function parseServiceTiers(model: Record<string, unknown>): ModelServiceTier[] | undefined {
+  const currentTiers = model.service_tiers;
+  const supportsPriority =
+    Array.isArray(currentTiers) &&
+    currentTiers.some((tier) => isRecord(tier) && tier.id === 'priority');
+  const legacyTiers = model.additional_speed_tiers;
+  const supportsLegacyFast =
+    Array.isArray(legacyTiers) && legacyTiers.some((tier) => tier === 'fast');
+
+  return supportsPriority || supportsLegacyFast ? ['priority'] : undefined;
+}
+
 interface SemanticVersion {
   major: bigint;
   minor: bigint;
@@ -216,7 +228,13 @@ export function parseCodexModels(
     if (!id || seen.has(id)) continue;
     seen.add(id);
     const name = nonEmptyString(value.display_name) ?? nonEmptyString(value.name) ?? id;
-    models.push({ id, name, source: 'probed' });
+    const serviceTiers = parseServiceTiers(value);
+    models.push({
+      id,
+      name,
+      source: 'probed',
+      ...(serviceTiers ? { capabilities: { serviceTiers } } : {}),
+    });
   }
 
   if (models.length === 0) {

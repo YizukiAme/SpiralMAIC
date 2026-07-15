@@ -17,8 +17,15 @@ describe('Codex settings surface contract', () => {
     expect(source).not.toContain('llm-base-url');
     expect(source).not.toContain('/api/provider/probe-models');
     expect(source).not.toContain('ModelEditDialog');
-    expect(source).toContain('settings.codexOAuth.connectTitle');
+    expect(source).not.toContain('settings.codexOAuth.connectTitle');
     expect(source).toContain('data-codex-model-row');
+    expect(source).toContain('settings.codexOAuth.fastMode');
+    expect(source).toContain('settings.codexOAuth.fastModeDescription');
+    expect(source).toContain('setCodexFastMode');
+    expect(source).toContain('<Switch');
+    expect(source).toContain('aria-describedby="codex-fast-mode-description"');
+    expect(source).toContain('data-codex-fast-supported');
+    expect(source.indexOf('<Switch')).toBeLessThan(source.indexOf('data-codex-model-row'));
     expect(source).toContain('bg-green-50 text-green-700 border border-green-200');
     expect(source).toContain('bg-red-50 text-red-700 border border-red-200');
   });

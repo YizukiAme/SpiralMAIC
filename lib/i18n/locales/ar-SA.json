@@ -1058,7 +1058,6 @@
     },
     "codexOAuth": {
       "experimental": "تكامل تجريبي من جهة خارجية مع Codex؛ يستخدم حصة خطة ChatGPT الخاصة بك.",
-      "connectTitle": "اتصال ChatGPT",
       "unavailableTitle": "تسجيل الدخول إلى Codex غير متاح",
       "unavailable": {
         "FEATURE_DISABLED": "فعّل Codex OAuth على الخادم لاستخدام هذا المزوّد.",
@@ -1078,6 +1077,8 @@
       "cancel": "إلغاء تسجيل الدخول",
       "signOut": "تسجيل الخروج",
       "models": "النماذج المتاحة",
+      "fastMode": "الوضع السريع",
+      "fastModeDescription": "ينطبق فقط على النماذج المدعومة: أسرع بنحو 1.5 مرة، لكنه يستهلك قدرًا أكبر من حصة خطة ChatGPT.",
       "testConnection": "اختبار الاتصال",
       "testSuccess": "تم الاتصال بـ Codex بنجاح.",
       "testUnauthorized": "سجّل الدخول باستخدام ChatGPT مرة أخرى.",

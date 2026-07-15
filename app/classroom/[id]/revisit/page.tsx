@@ -457,6 +457,7 @@ export default function RevisitChallengePage() {
         apiKey: modelConfig.apiKey,
         baseUrl: modelConfig.baseUrl,
         providerType: modelConfig.providerType,
+        serviceTier: modelConfig.serviceTier,
         agentIds: revisitAgentIds,
         agentConfigs: revisitAgentConfigs,
       });

@@ -20,6 +20,11 @@ vi.mock('@/lib/utils/model-config', () => ({
     apiKey: '',
     requiresApiKey: true,
   })),
+  buildModelRequestHeaders: (config: Record<string, string | undefined>) => ({
+    'x-model': config.modelString || '',
+    'x-api-key': config.apiKey || '',
+    ...(config.serviceTier ? { 'x-service-tier': config.serviceTier } : {}),
+  }),
 }));
 
 import { submitRevisitAttempt } from '@/lib/revisit/client';

@@ -235,7 +235,7 @@ vi.stubGlobal('window', { localStorage: localStorageStub });
 
 /** Full server response shape */
 interface MockServerResponse {
-  providers?: Record<string, { models?: string[]; baseUrl?: string }>;
+  providers?: Record<string, { models?: string[]; fastModels?: string[]; baseUrl?: string }>;
   tts?: Record<string, { baseUrl?: string; disabled?: boolean }>;
   asr?: Record<string, { baseUrl?: string }>;
   pdf?: Record<string, { baseUrl?: string }>;
@@ -506,6 +506,64 @@ describe('fetchServerProviders — provider availability sync', () => {
         },
       },
     ]);
+  });
+
+  it('maps Codex fastModels to the priority service tier capability', async () => {
+    const store = await getStore();
+    mockServerResponse({
+      providers: {
+        'openai-codex': {
+          models: ['gpt-5.5', 'gpt-5.4-mini'],
+          fastModels: ['gpt-5.5'],
+        },
+      },
+    });
+
+    await store.getState().fetchServerProviders();
+
+    const models = store.getState().providersConfig['openai-codex'].models;
+    expect(models[0].capabilities?.serviceTiers).toEqual(['priority']);
+    expect(models[1].capabilities?.serviceTiers).toBeUndefined();
+  });
+
+  it('clears discovered fast capabilities when native OAuth disappears', async () => {
+    const store = await getStore();
+    mockServerResponse({
+      providers: {
+        'openai-codex': { models: ['gpt-5.5'], fastModels: ['gpt-5.5'] },
+      },
+    });
+    await store.getState().fetchServerProviders();
+    expect(
+      store.getState().providersConfig['openai-codex'].models[0].capabilities?.serviceTiers,
+    ).toEqual(['priority']);
+
+    mockServerResponse({});
+    await store.getState().fetchServerProviders();
+
+    expect(
+      store
+        .getState()
+        .providersConfig[
+          'openai-codex'
+        ].models.every((model) => model.capabilities?.serviceTiers === undefined),
+    ).toBe(true);
+  });
+
+  it('keeps the Codex fast preference across provider rebuilds', async () => {
+    const store = await getStore();
+    store.getState().setCodexFastMode(true);
+
+    mockServerResponse({
+      providers: {
+        'openai-codex': { models: ['gpt-5.5'], fastModels: ['gpt-5.5'] },
+      },
+    });
+    await store.getState().fetchServerProviders();
+    mockServerResponse({});
+    await store.getState().fetchServerProviders();
+
+    expect(store.getState().codexFastMode).toBe(true);
   });
 
   it('resets Codex to static fallback models when native OAuth disappears', async () => {

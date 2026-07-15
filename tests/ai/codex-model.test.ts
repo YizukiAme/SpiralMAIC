@@ -136,6 +136,32 @@ describe('Codex language model middleware', () => {
     });
   });
 
+  it('merges priority with existing OpenAI reasoning options', async () => {
+    const doStream = vi.fn(async (_options: ModelCallOptions) => ({
+      stream: createStream([
+        { type: 'stream-start', warnings: [] },
+        {
+          type: 'finish',
+          usage: USAGE,
+          finishReason: { unified: 'stop', raw: 'completed' },
+        },
+      ]) as never,
+    }));
+    const model = wrapCodexLanguageModel(createLanguageModel({ doStream }), {
+      serviceTier: 'priority',
+    });
+
+    await model.doStream({
+      prompt: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }],
+      providerOptions: { openai: { reasoningEffort: 'high' } },
+    });
+
+    expect(doStream.mock.calls[0]?.[0].providerOptions?.openai).toMatchObject({
+      reasoningEffort: 'high',
+      serviceTier: 'priority',
+    });
+  });
+
   it('implements generate by aggregating the raw stream without losing metadata', async () => {
     const timestamp = new Date('2026-07-15T00:00:00.000Z');
     const warnings = [{ type: 'other', message: 'provider warning' }] as const;

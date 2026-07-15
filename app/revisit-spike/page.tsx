@@ -57,6 +57,7 @@ export default function RevisitSeatSpikePage() {
         apiKey: modelConfig.apiKey,
         baseUrl: modelConfig.baseUrl,
         providerType: modelConfig.providerType,
+        serviceTier: modelConfig.serviceTier,
       });
 
       const response = await fetch('/api/chat', {

@@ -2,9 +2,16 @@ import { expect, test } from '../fixtures/base';
 import { HomePage } from '../pages/home.page';
 import { createSettingsStorage } from '../fixtures/test-data/settings';
 
-function serverProvidersBody(connected: boolean) {
+function serverProvidersBody(connected: boolean, fastModels = ['gpt-live']) {
   return JSON.stringify({
-    providers: connected ? { 'openai-codex': { models: ['gpt-live', 'gpt-next'] } } : {},
+    providers: connected
+      ? {
+          'openai-codex': {
+            models: ['gpt-live', 'gpt-next'],
+            fastModels,
+          },
+        }
+      : {},
     tts: {},
     asr: {},
     pdf: {},
@@ -14,14 +21,21 @@ function serverProvidersBody(connected: boolean) {
   });
 }
 
-async function openCodexSettings(page: HomePage['page']) {
+async function openCodexSettings(page: HomePage['page'], connected = false) {
   const home = new HomePage(page);
   await home.goto();
   await expect(home.textarea).toBeVisible();
   await page.locator('button:has(svg.lucide-settings)').first().click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await page.getByRole('button', { name: /Codex/i }).first().click();
-  await expect(page.getByText(/Experimental third-party Codex integration/i).first()).toBeVisible();
+  if (connected) {
+    await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
+  } else {
+    await expect(
+      page.getByText(/Experimental third-party Codex integration/i).first(),
+    ).toBeVisible();
+  }
+  await expect(page.getByText('ChatGPT connection', { exact: true })).toHaveCount(0);
 }
 
 test.describe.configure({ mode: 'serial' });
@@ -175,6 +189,23 @@ test.describe('Codex OAuth settings', () => {
     releaseProviderSync();
     await expect(page.getByText('Connected with ChatGPT')).toBeVisible({ timeout: 5_000 });
     await expect(page.getByRole('button', { name: /Codex Connected/ })).toBeVisible();
+    const fastMode = page.getByRole('switch', { name: 'Fast mode' });
+    await expect(fastMode).toBeVisible();
+    await expect(fastMode).not.toBeChecked();
+    await expect(
+      page.getByText(/Applies only to supported models: about 1.5x faster/i),
+    ).toBeVisible();
+    await expect(page.locator('[data-codex-fast-supported]')).toHaveCount(1);
+    await fastMode.click();
+    await expect(fastMode).toBeChecked();
+    await expect
+      .poll(async () =>
+        page.evaluate(() => {
+          const raw = localStorage.getItem('settings-storage');
+          return raw ? JSON.parse(raw).state.codexFastMode : null;
+        }),
+      )
+      .toBe(true);
 
     await page.getByRole('button', { name: 'Test connection' }).click();
     await expect(
@@ -194,11 +225,39 @@ test.describe('Codex OAuth settings', () => {
         }),
       )
       .toBe('openai');
+    await expect(page.getByRole('switch', { name: 'Fast mode' })).toHaveCount(0);
 
     const storage = await page.evaluate(() => JSON.stringify(localStorage));
     expect(storage).not.toMatch(
       /sentinel-access-token|sentinel-account-id|sentinel-private-upstream-body/,
     );
+  });
+
+  test('hides fast mode when the connected catalog has no supported model', async ({ page }) => {
+    await page.route('**/api/server-providers', (route) =>
+      route.fulfill({
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+        body: serverProvidersBody(true, []),
+      }),
+    );
+    await page.route('**/api/codex/auth', (route) =>
+      route.fulfill({
+        status: 200,
+        json: {
+          available: true,
+          reason: 'AVAILABLE',
+          methods: ['browser', 'device'],
+          connected: true,
+          email: 'person@example.com',
+        },
+      }),
+    );
+
+    await openCodexSettings(page, true);
+
+    await expect(page.getByText('Connected as person@example.com')).toBeVisible();
+    await expect(page.getByRole('switch', { name: 'Fast mode' })).toHaveCount(0);
   });
 
   test('shows a fixed unavailable state without credential controls', async ({ page }) => {

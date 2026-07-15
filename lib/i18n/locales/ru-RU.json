@@ -1058,7 +1058,6 @@
     },
     "codexOAuth": {
       "experimental": "Экспериментальная сторонняя интеграция Codex; использует квоту вашего тарифа ChatGPT.",
-      "connectTitle": "Подключение к ChatGPT",
       "unavailableTitle": "Вход в Codex недоступен",
       "unavailable": {
         "FEATURE_DISABLED": "Включите Codex OAuth на сервере, чтобы использовать этого провайдера.",
@@ -1078,6 +1077,8 @@
       "cancel": "Отменить вход",
       "signOut": "Выйти",
       "models": "Доступные модели",
+      "fastMode": "Быстрый режим",
+      "fastModeDescription": "Работает только с поддерживаемыми моделями: примерно в 1,5 раза быстрее, но расходует больше квоты вашего тарифа ChatGPT.",
       "testConnection": "Проверить подключение",
       "testSuccess": "Подключение к Codex выполнено.",
       "testUnauthorized": "Войдите через ChatGPT ещё раз.",

@@ -4,6 +4,7 @@ import { withCodexCredentialVaultMutation } from './vault';
 
 export interface CodexNativeServerProvider {
   models: string[];
+  fastModels: string[];
 }
 
 /** Build the non-secret provider fragment consumed by /api/server-providers. */
@@ -22,5 +23,10 @@ export async function getCodexNativeServerProvider(): Promise<CodexNativeServerP
 
   const models = await runtime.modelDiscovery.getModels();
   if (models.length === 0) return null;
-  return { models: models.map((model) => model.id) };
+  return {
+    models: models.map((model) => model.id),
+    fastModels: models
+      .filter((model) => model.capabilities?.serviceTiers?.includes('priority'))
+      .map((model) => model.id),
+  };
 }

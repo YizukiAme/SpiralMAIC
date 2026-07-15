@@ -1042,7 +1042,6 @@
     },
     "codexOAuth": {
       "experimental": "實驗性第三方 Codex 接入；使用你的 ChatGPT 方案額度。",
-      "connectTitle": "ChatGPT 連線",
       "unavailableTitle": "Codex 登入目前不可用",
       "unavailable": {
         "FEATURE_DISABLED": "請在伺服器啟用 Codex OAuth 後使用此提供者。",
@@ -1062,6 +1061,8 @@
       "cancel": "取消登入",
       "signOut": "登出",
       "models": "可用模型",
+      "fastMode": "Fast 模式",
+      "fastModeDescription": "僅對支援的模型生效：速度約為 1.5 倍，但會消耗更多 ChatGPT 方案額度。",
       "testConnection": "測試連線",
       "testSuccess": "Codex 連線成功。",
       "testUnauthorized": "請重新使用 ChatGPT 登入。",

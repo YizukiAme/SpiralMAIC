@@ -36,7 +36,12 @@ import { toast } from 'sonner';
 import { type ProviderId } from '@/lib/ai/providers';
 import { PROVIDERS, MONO_LOGO_PROVIDERS } from '@/lib/ai/providers';
 import { cn } from '@/lib/utils';
-import { createCustomProviderSettings, getProviderTypeLabel, modelInfoFromId } from './utils';
+import {
+  createCustomProviderSettings,
+  getProviderTypeLabel,
+  modelInfoFromId,
+  orderProvidersForSettings,
+} from './utils';
 import { ProviderList } from './provider-list';
 import { ProviderConfigPanel } from './provider-config-panel';
 import { CodexProviderSettings } from './codex-provider-settings';
@@ -544,17 +549,19 @@ export function SettingsDialog({ open, onOpenChange, initialSection }: SettingsD
   };
 
   // Get all providers from providersConfig
-  const allProviders = Object.entries(providersConfig).map(([id, config]) => ({
-    id: id as ProviderId,
-    name: config.name,
-    type: config.type,
-    defaultBaseUrl: config.defaultBaseUrl,
-    icon: config.icon,
-    requiresApiKey: config.requiresApiKey,
-    credentialMode: config.credentialMode,
-    models: config.models,
-    isServerConfigured: config.isServerConfigured,
-  }));
+  const allProviders = orderProvidersForSettings(
+    Object.entries(providersConfig).map(([id, config]) => ({
+      id: id as ProviderId,
+      name: config.name,
+      type: config.type,
+      defaultBaseUrl: config.defaultBaseUrl,
+      icon: config.icon,
+      requiresApiKey: config.requiresApiKey,
+      credentialMode: config.credentialMode,
+      models: config.models,
+      isServerConfigured: config.isServerConfigured,
+    })),
+  );
 
   // Sections that show a provider list column
   const _hasProviderList = [

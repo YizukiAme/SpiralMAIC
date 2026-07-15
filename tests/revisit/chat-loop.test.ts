@@ -147,6 +147,26 @@ describe('runRevisitAgentLoop', () => {
     ).rejects.toThrow(/insufficient balance/);
   });
 
+  test('forwards the selected service tier in every shared chat-loop request body', async () => {
+    const fetchChat = vi.fn().mockResolvedValueOnce(
+      sse([
+        {
+          type: 'done',
+          data: { totalActions: 0, totalAgents: 0, agentHadContent: false },
+        },
+      ]),
+    );
+
+    await runRevisitAgentLoop({
+      request: { ...request, serviceTier: 'priority' },
+      agentIds,
+      fetchChat,
+      callbacks: {},
+    });
+
+    expect(fetchChat.mock.calls[0]?.[0]).toMatchObject({ serviceTier: 'priority' });
+  });
+
   test('forces a cue back to the teacher after two agent turns in one revisit round', async () => {
     const fetchChat = vi
       .fn()

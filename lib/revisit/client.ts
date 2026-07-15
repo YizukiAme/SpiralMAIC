@@ -17,7 +17,7 @@ import {
 } from '@/lib/revisit/db';
 import { computeLessonMemory } from '@/lib/revisit/memory';
 import type { RevisitMessage } from '@/lib/revisit/session';
-import { getCurrentModelConfig } from '@/lib/utils/model-config';
+import { buildModelRequestHeaders, getCurrentModelConfig } from '@/lib/utils/model-config';
 
 const DEMO_ACCELERATED_CLOCK_MULTIPLIER = 1440;
 
@@ -29,6 +29,7 @@ interface ModelConfig {
   requiresApiKey?: boolean;
   isServerConfigured?: boolean;
   thinkingConfig?: unknown;
+  serviceTier?: 'priority';
 }
 
 export function getEffectiveForgettingSpeedMultiplier(settings: {
@@ -217,11 +218,8 @@ async function requestBlueprintFromApi(
 ): Promise<RevisitExamBlueprint> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'x-model': modelConfig.modelString,
-    'x-api-key': modelConfig.apiKey,
+    ...buildModelRequestHeaders(modelConfig),
   };
-  if (modelConfig.baseUrl) headers['x-base-url'] = modelConfig.baseUrl;
-  if (modelConfig.providerType) headers['x-provider-type'] = modelConfig.providerType;
 
   const response = await fetch('/api/revisit/blueprint', {
     method: 'POST',
@@ -255,11 +253,8 @@ async function requestJudgeFromApi(args: {
 }): Promise<RevisitJudgeReport> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'x-model': args.modelConfig.modelString,
-    'x-api-key': args.modelConfig.apiKey,
+    ...buildModelRequestHeaders(args.modelConfig),
   };
-  if (args.modelConfig.baseUrl) headers['x-base-url'] = args.modelConfig.baseUrl;
-  if (args.modelConfig.providerType) headers['x-provider-type'] = args.modelConfig.providerType;
 
   const response = await fetch('/api/revisit/judge', {
     method: 'POST',

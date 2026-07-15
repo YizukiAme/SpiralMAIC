@@ -2,6 +2,7 @@ import type { UIMessage } from 'ai';
 
 import type { ChatMessageMetadata, StatelessChatRequest } from '@/lib/types/chat';
 import type { StatelessEvent } from '@/lib/types/chat';
+import type { ModelServiceTier } from '@/lib/types/provider';
 
 export const REVISIT_SPIKE_STUDENT_AGENT_ID = 'revisit-spike-wb-student';
 
@@ -11,6 +12,7 @@ interface CreateRevisitSeatSpikeRequestArgs {
   apiKey: string;
   baseUrl?: string;
   providerType?: string;
+  serviceTier?: ModelServiceTier;
 }
 
 export function createRevisitSeatSpikeRequest({
@@ -19,6 +21,7 @@ export function createRevisitSeatSpikeRequest({
   apiKey,
   baseUrl,
   providerType,
+  serviceTier,
 }: CreateRevisitSeatSpikeRequestArgs): StatelessChatRequest {
   const message: UIMessage<ChatMessageMetadata> = {
     id: `revisit-teacher-${Date.now()}`,
@@ -61,6 +64,7 @@ export function createRevisitSeatSpikeRequest({
     model,
     ...(baseUrl ? { baseUrl } : {}),
     ...(providerType ? { providerType } : {}),
+    ...(serviceTier ? { serviceTier } : {}),
   };
 }
 
