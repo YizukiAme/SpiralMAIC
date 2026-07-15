@@ -22,7 +22,7 @@ export default defineConfig({
     command: process.env.CI ? 'pnpm build && pnpm start' : 'pnpm dev',
     url: 'http://localhost:3002',
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+    timeout: 300_000,
     // Enable the MAIC Editor (Pro mode) so editor e2e can reach it. This is a
     // build-time NEXT_PUBLIC_* flag, so it must be set when the webServer runs
     // `pnpm build` (CI) or `pnpm dev` (local).
