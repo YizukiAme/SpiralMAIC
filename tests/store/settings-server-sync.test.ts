@@ -37,6 +37,36 @@ vi.mock('@/lib/ai/providers', () => ({
       credentialMode: 'oauth',
       icon: '/logos/openai.svg',
       models: [
+        {
+          id: 'gpt-5.6-sol',
+          name: 'GPT-5.6 Sol',
+          capabilities: {
+            thinking: {
+              effortValues: ['low', 'medium', 'high', 'xhigh', 'max'],
+              defaultEffort: 'low',
+            },
+          },
+        },
+        {
+          id: 'gpt-5.6-terra',
+          name: 'GPT-5.6 Terra',
+          capabilities: {
+            thinking: {
+              effortValues: ['low', 'medium', 'high', 'xhigh', 'max'],
+              defaultEffort: 'medium',
+            },
+          },
+        },
+        {
+          id: 'gpt-5.6-luna',
+          name: 'GPT-5.6 Luna',
+          capabilities: {
+            thinking: {
+              effortValues: ['low', 'medium', 'high', 'xhigh', 'max'],
+              defaultEffort: 'medium',
+            },
+          },
+        },
         { id: 'gpt-5.5', name: 'GPT-5.5' },
         { id: 'gpt-5.4', name: 'GPT-5.4' },
         { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini' },
@@ -379,7 +409,14 @@ describe('settings rehydrate — built-in provider models', () => {
       isServerConfigured: false,
     });
     expect(codex.serverModels).toBeUndefined();
-    expect(codex.models.map((model) => model.id)).toEqual(['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini']);
+    expect(codex.models.map((model) => model.id)).toEqual([
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
+      'gpt-5.5',
+      'gpt-5.4',
+      'gpt-5.4-mini',
+    ]);
     expect(store.getState().providerId).not.toBe('openai-codex');
     expect(store.getState().modelId).not.toBe('stale-secret-model');
   });
@@ -450,6 +487,27 @@ describe('fetchServerProviders — provider availability sync', () => {
     expect(codex.isServerConfigured).toBe(true);
   });
 
+  it('preserves GPT-5.6 Codex reasoning metadata when the server discovers it', async () => {
+    const store = await getStore();
+    mockServerResponse({
+      providers: { 'openai-codex': { models: ['gpt-5.6-luna'] } },
+    });
+
+    await store.getState().fetchServerProviders();
+
+    expect(store.getState().providersConfig['openai-codex'].models).toMatchObject([
+      {
+        id: 'gpt-5.6-luna',
+        capabilities: {
+          thinking: {
+            effortValues: ['low', 'medium', 'high', 'xhigh', 'max'],
+            defaultEffort: 'medium',
+          },
+        },
+      },
+    ]);
+  });
+
   it('resets Codex to static fallback models when native OAuth disappears', async () => {
     const store = await getStore();
     mockServerResponse({ providers: { 'openai-codex': { models: ['gpt-live'] } } });
@@ -461,7 +519,14 @@ describe('fetchServerProviders — provider availability sync', () => {
     const codex = store.getState().providersConfig['openai-codex'];
     expect(codex.isServerConfigured).toBe(false);
     expect(codex.serverModels).toBeUndefined();
-    expect(codex.models.map((model) => model.id)).toEqual(['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini']);
+    expect(codex.models.map((model) => model.id)).toEqual([
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
+      'gpt-5.5',
+      'gpt-5.4',
+      'gpt-5.4-mini',
+    ]);
   });
 
   it('keeps all models when server provides no model restriction', async () => {

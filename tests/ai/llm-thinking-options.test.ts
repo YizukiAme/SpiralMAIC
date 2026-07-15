@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const aiMock = vi.hoisted(() => ({
   generateText: vi.fn(async (params: unknown) => ({ text: 'ok', params })),
@@ -13,6 +13,34 @@ vi.mock('ai', () => ({
 import { callLLM } from '@/lib/ai/llm';
 
 describe('LLM thinking provider options', () => {
+  beforeEach(() => {
+    aiMock.generateText.mockClear();
+    aiMock.streamText.mockClear();
+  });
+
+  it('sends a selected GPT-5.6 Codex reasoning effort through Responses options', async () => {
+    await callLLM(
+      {
+        model: {
+          provider: 'openai.responses',
+          modelId: 'gpt-5.6-luna',
+        },
+        prompt: 'hi',
+      } as Parameters<typeof callLLM>[0],
+      'test',
+      undefined,
+      { mode: 'enabled', effort: 'low' },
+    );
+
+    expect(aiMock.generateText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerOptions: {
+          openai: { reasoningEffort: 'low' },
+        },
+      }),
+    );
+  });
+
   it('sends Claude Haiku 4.5 thinking budget without effort', async () => {
     await callLLM(
       {

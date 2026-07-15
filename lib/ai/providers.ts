@@ -163,6 +163,27 @@ export const PROVIDERS: Record<ProviderId, ProviderConfig> = {
     credentialMode: 'oauth',
     icon: '/logos/openai.svg',
     models: [
+      {
+        id: 'gpt-5.6-sol',
+        name: 'GPT-5.6 Sol',
+        contextWindow: 272000,
+        capabilities: { streaming: true, tools: true, vision: true },
+        source: 'probed',
+      },
+      {
+        id: 'gpt-5.6-terra',
+        name: 'GPT-5.6 Terra',
+        contextWindow: 272000,
+        capabilities: { streaming: true, tools: true, vision: true },
+        source: 'probed',
+      },
+      {
+        id: 'gpt-5.6-luna',
+        name: 'GPT-5.6 Luna',
+        contextWindow: 272000,
+        capabilities: { streaming: true, tools: true, vision: true },
+        source: 'probed',
+      },
       { id: 'gpt-5.5', name: 'GPT-5.5', source: 'probed' },
       { id: 'gpt-5.4', name: 'GPT-5.4', source: 'probed' },
       { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini', source: 'probed' },

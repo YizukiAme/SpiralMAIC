@@ -36,6 +36,9 @@ describe('native Codex provider seam', () => {
       credentialMode: 'oauth',
       requiresApiKey: false,
       models: [
+        { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol' },
+        { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra' },
+        { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna' },
         { id: 'gpt-5.5', name: 'GPT-5.5' },
         { id: 'gpt-5.4', name: 'GPT-5.4' },
         { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini' },
@@ -92,6 +95,33 @@ describe('native Codex provider seam', () => {
           );
         }
       }
+    }
+  });
+
+  it('exposes the account-verified reasoning controls for GPT-5.6 Codex models', () => {
+    const expectations = {
+      'gpt-5.6-sol': 'low',
+      'gpt-5.6-terra': 'medium',
+      'gpt-5.6-luna': 'medium',
+    } as const;
+
+    for (const [modelId, defaultEffort] of Object.entries(expectations)) {
+      expect(PROVIDERS['openai-codex'].models.find((model) => model.id === modelId)).toMatchObject({
+        id: modelId,
+        contextWindow: 272_000,
+        capabilities: {
+          streaming: true,
+          tools: true,
+          vision: true,
+          thinking: {
+            control: 'effort',
+            requestAdapter: 'openai',
+            effortValues: ['low', 'medium', 'high', 'xhigh', 'max'],
+            defaultEffort,
+          },
+        },
+        source: 'probed',
+      });
     }
   });
 
