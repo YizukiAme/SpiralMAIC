@@ -63,6 +63,8 @@ export interface StageRecord {
   interactiveMode?: boolean; // Interactive Mode flag; non-indexed
   taskEngineMode?: boolean; // Vocational Task Engine flag; non-indexed
   generatedAgentConfigs?: GeneratedAgentConfig[]; // Editor-authored agent roster snapshot
+  featuredDemoId?: string; // Stable identity for an app-bundled demo course; non-indexed
+  featuredDemoRevision?: string; // Immutable bundled artifact revision; non-indexed
 }
 
 /**
