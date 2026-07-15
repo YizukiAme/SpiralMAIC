@@ -228,6 +228,25 @@ const doubaoSeed20Effort: ThinkingCapability = {
 const minimaxM3Thinking = toggleCapability('anthropic', false);
 
 const THINKING_CAPABILITIES: Record<string, ThinkingCapability> = {
+  // The subscription backend does not advertise the public API's `none`
+  // effort. It also advertises an `ultra` delegation mode that is outside this
+  // single-model MVP, so expose the verified common range and preserve the
+  // account-provided defaults without offering unsupported controls.
+  [getModelMetadataKey('openai-codex', 'gpt-5.6-sol')]: effortCapability(
+    'openai',
+    ['low', 'medium', 'high', 'xhigh', 'max'],
+    'low',
+  ),
+  [getModelMetadataKey('openai-codex', 'gpt-5.6-terra')]: effortCapability(
+    'openai',
+    ['low', 'medium', 'high', 'xhigh', 'max'],
+    'medium',
+  ),
+  [getModelMetadataKey('openai-codex', 'gpt-5.6-luna')]: effortCapability(
+    'openai',
+    ['low', 'medium', 'high', 'xhigh', 'max'],
+    'medium',
+  ),
   [getModelMetadataKey('openai', 'gpt-5.5')]: effortCapability(
     'openai',
     ['low', 'medium', 'high', 'xhigh'],
@@ -403,9 +422,12 @@ export function getCatalogThinkingCapability(
   providerId: string,
   modelId: string,
 ): ThinkingCapability | undefined {
-  const metadataProviderId = providerId === 'openai-codex' ? 'openai' : providerId;
-  const exact = THINKING_CAPABILITIES[getModelMetadataKey(metadataProviderId, modelId)];
+  const exact = THINKING_CAPABILITIES[getModelMetadataKey(providerId, modelId)];
   if (exact) return exact;
+
+  if (providerId === 'openai-codex') {
+    return THINKING_CAPABILITIES[getModelMetadataKey('openai', modelId)];
+  }
 
   if (providerId === 'lemonade') {
     return lemonadeToggleBudget;
