@@ -43,7 +43,7 @@ export function FeaturedDemoCourseCard({
             : 'cursor-pointer hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-xl hover:shadow-emerald-950/[0.09] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 dark:hover:border-emerald-700',
         )}
       >
-        <span className="relative block aspect-[16/9] min-h-44 overflow-hidden bg-emerald-50 sm:aspect-auto">
+        <span className="relative block aspect-[16/9] min-h-44 overflow-hidden bg-emerald-50 sm:aspect-auto sm:min-h-48">
           <Image
             src={course.coverUrl}
             alt=""
