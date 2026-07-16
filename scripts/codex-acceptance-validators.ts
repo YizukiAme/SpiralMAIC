@@ -398,7 +398,7 @@ function isNumberPair(value: unknown): value is [number, number] {
   return Array.isArray(value) && value.length === 2 && value.every(isFiniteNumber);
 }
 
-function isSupportedCanvasElement(value: unknown): boolean {
+function isSupportedSlideElement(value: unknown): boolean {
   if (!isRecord(value) || !isNonEmptyString(value.type)) return false;
   if (value.type === 'line') {
     return Boolean(
@@ -493,15 +493,44 @@ function isSupportedCanvasElement(value: unknown): boolean {
   }
 }
 
-function isCanonicalTheme(value: unknown): boolean {
+function isCanonicalGradient(value: unknown): boolean {
   return Boolean(
     isRecord(value) &&
-    isNonEmptyString(value.backgroundColor) &&
-    Array.isArray(value.themeColors) &&
-    value.themeColors.every((color) => isNonEmptyString(color)) &&
-    isNonEmptyString(value.fontColor) &&
-    isNonEmptyString(value.fontName),
+    exactKeys(value, ['type', 'colors', 'rotate']) &&
+    (value.type === 'linear' || value.type === 'radial') &&
+    Array.isArray(value.colors) &&
+    value.colors.length > 0 &&
+    value.colors.every(
+      (stop) =>
+        isRecord(stop) &&
+        exactKeys(stop, ['pos', 'color']) &&
+        isFiniteNumber(stop.pos) &&
+        isNonEmptyString(stop.color),
+    ) &&
+    isFiniteNumber(value.rotate),
   );
+}
+
+function isCanonicalSlideBackground(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  if (value.type === 'solid') {
+    return exactKeys(value, ['type', 'color']) && isNonEmptyString(value.color);
+  }
+  if (value.type === 'image') {
+    return Boolean(
+      exactKeys(value, ['type', 'image']) &&
+      isRecord(value.image) &&
+      exactKeys(value.image, ['src', 'size']) &&
+      isNonEmptyString(value.image.src) &&
+      (value.image.size === 'cover' ||
+        value.image.size === 'contain' ||
+        value.image.size === 'repeat'),
+    );
+  }
+  if (value.type === 'gradient') {
+    return exactKeys(value, ['type', 'gradient']) && isCanonicalGradient(value.gradient);
+  }
+  return false;
 }
 
 export function validateSceneJson(value: unknown): {
@@ -517,19 +546,15 @@ export function validateSceneJson(value: unknown): {
   ) {
     fail('invalid-shape');
   }
-  const canvas = isRecord(value.content.canvas) ? value.content.canvas : undefined;
+  const contentKeys = new Set(['elements', 'background', 'remark']);
   if (
-    value.content.type !== 'slide' ||
-    !canvas ||
-    !isNonEmptyString(canvas.id) ||
-    !isFiniteNumber(canvas.viewportSize) ||
-    canvas.viewportSize <= 0 ||
-    !isFiniteNumber(canvas.viewportRatio) ||
-    canvas.viewportRatio <= 0 ||
-    !isCanonicalTheme(canvas.theme) ||
-    !Array.isArray(canvas.elements) ||
-    canvas.elements.length < 1 ||
-    !canvas.elements.every(isSupportedCanvasElement) ||
+    !Object.keys(value.content).every((key) => contentKeys.has(key)) ||
+    !Array.isArray(value.content.elements) ||
+    value.content.elements.length < 1 ||
+    !value.content.elements.every(isSupportedSlideElement) ||
+    (value.content.background !== undefined &&
+      !isCanonicalSlideBackground(value.content.background)) ||
+    (value.content.remark !== undefined && typeof value.content.remark !== 'string') ||
     !isRecord(value.effectiveOutline) ||
     !isValidOutline(value.effectiveOutline) ||
     value.effectiveOutline.type !== 'slide' ||

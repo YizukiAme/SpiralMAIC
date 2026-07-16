@@ -55,13 +55,14 @@ interface LockSnapshot {
 interface RegistryEntry {
   lockPath: string;
   owner: LockOwner;
+  dev: number | bigint;
+  ino: number | bigint;
   scopedReferences: number;
   processLifetime: boolean;
 }
 
 interface RuntimeLockRegistry {
   entries: Map<string, RegistryEntry>;
-  exitHookInstalled: boolean;
 }
 
 const REGISTRY_KEY = Symbol.for('openmaic.codex.oauth.runtime-lock.v1');
@@ -69,17 +70,14 @@ const registryHost = globalThis as unknown as Record<PropertyKey, unknown>;
 
 function isRegistry(value: unknown): value is RuntimeLockRegistry {
   return Boolean(
-    value &&
-    typeof value === 'object' &&
-    (value as RuntimeLockRegistry).entries instanceof Map &&
-    typeof (value as RuntimeLockRegistry).exitHookInstalled === 'boolean',
+    value && typeof value === 'object' && (value as RuntimeLockRegistry).entries instanceof Map,
   );
 }
 
 const existingRegistry = registryHost[REGISTRY_KEY];
 const registry: RuntimeLockRegistry = isRegistry(existingRegistry)
   ? existingRegistry
-  : { entries: new Map(), exitHookInstalled: false };
+  : { entries: new Map() };
 
 if (!isRegistry(existingRegistry)) {
   Object.defineProperty(registryHost, REGISTRY_KEY, {
@@ -202,7 +200,7 @@ function writePreparedOwner(authDir: string, owner: LockOwner): string {
   }
 }
 
-function tryCreateLock(authDir: string, lockPath: string): LockOwner | undefined {
+function tryCreateLock(authDir: string, lockPath: string): LockSnapshot | undefined {
   const owner: LockOwner = {
     version: 1,
     pid: process.pid,
@@ -213,8 +211,9 @@ function tryCreateLock(authDir: string, lockPath: string): LockOwner | undefined
     // The fully-written private owner file is hard-linked into the fixed lock
     // name, making acquisition atomic without an empty/partial owner window.
     linkSync(preparedPath, lockPath);
-    chmodSync(lockPath, 0o600);
-    return owner;
+    const snapshot = readLockSnapshot(lockPath);
+    if (snapshot.owner.pid !== owner.pid || snapshot.owner.nonce !== owner.nonce) locked();
+    return snapshot;
   } catch (error) {
     if (errnoCode(error) !== 'EEXIST') unavailable();
     return undefined;
@@ -286,55 +285,37 @@ function reclaimDeadOwner(lockPath: string, snapshot: LockSnapshot): boolean {
   return true;
 }
 
-function removeOwnedLock(entry: RegistryEntry): void {
-  try {
-    const current = readLockSnapshot(entry.lockPath);
-    if (current.owner.pid === entry.owner.pid && current.owner.nonce === entry.owner.nonce) {
-      unlinkSync(entry.lockPath);
-    }
-  } catch {
-    // Never remove a lock whose ownership can no longer be proven.
-  } finally {
-    registry.entries.delete(entry.lockPath);
-  }
-}
-
-function installExitCleanup(): void {
-  if (registry.exitHookInstalled) return;
-  registry.exitHookInstalled = true;
-  process.once('exit', () => {
-    for (const entry of [...registry.entries.values()]) removeOwnedLock(entry);
-  });
-}
-
 function acquireEntry(baseDir: string, processLifetime: boolean): RegistryEntry {
   const authDir = ensurePrivateAuthDirectory(baseDir);
   const lockPath = resolve(authDir, CODEX_RUNTIME_LOCK_FILE_NAME);
   const existing = registry.entries.get(lockPath);
   if (existing) {
+    const current = readLockSnapshot(lockPath);
+    if (!sameSnapshot(existing, current)) locked();
     if (processLifetime) existing.processLifetime = true;
     else existing.scopedReferences += 1;
     return existing;
   }
 
   for (let attempt = 0; attempt < 8; attempt += 1) {
-    const owner = tryCreateLock(authDir, lockPath);
-    if (owner) {
+    const snapshot = tryCreateLock(authDir, lockPath);
+    if (snapshot) {
       const entry: RegistryEntry = {
         lockPath,
-        owner,
+        owner: snapshot.owner,
+        dev: snapshot.dev,
+        ino: snapshot.ino,
         scopedReferences: processLifetime ? 0 : 1,
         processLifetime,
       };
       registry.entries.set(lockPath, entry);
-      installExitCleanup();
       return entry;
     }
 
-    const snapshot = readLockSnapshot(lockPath);
-    const live = isPidLive(snapshot.owner.pid);
+    const incumbent = readLockSnapshot(lockPath);
+    const live = isPidLive(incumbent.owner.pid);
     if (live !== false) locked();
-    if (!reclaimDeadOwner(lockPath, snapshot)) continue;
+    if (!reclaimDeadOwner(lockPath, incumbent)) continue;
   }
   locked();
 }
@@ -348,7 +329,6 @@ export function acquireCodexRuntimeLock(options: RuntimeLockOptions = {}): Codex
       if (released) return;
       released = true;
       entry.scopedReferences = Math.max(0, entry.scopedReferences - 1);
-      if (!entry.processLifetime && entry.scopedReferences === 0) removeOwnedLock(entry);
     },
   };
 }

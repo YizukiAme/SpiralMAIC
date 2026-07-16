@@ -151,6 +151,17 @@ describe('Codex acceptance package and documentation contracts', () => {
     expect(runbook).toMatch(/log[\s\S]*localStorage[\s\S]*git diff/i);
   });
 
+  it('documents inode-safe lifetime ownership and dead-owner tombstone reclamation', async () => {
+    const deployment = await readFile(resolve('docs/codex-oauth-deployment.md'), 'utf8');
+    const runbook = await readFile(resolve('docs/codex-real-account-acceptance.md'), 'utf8');
+
+    expect(deployment).toMatch(/device(?:\s+|\/)inode|inode(?:\s+|\/)device/i);
+    expect(deployment).toMatch(/dead-owner tombstone/i);
+    expect(deployment).toMatch(/logical release[\s\S]*does not unlink/i);
+    expect(runbook).toMatch(/do not\s+manually delete[\s\S]*runtime lock/i);
+    expect(runbook).toMatch(/next process[\s\S]*reclaims/i);
+  });
+
   it('uses one quiet fail-closed secret shape for log, storage, staged, and unstaged scans', async () => {
     const runbook = await readFile(resolve('docs/codex-real-account-acceptance.md'), 'utf8');
     const shellPattern = runbook.match(/CODEX_SECRET_PATTERN='([^'\n]+)'/)?.[1];

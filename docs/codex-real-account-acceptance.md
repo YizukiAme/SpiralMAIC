@@ -91,6 +91,12 @@ ambiguous timeout/DNS/network failure, or a live lock owner makes it refuse to p
 permission to write. Run the helper from the same checkout so it targets the same local `data/`
 directory. It prints no credentials.
 
+The helper's logical release does not unlink the authoritative runtime lock while the helper process
+is alive. After the helper exits, its owner file can remain as a dead-owner tombstone. Do not
+manually delete the runtime lock: the next process reopens it without following symlinks, verifies
+the recorded PID plus device/inode identity, confirms that the owner PID is dead, and then reclaims
+it safely. A remaining file by itself does not mean the prior process is still running.
+
 Restart the one local process and rerun the normal harness:
 
 ```bash

@@ -20,6 +20,14 @@ runtime uses a private PID/liveness lock to reject a second supported local proc
 helper, and reclaims an owner only after that PID is dead. This is a local process-safety boundary,
 not a distributed coordination system; a shared filesystem does not make horizontal scaling safe.
 
+The in-process registry records the acquired device/inode together with the owner PID and nonce.
+Every same-process or HMR reentry reopens the owner file without following symlinks and verifies all
+four values before trusting it. A logical release only reduces in-process usage; it does not unlink
+the authoritative lock pathname or surrender filesystem ownership while that process is alive.
+After the owner exits, the file intentionally remains as a dead-owner tombstone. The next supported
+process verifies that the PID is dead and that the device/inode and owner record are unchanged before
+it reclaims the tombstone. Do not delete or replace this file manually.
+
 This constraint applies even when an orchestrator can mount the same persistent volume into
 multiple replicas: keep the deployment at `replica=1`. Rolling updates must stop the old process
 before starting the replacement. If overlap occurs, runtime-lock acquisition makes the replacement

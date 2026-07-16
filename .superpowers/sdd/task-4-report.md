@@ -187,3 +187,54 @@ OAuth flow and without adding a diagnostic endpoint.
   select a provider/model or send a mismatched request upstream.
 - No OAuth vault contents, real credentials, real OAuth flow, or new diagnostic route were used.
   No constrained revisit/Tabs/prompt-loader/time-semantics file was touched.
+
+## Final re-review exact-fix wave — 2026-07-16
+
+This final wave implements only the two findings in `task-4-review-findings-2.md`.
+
+### Exact fixes
+
+- The scene acceptance fixture and validator now use the route's real `GeneratedSlideContent`
+  response contract: `content` contains `elements` plus optional canonical `background` and
+  `remark`, rather than a stored-scene `{ type: "slide", canvas }` envelope. The validator accepts
+  only supported `PPTElement` kinds with their required fields, validates solid/image/gradient
+  backgrounds, retains strict response/effective-outline validation, and rejects the old envelope,
+  malformed backgrounds, unsupported element types, and elements missing required fields.
+- Runtime-lock registry entries now retain the acquired device/inode with PID and nonce. Every
+  same-PID/HMR reentry reopens the fixed lock path with no-follow semantics and matches the complete
+  snapshot before trusting the registry. Logical release only decrements the reference count; it
+  never unlinks or removes the process-lifetime registry ownership. Normal exit also leaves the
+  authoritative owner file as a dead-owner tombstone, so only the next acquirer can reclaim it after
+  the existing PID-liveness and inode-safe moved-snapshot checks. An old owner therefore performs no
+  pathname unlink that could remove a replacement/successor inode.
+- Deployment and real-account runbooks document device/inode reentry checks, logical-release
+  semantics, dead-owner tombstones, next-process reclamation, and the instruction not to delete the
+  runtime lock manually.
+
+### Strict TDD evidence
+
+- Scene contract RED: the route-shaped `GeneratedSlideContent` fixture failed with
+  `SafeAcceptanceError: invalid-shape` at the old canvas-envelope validator (1 failed, 27 skipped).
+  GREEN: the full acceptance suite passed 28/28, including the actual route fixture and retained
+  malformed-but-plausible cases.
+- Runtime ownership RED: 4 of 8 lock tests failed for the four reviewed gaps: last logical release
+  removed the lock, copied-payload/new-inode reentry was trusted, an exiting old owner unlinked a
+  replacement inode, and orderly exit removed the file instead of leaving a reclaimable tombstone.
+  The first implementation run exposed a duplicate local identifier during transform; after the
+  minimal correction, lock, availability, and offline-helper suites passed 29/29.
+- Documentation RED: the new inode/lifetime/tombstone contract test failed because the existing docs
+  had no device/inode cleanup semantics. After documenting them and making the assertion tolerate
+  normal Markdown line wrapping, the package/documentation suite passed 6/6.
+
+### Verification before final full suite
+
+- Covering focused command over acceptance, package/docs, runtime lock, availability, runtime, and
+  offline helper: 6 files, 68/68 tests passed.
+- `pnpm exec tsc --noEmit --pretty false`: passed with no output.
+- `pnpm lint`: passed with 0 errors and 13 unrelated existing warnings.
+- `pnpm check`: all matched files use Prettier code style.
+- `pnpm build`: passed, including TypeScript and 45/45 static pages.
+- Exactly one final full `pnpm test` was run after both fixes: 386 files passed, 2 skipped;
+  3,359 tests passed, 3 skipped.
+- No real OAuth, credential/vault read, diagnostic endpoint, unrelated scope change, or push was
+  performed.
