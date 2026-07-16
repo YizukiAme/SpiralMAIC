@@ -1,5 +1,5 @@
 import { once } from 'node:events';
-import { access, mkdtemp, rm } from 'node:fs/promises';
+import { access, mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -135,7 +135,7 @@ describe('Codex cross-process runtime lock', () => {
     replacement.release();
   });
 
-  it('is reentrant in the same PID and removes a scoped lock after the last release', async () => {
+  it('is reentrant in the same PID and retains filesystem ownership after logical release', async () => {
     const dataDir = await makeDataDir();
     const first = acquireCodexRuntimeLock({ baseDir: dataDir });
     const second = acquireCodexRuntimeLock({ baseDir: dataDir });
@@ -143,16 +143,61 @@ describe('Codex cross-process runtime lock', () => {
     first.release();
     await expect(access(lockPath(dataDir))).resolves.toBeUndefined();
     second.release();
-    await expect(access(lockPath(dataDir))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(access(lockPath(dataDir))).resolves.toBeUndefined();
+
+    const contender = spawnLockProcess(dataDir, false);
+    await expect(firstLine(contender)).resolves.toBe('LOCKED');
+    await once(contender, 'exit');
+    expect(contender.exitCode).toBe(2);
   });
 
-  it('cleans a process-lifetime lock on an orderly process exit', async () => {
+  it('fails same-PID reentry when the lock pathname has been replaced with a new inode', async () => {
+    const dataDir = await makeDataDir();
+    acquireCodexRuntimeLock({ baseDir: dataDir });
+    const path = lockPath(dataDir);
+    const ownerPayload = await readFile(path, 'utf8');
+    const original = await stat(path);
+
+    await rename(path, `${path}.old`);
+    await writeFile(path, ownerPayload, { mode: 0o600 });
+    const replacement = await stat(path);
+    expect(replacement.ino).not.toBe(original.ino);
+
+    expect(() => acquireCodexRuntimeLock({ baseDir: dataDir })).toThrowError(
+      expect.objectContaining({ code: 'CODEX_RUNTIME_LOCKED' }),
+    );
+  });
+
+  it('does not let an exiting old owner pathname-unlink a replacement inode', async () => {
+    const dataDir = await makeDataDir();
+    const app = spawnLockProcess(dataDir, true);
+    await expect(firstLine(app)).resolves.toBe('READY');
+    const path = lockPath(dataDir);
+    const ownerPayload = await readFile(path, 'utf8');
+
+    await rename(path, `${path}.old`);
+    await writeFile(path, ownerPayload, { mode: 0o600 });
+    const replacement = await stat(path);
+
+    app.stdin.write('exit\n');
+    await once(app, 'exit');
+    expect(app.exitCode).toBe(0);
+    await expect(stat(path)).resolves.toMatchObject({ ino: replacement.ino });
+  });
+
+  it('leaves an orderly-exit tombstone that the next process reclaims after PID death', async () => {
     const dataDir = await makeDataDir();
     const app = spawnLockProcess(dataDir, false);
 
     await expect(firstLine(app)).resolves.toBe('READY');
     await once(app, 'exit');
     expect(app.exitCode).toBe(0);
-    await expect(access(lockPath(dataDir))).rejects.toMatchObject({ code: 'ENOENT' });
+    const departed = await stat(lockPath(dataDir));
+
+    const replacement = acquireCodexRuntimeLock({ baseDir: dataDir });
+    const current = await stat(lockPath(dataDir));
+    expect(current.ino).not.toBe(departed.ino);
+    replacement.release();
+    await expect(access(lockPath(dataDir))).resolves.toBeUndefined();
   });
 });

@@ -13,6 +13,7 @@ import {
   validateVerificationJson,
   type SafeReport,
 } from '@/scripts/codex-acceptance-lib';
+import type { GeneratedSlideContent } from '@/lib/types/generation';
 
 function json(body: unknown, status = 200, headers?: HeadersInit): Response {
   return Response.json(body, { status, headers });
@@ -121,20 +122,13 @@ const canonicalTextElement = {
   content: '<p>2 + 2 = 4</p>',
   defaultFontName: 'Arial',
   defaultColor: '#000000',
-};
+} satisfies GeneratedSlideContent['elements'][number];
 
-const canonicalCanvas = {
-  id: 'canvas-1',
-  viewportSize: 1000,
-  viewportRatio: 0.5625,
-  theme: {
-    backgroundColor: '#ffffff',
-    themeColors: ['#000000'],
-    fontColor: '#000000',
-    fontName: 'Arial',
-  },
+const canonicalSlideContent = {
   elements: [canonicalTextElement],
-};
+  background: { type: 'solid', color: '#ffffff' },
+  remark: 'A short arithmetic slide.',
+} satisfies GeneratedSlideContent;
 
 function connectedFetch(priority: boolean, editorEnabled = true) {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -163,10 +157,7 @@ function connectedFetch(priority: boolean, editorEnabled = true) {
     if (url.pathname === '/api/generate/scene-content') {
       return json({
         success: true,
-        content: {
-          type: 'slide',
-          canvas: canonicalCanvas,
-        },
+        content: canonicalSlideContent,
         effectiveOutline: {
           id: 'acceptance-outline',
           type: 'slide',
@@ -425,7 +416,7 @@ describe('SSE and JSON validation', () => {
     expect(() => validateCodexCatalog(leaked)).toThrowError('invalid-shape');
   });
 
-  it('validates verification and simple slide JSON without returning generated text', () => {
+  it('validates the route-shaped GeneratedSlideContent response without returning generated text', () => {
     expect(
       validateVerificationJson({
         success: true,
@@ -436,10 +427,7 @@ describe('SSE and JSON validation', () => {
     expect(
       validateSceneJson({
         success: true,
-        content: {
-          type: 'slide',
-          canvas: canonicalCanvas,
-        },
+        content: canonicalSlideContent,
         effectiveOutline: {
           id: 'acceptance-outline',
           type: 'slide',
@@ -471,35 +459,19 @@ describe('SSE and JSON validation', () => {
     expect(() =>
       validateSceneJson({
         success: true,
-        content: { type: 'slide', canvas: { elements: [] } },
-        effectiveOutline: { id: 'acceptance-outline', type: 'slide' },
-      }),
-    ).toThrowError('invalid-shape');
-    expect(() =>
-      validateSceneJson({
-        success: true,
-        content: {
-          type: 'slide',
-          canvas: { ...canonicalCanvas, theme: undefined },
-        },
-        effectiveOutline: {
-          id: 'acceptance-outline',
-          type: 'slide',
-          title: 'Two plus two',
-          description: 'Show that 2 + 2 = 4.',
-          keyPoints: ['2 + 2 = 4'],
-          order: 0,
-        },
-      }),
-    ).toThrowError('invalid-shape');
-    expect(() =>
-      validateSceneJson({
-        success: true,
         content: {
           type: 'slide',
           canvas: {
-            ...canonicalCanvas,
-            elements: [{ ...canonicalTextElement, type: 'widget' }],
+            id: 'legacy-envelope',
+            viewportSize: 1000,
+            viewportRatio: 0.5625,
+            theme: {
+              backgroundColor: '#ffffff',
+              themeColors: ['#000000'],
+              fontColor: '#000000',
+              fontName: 'Arial',
+            },
+            elements: [canonicalTextElement],
           },
         },
         effectiveOutline: {
@@ -516,21 +488,52 @@ describe('SSE and JSON validation', () => {
       validateSceneJson({
         success: true,
         content: {
+          ...canonicalSlideContent,
+          background: { type: 'image', image: { src: '/background.png' } },
+        },
+        effectiveOutline: {
+          id: 'acceptance-outline',
           type: 'slide',
-          canvas: {
-            ...canonicalCanvas,
-            elements: [
-              {
-                id: 'element-1',
-                type: 'text',
-                left: 0,
-                top: 0,
-                width: 100,
-                height: 40,
-                rotate: 0,
-              },
-            ],
-          },
+          title: 'Two plus two',
+          description: 'Show that 2 + 2 = 4.',
+          keyPoints: ['2 + 2 = 4'],
+          order: 0,
+        },
+      }),
+    ).toThrowError('invalid-shape');
+    expect(() =>
+      validateSceneJson({
+        success: true,
+        content: {
+          ...canonicalSlideContent,
+          elements: [{ ...canonicalTextElement, type: 'widget' }],
+        },
+        effectiveOutline: {
+          id: 'acceptance-outline',
+          type: 'slide',
+          title: 'Two plus two',
+          description: 'Show that 2 + 2 = 4.',
+          keyPoints: ['2 + 2 = 4'],
+          order: 0,
+        },
+      }),
+    ).toThrowError('invalid-shape');
+    expect(() =>
+      validateSceneJson({
+        success: true,
+        content: {
+          ...canonicalSlideContent,
+          elements: [
+            {
+              id: 'element-1',
+              type: 'text',
+              left: 0,
+              top: 0,
+              width: 100,
+              height: 40,
+              rotate: 0,
+            },
+          ],
         },
         effectiveOutline: {
           id: 'acceptance-outline',
