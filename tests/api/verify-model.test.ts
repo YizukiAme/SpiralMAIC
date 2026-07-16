@@ -102,6 +102,34 @@ describe('POST /api/verify-model', () => {
     });
   });
 
+  it('forwards only the exact priority tier for a credential-free Codex check', async () => {
+    const res = await postVerifyModel({
+      model: 'openai-codex:gpt-5.5',
+      serviceTier: 'priority',
+    });
+
+    expect(res.status).toBe(200);
+    expect(mocks.resolveModel).toHaveBeenCalledWith({
+      modelString: 'openai-codex:gpt-5.5',
+      apiKey: '',
+      baseUrl: undefined,
+      providerType: undefined,
+      serviceTier: 'priority',
+    });
+
+    mocks.resolveModel.mockClear();
+    await postVerifyModel({
+      model: 'openai-codex:gpt-5.5',
+      serviceTier: 'priority ',
+    });
+    expect(mocks.resolveModel).toHaveBeenCalledWith({
+      modelString: 'openai-codex:gpt-5.5',
+      apiKey: '',
+      baseUrl: undefined,
+      providerType: undefined,
+    });
+  });
+
   it.each([
     [401, 'ChatGPT sign-in is required'],
     [403, 'This ChatGPT workspace does not have Codex access'],
