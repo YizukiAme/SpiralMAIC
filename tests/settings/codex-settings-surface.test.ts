@@ -43,7 +43,10 @@ describe('Codex settings surface contract', () => {
       /const\s+isCodexProviderSurface\s*=\s*activeSection === 'providers'\s*&&\s*selectedProviderId === 'openai-codex'/,
     );
     expect(source).toMatch(
-      /\{!isCodexProviderSurface\s*&&\s*\(\s*<Button size="sm" onClick=\{handleSave\}>/,
+      /const\s+isManagedSettingsSurface\s*=\s*isCodexProviderSurface \|\| isCodexImageSurface/,
+    );
+    expect(source).toMatch(
+      /\{!isManagedSettingsSurface\s*&&\s*\(\s*<Button size="sm" onClick=\{handleSave\}>/,
     );
   });
 

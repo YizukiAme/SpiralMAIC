@@ -136,19 +136,78 @@ pass when advertised and reports `SKIP` otherwise.
 Disconnecting hides the Codex provider from the server provider catalog. The UI must then fall back
 to another configured provider until the user signs in again.
 
+## Codex image generation
+
+Codex image generation reuses the existing ChatGPT/Codex login; there is no separate image API key,
+base URL, or model picker. The model is fixed to `gpt-image-2`. Supported aspect ratios map to these
+requested size hints:
+
+| Aspect ratio | Requested size hint |
+| --- | --- |
+| `16:9` | `1536x864` |
+| `4:3` | `1024x768` |
+| `1:1` | `1024x1024` |
+| `9:16` | `864x1536` |
+
+These hints are not guaranteed output dimensions. The backend can return a different response
+`size`, and the decoded image can differ from both request and response metadata. Request/response/ratio
+drift is soft evidence: it is recorded only as bounded, non-content operational metadata and does
+not by itself turn a safe HTTP 200 image into a `502`.
+
+The decoded PNG IHDR supplies the actual image dimensions. The public DTO width and height must be
+positive integers and must exactly match that IHDR. The shared resource-safety contract accepts at
+most a 20 MiB decoded PNG payload, an edge of 8,192 pixels, and 16,777,216 pixels total. MIME,
+canonical base64, PNG structure, DTO/IHDR agreement, and these limits remain hard failures. Enforcing
+an exact aspect ratio would require a post-success crop or resize rather than a `502` rejection of an
+otherwise safe image.
+
+The single non-contractual manual incident observation is recorded only in the
+[real-account acceptance runbook](codex-real-account-acceptance.md#single-non-contractual-manual-incident-observation).
+It is operational evidence, not an output-size promise.
+
+This is an experimental integration with a third-party subscription-backend route, not a general
+OpenAI Images API. It fails closed unless the existing Codex login, account entitlement, exact
+backend route, and response contract can all be verified; it does not fall back to another image
+transport.
+
+Requests identify this client truthfully with `originator: openmaic`, an `OpenMAIC/<version>` user
+agent, and a `version` header containing the OpenMAIC package version. They do not claim to be a
+Codex CLI build.
+
+Image generation counts against the signed-in account's general ChatGPT/Codex plan limits.
+[Official usage guidance](https://learn.chatgpt.com/docs/image-generation) estimates that image turns
+consume included limits about 3–5x faster than similar turns without image generation, depending on
+image quality and size. Treat that ratio as planning guidance rather than a guaranteed per-request
+charge, because account entitlements and plan limits can change.
+
 ## Explicitly out of scope
 
-- **Images** through the Codex subscription transport
 - **WebSocket** transport
+- reference-image editing and **multi-image** requests
+- user-selectable output format or quality, transparent background, and **2K/4K UI** controls
+- image-model discovery, a Responses API fallback, and **CLIProxyAPI**
 - **multi-account** hosting or account switching within one server data directory
+- **multi-instance** deployment or horizontal scaling
 - upstream **thread-id** state
 
-The integration uses text generation over public OpenMAIC HTTP routes. These exclusions are not
-deployment knobs and must not be inferred from a successful acceptance run.
+The integration uses text and fixed-model, single-image generation over public OpenMAIC HTTP routes.
+These exclusions are not deployment knobs and must not be inferred from a successful acceptance
+run.
 
 ## Acceptance and operations
 
 Real-account checks are manual and must not run in CI. Follow
 [`docs/codex-real-account-acceptance.md`](codex-real-account-acceptance.md) before a release or
-deployment change. The harness prints only safe PASS/FAIL/SKIP facts; it never prints the access
-code, session cookie, account identity, generated text, or upstream response body.
+deployment change. Image acceptance is opt-in with `--include-image`; each invocation with that flag
+makes one local `/api/generate/image` request when the server advertises `codex-image`. The transport
+uses one upstream POST and permits one additional POST only after a `401` credential refresh; it does
+not retry `429`, `5xx`, network, or timeout failures. If that capability is absent, the harness
+reports `SKIP` without an image request or quota impact. The
+default harness makes no image request. The harness prints only safe PASS/FAIL/SKIP facts; it never
+prints the access code, session cookie, account identity, generated text or image, prompt, base64,
+or upstream response body.
+
+For the real-account UI cycle in the runbook, use exactly one **Retry** on one existing failed-image
+task. Do not also run the CLI `--include-image` option in that same cycle, and never replace the local
+route with a direct upstream probe. The CLI option is reserved for a separate, explicitly approved
+black-box cycle so quota impact remains one image turn at a time.

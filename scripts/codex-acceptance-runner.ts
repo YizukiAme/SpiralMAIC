@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import {
   establishAccess,
   headers,
+  requireCodexImageJson,
   requireJson,
   responseEvents,
   safeFetch,
@@ -18,6 +19,8 @@ import type {
 import { DEFAULT_REQUEST_TIMEOUT_MS } from './codex-acceptance-types';
 import {
   validateCodexCatalog,
+  validateCodexImageCapability,
+  validateCodexImageJson,
   validateEditorEvents,
   validateOutlineEvents,
   validateSceneJson,
@@ -26,6 +29,9 @@ import {
 
 const ACCEPTANCE_REQUIREMENT =
   'Create exactly one short slide explaining that 2 + 2 = 4. Do not use images, video, quizzes, or interactive content.';
+const CODEX_IMAGE_MODEL = 'gpt-image-2';
+const CODEX_IMAGE_PROMPT =
+  'A simple flat educational illustration of four blue circles arranged as two pairs on a plain white background. No text, logos, people, or brands.';
 
 function modelHeaders(modelId: string, cookie?: string, priority = false): Headers {
   return headers(cookie, {
@@ -68,6 +74,60 @@ async function runOutlineRequest(
     httpStatus: response.status,
     metrics: validateOutlineEvents(await responseEvents(response)),
   };
+}
+
+async function runImageAcceptance(
+  options: AcceptanceOptions,
+  fetcher: Fetcher,
+  timeoutMs: number,
+  cookie: string | undefined,
+  providerPayload: unknown,
+): Promise<SafeReport> {
+  let imageAvailable: boolean;
+  try {
+    imageAvailable = validateCodexImageCapability(providerPayload).available;
+  } catch (error) {
+    return safeFailure('image-generation', error, CODEX_IMAGE_MODEL);
+  }
+  if (!imageAvailable) {
+    return {
+      outcome: 'SKIP',
+      stage: 'image-generation',
+      modelId: CODEX_IMAGE_MODEL,
+      errorCategory: 'unavailable',
+    };
+  }
+
+  try {
+    const response = await safeFetch(
+      fetcher,
+      `${options.baseUrl}/api/generate/image`,
+      {
+        method: 'POST',
+        headers: headers(cookie, {
+          'content-type': 'application/json',
+          'x-image-provider': 'codex-image',
+          'x-image-model': CODEX_IMAGE_MODEL,
+        }),
+        body: JSON.stringify({
+          prompt: CODEX_IMAGE_PROMPT,
+          aspectRatio: '16:9',
+        }),
+        cache: 'no-store',
+      },
+      timeoutMs,
+    );
+    const metrics = validateCodexImageJson(await requireCodexImageJson(response));
+    return {
+      outcome: 'PASS',
+      stage: 'image-generation',
+      modelId: CODEX_IMAGE_MODEL,
+      httpStatus: response.status,
+      ...metrics,
+    };
+  } catch (error) {
+    return safeFailure('image-generation', error, CODEX_IMAGE_MODEL);
+  }
 }
 
 export async function runCodexAcceptance(
@@ -143,7 +203,8 @@ export async function runCodexAcceptance(
     return reports;
   }
 
-  let catalog: ReturnType<typeof validateCodexCatalog>;
+  let catalogPayload: unknown;
+  let catalogHttpStatus: number;
   try {
     const response = await safeFetch(
       fetcher,
@@ -151,12 +212,24 @@ export async function runCodexAcceptance(
       { method: 'GET', headers: headers(cookie), cache: 'no-store' },
       timeoutMs,
     );
-    catalog = validateCodexCatalog(await requireJson(response));
+    catalogPayload = await requireJson(response);
+    catalogHttpStatus = response.status;
+  } catch (error) {
+    reports.push(safeFailure('catalog', error));
+    if (options.includeImage) {
+      reports.push(safeFailure('image-generation', error, CODEX_IMAGE_MODEL));
+    }
+    return reports;
+  }
+
+  let catalog: ReturnType<typeof validateCodexCatalog>;
+  try {
+    catalog = validateCodexCatalog(catalogPayload);
     reports.push({
       outcome: 'PASS',
       stage: 'catalog',
       modelId: catalog.modelId,
-      httpStatus: response.status,
+      httpStatus: catalogHttpStatus,
       catalogStrict: true,
       priorityAdvertised: catalog.priorityAdvertised,
       modelCount: catalog.modelCount,
@@ -164,6 +237,9 @@ export async function runCodexAcceptance(
     });
   } catch (error) {
     reports.push(safeFailure('catalog', error));
+    if (options.includeImage) {
+      reports.push(await runImageAcceptance(options, fetcher, timeoutMs, cookie, catalogPayload));
+    }
     return reports;
   }
 
@@ -227,6 +303,10 @@ export async function runCodexAcceptance(
       modelId,
       priorityAdvertised: false,
     });
+  }
+
+  if (options.includeImage) {
+    reports.push(await runImageAcceptance(options, fetcher, timeoutMs, cookie, catalogPayload));
   }
 
   try {

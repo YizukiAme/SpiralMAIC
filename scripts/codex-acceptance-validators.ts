@@ -1,4 +1,10 @@
+import { Buffer } from 'node:buffer';
+
 import { rebuildCodexModelCatalog } from '@/lib/ai/codex-catalog';
+import {
+  CODEX_IMAGE_MAX_BYTES,
+  areCodexImageDimensionsSafe,
+} from '@/lib/media/codex-image-contract';
 
 import { SAFE_MODEL_ID, exactKeys, fail, isRecord, jsonEqual } from './codex-acceptance-report';
 
@@ -377,6 +383,99 @@ export function validateCodexCatalog(value: unknown): {
     modelCount: rebuilt.length,
     fastModelCount: priorityModels.length,
     priorityAdvertised: priorityModels.includes(selected.id),
+  };
+}
+
+const CODEX_IMAGE_MODEL = 'gpt-image-2';
+const CODEX_IMAGE_MAX_BASE64_CHARS = Math.ceil(CODEX_IMAGE_MAX_BYTES / 3) * 4;
+const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+const PNG_IHDR = Buffer.from('IHDR', 'ascii');
+
+function isBase64AlphabetCode(code: number): boolean {
+  return (
+    (code >= 0x41 && code <= 0x5a) ||
+    (code >= 0x61 && code <= 0x7a) ||
+    (code >= 0x30 && code <= 0x39) ||
+    code === 0x2b ||
+    code === 0x2f
+  );
+}
+
+export function validateCodexImageCapability(value: unknown): { available: boolean } {
+  if (!isRecord(value) || value.success !== true || !isRecord(value.providers)) {
+    fail('invalid-shape');
+  }
+  if (value.image === undefined) return { available: false };
+  if (!isRecord(value.image)) fail('invalid-shape');
+  const provider = value.image['codex-image'];
+  if (provider === undefined) return { available: false };
+  if (
+    !isRecord(provider) ||
+    !exactKeys(provider, ['models']) ||
+    !Array.isArray(provider.models) ||
+    provider.models.length !== 1 ||
+    provider.models[0] !== CODEX_IMAGE_MODEL
+  ) {
+    fail('invalid-shape');
+  }
+  return { available: true };
+}
+
+export function validateCodexImageJson(value: unknown): {
+  mimeType: 'image/png';
+  width: number;
+  height: number;
+} {
+  if (
+    !isRecord(value) ||
+    !exactKeys(value, ['success', 'result']) ||
+    value.success !== true ||
+    !isRecord(value.result) ||
+    !exactKeys(value.result, ['base64', 'width', 'height']) ||
+    typeof value.result.base64 !== 'string' ||
+    value.result.base64.length < 32 ||
+    value.result.base64.length > CODEX_IMAGE_MAX_BASE64_CHARS ||
+    value.result.base64.length % 4 !== 0 ||
+    typeof value.result.width !== 'number' ||
+    typeof value.result.height !== 'number' ||
+    !areCodexImageDimensionsSafe(value.result.width, value.result.height)
+  ) {
+    fail('invalid-shape');
+  }
+
+  const paddingBytes = value.result.base64.endsWith('==')
+    ? 2
+    : value.result.base64.endsWith('=')
+      ? 1
+      : 0;
+  const decodedLength = (value.result.base64.length / 4) * 3 - paddingBytes;
+  const alphabetLength = value.result.base64.length - paddingBytes;
+  for (let index = 0; index < alphabetLength; index += 1) {
+    if (!isBase64AlphabetCode(value.result.base64.charCodeAt(index))) {
+      fail('invalid-shape');
+    }
+  }
+  const header = Buffer.from(value.result.base64.slice(0, 32), 'base64');
+  const finalQuartet = value.result.base64.slice(-4);
+  if (
+    decodedLength < 33 ||
+    decodedLength > CODEX_IMAGE_MAX_BYTES ||
+    header.byteLength !== 24 ||
+    header.toString('base64') !== value.result.base64.slice(0, 32) ||
+    Buffer.from(finalQuartet, 'base64').toString('base64') !== finalQuartet ||
+    !header.subarray(0, PNG_SIGNATURE.byteLength).equals(PNG_SIGNATURE) ||
+    header.readUInt32BE(8) !== 13 ||
+    !header.subarray(12, 16).equals(PNG_IHDR) ||
+    header.readUInt32BE(16) !== value.result.width ||
+    header.readUInt32BE(20) !== value.result.height
+  ) {
+    fail('invalid-shape');
+  }
+
+  return {
+    mimeType: 'image/png',
+    width: value.result.width,
+    height: value.result.height,
   };
 }
 

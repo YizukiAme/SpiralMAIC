@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => {
   const mediaStore = {
@@ -81,6 +81,64 @@ describe('media orchestrator Codex auth invalidation', () => {
     mocks.settingsState.imageModelId = 'gpt-image-2';
     mocks.settingsState.imageGenerationEnabled = true;
     mocks.settingsState.fetchServerProviders.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('persists a mocked Codex API image as a page-ready Blob without a network or quota call', async () => {
+    const imageBytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3, 4]);
+    const base64 = Buffer.from(imageBytes).toString('base64');
+    const dataUrl = `data:image/png;base64,${base64}`;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/api/generate/image') {
+        return Response.json({
+          success: true,
+          result: { base64, width: 1254, height: 1254 },
+        });
+      }
+      if (String(input) === dataUrl) {
+        return new Response(new Blob([imageBytes], { type: 'image/png' }));
+      }
+      throw new Error(`unexpected mocked media request: ${String(input)}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const createObjectURL = vi
+      .spyOn(URL, 'createObjectURL')
+      .mockReturnValue('blob:codex-image-page-ready');
+
+    await generateMediaForOutlines(imageOutline('image-1'), 'stage-1');
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+      '/api/generate/image',
+      dataUrl,
+    ]);
+    expect(mocks.mediaFilesPut).toHaveBeenCalledOnce();
+    const record = mocks.mediaFilesPut.mock.calls[0]?.[0] as {
+      id: string;
+      type: string;
+      blob: Blob;
+      mimeType: string;
+      size: number;
+    };
+    expect(record).toMatchObject({
+      id: 'stage-1:image-1',
+      type: 'image',
+      mimeType: 'image/png',
+      size: imageBytes.byteLength,
+    });
+    expect(record.blob).toBeInstanceOf(Blob);
+    expect(record.blob.size).toBeGreaterThan(0);
+    expect(createObjectURL).toHaveBeenCalledWith(record.blob);
+    expect(mocks.mediaStore.markDone).toHaveBeenCalledWith(
+      'image-1',
+      'blob:codex-image-page-ready',
+      undefined,
+    );
+    expect(mocks.mediaStore.markFailed).not.toHaveBeenCalled();
   });
 
   it('triggers a fail-closed provider sync for a selected Codex 401', async () => {
