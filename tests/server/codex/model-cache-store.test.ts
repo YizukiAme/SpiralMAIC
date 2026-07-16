@@ -14,7 +14,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { ModelInfo } from '@/lib/types/provider';
@@ -147,6 +147,28 @@ describe('FileCodexModelCatalogStore', () => {
     await expect(store.load('different-account', NOW + 1)).resolves.toBeNull();
     await expect(store.load(ACCOUNT_ID, NOW + CODEX_MODEL_CACHE_TTL_MS)).resolves.toBeNull();
     await expect(store.load(ACCOUNT_ID, NOW - 1)).resolves.toBeNull();
+  });
+
+  it('rejects a writable canonical file even when a pre-opened writer performs a same-size rewrite', async () => {
+    const store = new FileCodexModelCatalogStore({ baseDir: await makeBaseDir() });
+    await store.save(ACCOUNT_ID, safeModels(), NOW);
+    const canonical = await readFile(store.cachePath, 'utf8');
+    const attackerPayload = canonical
+      .replace('gpt-safe', 'gpt-evil')
+      .replace('GPT Safe', 'GPT Evil');
+
+    expect(Buffer.byteLength(attackerPayload)).toBe(Buffer.byteLength(canonical));
+    await chmod(store.cachePath, 0o666);
+    const writer = await open(store.cachePath, 'r+');
+    try {
+      const payload = Buffer.from(attackerPayload);
+      await writer.write(payload, 0, payload.byteLength, 0);
+      await writer.sync();
+
+      await expect(store.load(ACCOUNT_ID, NOW + 1)).resolves.toBeNull();
+    } finally {
+      await writer.close();
+    }
   });
 
   it('ignores corruption, unknown fields, schema changes, and compatibility changes', async () => {
@@ -501,6 +523,51 @@ describe('FileCodexModelCatalogStore', () => {
     await expect(store.load(ACCOUNT_ID, NOW)).resolves.toBeNull();
     await expect(store.save(ACCOUNT_ID, safeModels(), NOW)).rejects.toThrow();
     expect(await readdir(externalDir)).toEqual([]);
+  });
+
+  it('rejects a trusted root alias whose expanded target chain has a writable intermediate', async () => {
+    const parentDir = await makeBaseDir();
+    const physicalRoot = join(parentDir, 'physical-root');
+    const writableIntermediate = join(physicalRoot, 'writable-intermediate');
+    const trustedTarget = join(writableIntermediate, 'trusted-target');
+    const physicalBaseDir = join(trustedTarget, 'data');
+    const physicalStore = new FileCodexModelCatalogStore({ baseDir: physicalBaseDir });
+    await physicalStore.save(ACCOUNT_ID, safeModels(), NOW);
+
+    const alias = join(parentDir, 'trusted-system-alias');
+    await symlink(trustedTarget, alias);
+    await chmod(writableIntermediate, 0o777);
+    const isPhysicalTargetComponent = (path: string): boolean =>
+      path === trustedTarget || trustedTarget.startsWith(`${path}${sep}`);
+    const rootOwned = <T extends object>(value: T): T =>
+      new Proxy(value, {
+        get(target, property) {
+          if (property === 'uid') return 0;
+          return Reflect.get(target, property, target);
+        },
+      });
+    const aliasStore = new FileCodexModelCatalogStore({
+      baseDir: join(alias, 'data'),
+      fs: {
+        lstat: (async (path) => {
+          const result = await lstat(path);
+          const candidate = String(path);
+          return candidate === alias || isPhysicalTargetComponent(candidate)
+            ? rootOwned(result)
+            : result;
+        }) as typeof lstat,
+        stat: (async (path) => {
+          const result = await stat(path);
+          return String(path) === alias ? rootOwned(result) : result;
+        }) as typeof stat,
+      },
+    });
+
+    await expect(aliasStore.load(ACCOUNT_ID, NOW + 1)).resolves.toBeNull();
+    await chmod(writableIntermediate, 0o700);
+    await expect(aliasStore.load(ACCOUNT_ID, NOW + 1)).resolves.toMatchObject({
+      models: [{ id: 'gpt-safe' }],
+    });
   });
 
   it('rejects cache directories not owned by the effective user', async () => {

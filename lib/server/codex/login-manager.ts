@@ -329,13 +329,13 @@ export class CodexLoginManager {
         if (!this.isAttemptCommitEligible(attempt)) {
           return { committed: false, replaced: false };
         }
-        if (previous) {
-          // The catalog clear is a commit barrier: replacement credentials must
-          // not become visible until every old-account capability is invalidated.
-          await this.onCredentialsReplaced?.();
-          if (!this.isAttemptCommitEligible(attempt)) {
-            return { committed: false, replaced: false };
-          }
+        // The catalog clear is a publication barrier for every interactive
+        // login, including a first login after logout or terminal invalidation.
+        // A prior best-effort clear may have failed after the vault was emptied,
+        // so new credentials must never make that stale capability cache usable.
+        await this.onCredentialsReplaced?.();
+        if (!this.isAttemptCommitEligible(attempt)) {
+          return { committed: false, replaced: false };
         }
         await this.vault.save(credentials);
         if (this.isAttemptCommitEligible(attempt)) {
