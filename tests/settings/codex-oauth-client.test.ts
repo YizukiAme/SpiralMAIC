@@ -556,7 +556,9 @@ describe('Codex settings integration helpers', () => {
 
     await syncServerProvidersAfterAccessUnlock(() => ({ fetchServerProviders }));
 
-    expect(fetchServerProviders).toHaveBeenCalledTimes(1);
+    expect(fetchServerProviders).toHaveBeenCalledWith({
+      reconcileOAuthImageSelectionImmediately: true,
+    });
   });
 
   it('uses Connected only for server-connected OAuth providers', () => {

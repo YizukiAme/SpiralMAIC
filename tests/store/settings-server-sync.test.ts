@@ -169,16 +169,31 @@ vi.mock('@/lib/pdf/constants', () => ({
 }));
 
 vi.mock('@/lib/media/image-providers', () => ({
+  getImageProviderCredentialMode: (provider: {
+    requiresApiKey: boolean;
+    credentialMode?: 'api-key' | 'oauth' | 'none';
+  }) => provider.credentialMode ?? (provider.requiresApiKey ? 'api-key' : 'none'),
   IMAGE_PROVIDERS: {
     seedream: {
       id: 'seedream',
       requiresApiKey: true,
       models: [{ id: 'doubao-seedream-5-0-260128', name: 'Seedream 5.0' }],
     },
+    'codex-image': {
+      id: 'codex-image',
+      requiresApiKey: false,
+      credentialMode: 'oauth',
+      models: [{ id: 'gpt-image-2', name: 'GPT Image 2' }],
+    },
     'qwen-image': {
       id: 'qwen-image',
       requiresApiKey: true,
       models: [{ id: 'qwen-image-max', name: 'Qwen Image Max' }],
+    },
+    lemonade: {
+      id: 'lemonade',
+      requiresApiKey: false,
+      models: [{ id: 'Qwen-Image-GGUF', name: 'Qwen Image GGUF' }],
     },
   },
 }));
@@ -234,7 +249,7 @@ interface MockServerResponse {
   tts?: Record<string, { baseUrl?: string; disabled?: boolean }>;
   asr?: Record<string, { baseUrl?: string }>;
   pdf?: Record<string, { baseUrl?: string }>;
-  image?: Record<string, { baseUrl?: string }>;
+  image?: Record<string, { baseUrl?: string; models?: string[] }>;
   video?: Record<string, { baseUrl?: string }>;
   webSearch?: Record<string, { baseUrl?: string }>;
 }
@@ -295,6 +310,51 @@ describe('settings rehydrate — built-in provider models', () => {
     const { useSettingsStore } = await import('@/lib/store/settings');
     return useSettingsStore;
   }
+
+  it('distrusts persisted Codex image credentials and connected state', async () => {
+    storage.set(
+      'settings-storage',
+      JSON.stringify({
+        state: {
+          imageProviderId: 'codex-image',
+          imageModelId: 'gpt-image-2',
+          imageGenerationEnabled: true,
+          imageProvidersConfig: {
+            'codex-image': {
+              apiKey: 'fake-access-token',
+              baseUrl: 'https://attacker.invalid',
+              enabled: true,
+              isServerConfigured: true,
+              customModels: [{ id: 'attacker-model', name: 'Attacker Model' }],
+              replaceBuiltInModels: true,
+            },
+          },
+        },
+        version: 5,
+      }),
+    );
+
+    const store = await getStore();
+    const codex = store.getState().imageProvidersConfig['codex-image'];
+
+    expect(codex).toMatchObject({
+      apiKey: '',
+      baseUrl: '',
+      enabled: true,
+      isServerConfigured: false,
+      customModels: [],
+      replaceBuiltInModels: false,
+    });
+    expect(store.getState()).toMatchObject({
+      imageProviderId: '',
+      imageModelId: '',
+      imageGenerationEnabled: false,
+      imageGenerationPreference: true,
+    });
+    expect(JSON.stringify(store.getState())).not.toMatch(
+      /fake-access-token|attacker\.invalid|attacker-model/,
+    );
+  });
 
   it('reorders persisted built-in models to registry order while preserving custom models', async () => {
     storage.set(
@@ -1460,6 +1520,426 @@ describe('fetchServerProviders — Image stale selection', () => {
     expect(store.getState().imageGenerationEnabled).toBe(false);
     // But model should be auto-filled
     expect(store.getState().imageModelId).toBe('doubao-seedream-5-0-260128');
+  });
+
+  it('includes disconnected Codex metadata but does not treat OAuth as keyless', async () => {
+    const store = await getStore();
+    const codex = store.getState().imageProvidersConfig['codex-image'];
+
+    expect(codex).toEqual({
+      apiKey: '',
+      baseUrl: '',
+      enabled: true,
+      isServerConfigured: false,
+      customModels: [],
+      replaceBuiltInModels: false,
+    });
+    store.setState({
+      imageProviderId: 'codex-image',
+      imageModelId: 'gpt-image-2',
+      imageProvidersConfig: {
+        ...store.getState().imageProvidersConfig,
+        'codex-image': { ...codex, enabled: true },
+      },
+      imageGenerationEnabled: false,
+    });
+    store.getState().setImageGenerationEnabled(true);
+
+    expect(store.getState().imageGenerationEnabled).toBe(false);
+  });
+
+  it('does not replace an already usable client image provider when Codex connects', async () => {
+    const store = await getStore();
+    store.setState({
+      imageProviderId: 'seedream',
+      imageModelId: 'doubao-seedream-5-0-260128',
+      imageProvidersConfig: {
+        ...store.getState().imageProvidersConfig,
+        seedream: {
+          ...store.getState().imageProvidersConfig.seedream,
+          apiKey: 'user-key',
+          enabled: true,
+        },
+      },
+      imageGenerationEnabled: true,
+      autoConfigApplied: false,
+    });
+
+    mockServerResponse({ image: { 'codex-image': { models: ['gpt-image-2'] } } });
+    await store.getState().fetchServerProviders();
+
+    expect(store.getState().imageProviderId).toBe('seedream');
+    expect(store.getState().imageModelId).toBe('doubao-seedream-5-0-260128');
+    expect(store.getState().imageGenerationEnabled).toBe(true);
+    expect(store.getState().imageProvidersConfig['codex-image'].isServerConfigured).toBe(true);
+  });
+
+  it('does not replace an enabled credential-free image provider when Codex connects', async () => {
+    const store = await getStore();
+    store.setState({
+      imageProviderId: 'lemonade',
+      imageModelId: 'Qwen-Image-GGUF',
+      imageProvidersConfig: {
+        ...store.getState().imageProvidersConfig,
+        lemonade: {
+          ...store.getState().imageProvidersConfig.lemonade,
+          enabled: true,
+        },
+      },
+      imageGenerationEnabled: true,
+      autoConfigApplied: false,
+    });
+
+    mockServerResponse({ image: { 'codex-image': { models: ['gpt-image-2'] } } });
+    await store.getState().fetchServerProviders();
+
+    expect(store.getState().imageProviderId).toBe('lemonade');
+    expect(store.getState().imageModelId).toBe('Qwen-Image-GGUF');
+    expect(store.getState().imageGenerationEnabled).toBe(true);
+    expect(store.getState().imageProvidersConfig['codex-image'].isServerConfigured).toBe(true);
+  });
+
+  it('prefers a pre-existing usable image provider when Codex connects to an unusable selection', async () => {
+    const store = await getStore();
+    store.setState({
+      imageProviderId: 'seedream',
+      imageModelId: 'doubao-seedream-5-0-260128',
+      imageProvidersConfig: {
+        ...store.getState().imageProvidersConfig,
+        'qwen-image': {
+          ...store.getState().imageProvidersConfig['qwen-image'],
+          apiKey: 'user-key',
+          enabled: true,
+        },
+      },
+      imageGenerationEnabled: true,
+      autoConfigApplied: true,
+    });
+
+    mockServerResponse({ image: { 'codex-image': { models: ['gpt-image-2'] } } });
+    await store.getState().fetchServerProviders();
+
+    expect(store.getState().imageProviderId).toBe('qwen-image');
+    expect(store.getState().imageModelId).toBe('qwen-image-max');
+    expect(store.getState().imageGenerationEnabled).toBe(true);
+    expect(store.getState().imageProvidersConfig['codex-image'].isServerConfigured).toBe(true);
+  });
+
+  it('prefers another image provider that becomes available in the same sync as Codex', async () => {
+    const store = await getStore();
+    store.setState({
+      imageProviderId: 'seedream',
+      imageModelId: 'doubao-seedream-5-0-260128',
+      imageGenerationEnabled: true,
+      autoConfigApplied: true,
+    });
+
+    mockServerResponse({
+      image: {
+        'codex-image': { models: ['gpt-image-2'] },
+        'qwen-image': { models: ['qwen-image-max'] },
+      },
+    });
+    await store.getState().fetchServerProviders();
+
+    expect(store.getState().imageProviderId).toBe('qwen-image');
+    expect(store.getState().imageModelId).toBe('qwen-image-max');
+    expect(store.getState().imageGenerationEnabled).toBe(true);
+  });
+
+  it('selects and enables Codex when it is the only usable image provider', async () => {
+    const store = await getStore();
+
+    mockServerResponse({ image: { 'codex-image': { models: ['gpt-image-2'] } } });
+    await store.getState().fetchServerProviders();
+
+    expect(store.getState().imageProviderId).toBe('codex-image');
+    expect(store.getState().imageModelId).toBe('gpt-image-2');
+    expect(store.getState().imageGenerationEnabled).toBe(true);
+  });
+
+  it('does not re-enable Codex image generation after the user turns it off', async () => {
+    const store = await getStore();
+    mockServerResponse({ image: { 'codex-image': { models: ['gpt-image-2'] } } });
+    await store.getState().fetchServerProviders();
+    expect(store.getState().imageGenerationEnabled).toBe(true);
+
+    store.getState().setImageGenerationEnabled(false);
+    mockServerResponse({ image: { 'codex-image': { models: ['gpt-image-2'] } } });
+    await store.getState().fetchServerProviders();
+
+    expect(store.getState().imageProviderId).toBe('codex-image');
+    expect(store.getState().imageGenerationEnabled).toBe(false);
+  });
+
+  it('preserves disabled Codex image intent across overlapping provider syncs', async () => {
+    const store = await getStore();
+    mockServerResponse({ image: { 'codex-image': { models: ['gpt-image-2'] } } });
+    await store.getState().fetchServerProviders();
+    store.getState().setImageGenerationEnabled(false);
+
+    let releaseOlder!: (value: { ok: true; json(): Promise<MockServerResponse> }) => void;
+    const olderResponse = new Promise<{ ok: true; json(): Promise<MockServerResponse> }>(
+      (resolve) => {
+        releaseOlder = resolve;
+      },
+    );
+    mockFetch.mockReturnValueOnce(olderResponse);
+    const olderSync = store.getState().fetchServerProviders();
+
+    mockServerResponse({ image: { 'codex-image': { models: ['gpt-image-2'] } } });
+    await store.getState().fetchServerProviders();
+    releaseOlder({
+      ok: true,
+      json: async () =>
+        fullServerResponse({ image: { 'codex-image': { models: ['gpt-image-2'] } } }),
+    });
+    await olderSync;
+
+    expect(store.getState().imageProviderId).toBe('codex-image');
+    expect(store.getState().imageGenerationEnabled).toBe(false);
+  });
+
+  it('preserves explicit Codex image opt-out across failed sync and recovery', async () => {
+    const store = await getStore();
+    mockServerResponse({ image: { 'codex-image': { models: ['gpt-image-2'] } } });
+    await store.getState().fetchServerProviders();
+    store.getState().setImageGenerationEnabled(false);
+
+    mockFetch.mockRejectedValueOnce(new Error('network'));
+    await store.getState().fetchServerProviders();
+    expect(store.getState().imageProviderId).toBe('');
+
+    mockServerResponse({ image: { 'codex-image': { models: ['gpt-image-2'] } } });
+    await store.getState().fetchServerProviders();
+
+    expect(store.getState().imageProviderId).toBe('codex-image');
+    expect(store.getState().imageGenerationEnabled).toBe(false);
+  });
+
+  it('restores an explicit image opt-in when Codex reconnects', async () => {
+    const store = await getStore();
+    mockServerResponse({ image: { 'codex-image': { models: ['gpt-image-2'] } } });
+    await store.getState().fetchServerProviders();
+    store.getState().setImageGenerationEnabled(true);
+    expect(store.getState().imageGenerationPreference).toBe(true);
+
+    mockServerResponse({});
+    await store.getState().fetchServerProviders();
+    expect(store.getState().imageGenerationEnabled).toBe(false);
+
+    mockServerResponse({ image: { 'codex-image': { models: ['gpt-image-2'] } } });
+    await store.getState().fetchServerProviders();
+
+    expect(store.getState().imageProviderId).toBe('codex-image');
+    expect(store.getState().imageGenerationEnabled).toBe(true);
+  });
+
+  it('does not make explicitly disabled Codex usable when OAuth connects', async () => {
+    const store = await getStore();
+    store.setState({
+      imageProvidersConfig: {
+        ...store.getState().imageProvidersConfig,
+        'codex-image': {
+          ...store.getState().imageProvidersConfig['codex-image'],
+          enabled: false,
+        },
+      },
+    });
+
+    mockServerResponse({ image: { 'codex-image': { models: ['gpt-image-2'] } } });
+    await store.getState().fetchServerProviders();
+
+    expect(store.getState().imageProvidersConfig['codex-image']).toMatchObject({
+      enabled: false,
+      isServerConfigured: true,
+    });
+    expect(store.getState().imageProviderId).toBe('');
+    expect(store.getState().imageGenerationEnabled).toBe(false);
+  });
+
+  it('rejects client attempts to override Codex image credentials, model, or managed state', async () => {
+    const store = await getStore();
+    mockServerResponse({ image: { 'codex-image': { models: ['gpt-image-2'] } } });
+    await store.getState().fetchServerProviders();
+    store.getState().setImageProvider('codex-image');
+    store.getState().setImageProviderConfig('codex-image', {
+      apiKey: 'fake-token',
+      baseUrl: 'https://attacker.invalid',
+      customModels: [{ id: 'attacker-model', name: 'Attacker Model' }],
+      replaceBuiltInModels: true,
+      // @ts-expect-error Exercise an untrusted runtime caller outside the typed UI.
+      isServerConfigured: false,
+    });
+    store.getState().setImageModelId('attacker-model');
+
+    expect(store.getState().imageProvidersConfig['codex-image']).toMatchObject({
+      apiKey: '',
+      baseUrl: '',
+      customModels: [],
+      replaceBuiltInModels: false,
+      isServerConfigured: true,
+    });
+    expect(store.getState().imageModelId).toBe('gpt-image-2');
+    expect(JSON.stringify(store.getState())).not.toMatch(
+      /fake-token|attacker\.invalid|attacker-model/,
+    );
+  });
+
+  it('preserves server-configured-first image fallback ordering when Codex disconnects', async () => {
+    const store = await getStore();
+    store.setState({
+      imageProviderId: 'codex-image',
+      imageModelId: 'gpt-image-2',
+      imageGenerationEnabled: true,
+      imageProvidersConfig: {
+        ...store.getState().imageProvidersConfig,
+        seedream: {
+          ...store.getState().imageProvidersConfig.seedream,
+          apiKey: 'client-key',
+          enabled: true,
+        },
+      },
+    });
+
+    mockServerResponse({ image: { 'qwen-image': {} } });
+    await store.getState().fetchServerProviders();
+
+    expect(store.getState().imageProviderId).toBe('qwen-image');
+    expect(store.getState().imageModelId).toBe('qwen-image-max');
+    expect(store.getState().imageGenerationEnabled).toBe(true);
+  });
+
+  it.each([
+    ['a non-OK response', () => mockFetch.mockResolvedValueOnce({ ok: false, status: 500 })],
+    ['a rejected request', () => mockFetch.mockRejectedValueOnce(new Error('network'))],
+  ])(
+    'preserves server-configured-first image fallback ordering after %s',
+    async (_label, arrangeFailure) => {
+      const store = await getStore();
+      store.setState({
+        imageProvidersConfig: {
+          ...store.getState().imageProvidersConfig,
+          seedream: {
+            ...store.getState().imageProvidersConfig.seedream,
+            apiKey: 'client-key',
+            enabled: true,
+          },
+        },
+      });
+      mockServerResponse({
+        image: {
+          'qwen-image': {},
+          'codex-image': { models: ['gpt-image-2'] },
+        },
+      });
+      await store.getState().fetchServerProviders();
+      store.setState({
+        imageProviderId: 'codex-image',
+        imageModelId: 'gpt-image-2',
+        imageGenerationEnabled: true,
+      });
+
+      arrangeFailure();
+      await store.getState().fetchServerProviders();
+
+      expect(store.getState().imageProviderId).toBe('qwen-image');
+      expect(store.getState().imageModelId).toBe('qwen-image-max');
+      expect(store.getState().imageGenerationEnabled).toBe(true);
+    },
+  );
+
+  it('fails closed and clears a selected Codex image provider when server sync fails', async () => {
+    const store = await getStore();
+    mockServerResponse({ image: { 'codex-image': { models: ['gpt-image-2'] } } });
+    await store.getState().fetchServerProviders();
+    expect(store.getState()).toMatchObject({
+      imageProviderId: 'codex-image',
+      imageGenerationEnabled: true,
+    });
+
+    mockFetch.mockResolvedValueOnce({ ok: false });
+    await store.getState().fetchServerProviders();
+
+    expect(store.getState().imageProvidersConfig['codex-image'].isServerConfigured).toBe(false);
+    expect(store.getState()).toMatchObject({
+      imageProviderId: '',
+      imageModelId: '',
+      imageGenerationEnabled: false,
+    });
+  });
+
+  it('reconciles a selected OAuth image provider before a terminal sync response arrives', async () => {
+    const store = await getStore();
+    mockServerResponse({ image: { 'codex-image': { models: ['gpt-image-2'] } } });
+    await store.getState().fetchServerProviders();
+    expect(store.getState()).toMatchObject({
+      imageProviderId: 'codex-image',
+      imageGenerationEnabled: true,
+    });
+
+    let releaseResponse!: (value: { ok: true; json(): Promise<MockServerResponse> }) => void;
+    const response = new Promise<{ ok: true; json(): Promise<MockServerResponse> }>((resolve) => {
+      releaseResponse = resolve;
+    });
+    mockFetch.mockReturnValueOnce(response);
+
+    const sync = store.getState().fetchServerProviders({
+      reconcileOAuthImageSelectionImmediately: true,
+    });
+
+    expect(store.getState().imageProvidersConfig['codex-image'].isServerConfigured).toBe(false);
+    expect(store.getState()).toMatchObject({
+      imageProviderId: '',
+      imageModelId: '',
+      imageGenerationEnabled: false,
+    });
+
+    releaseResponse({ ok: true, json: async () => fullServerResponse({}) });
+    await sync;
+  });
+
+  it('falls back from Codex on logout without disabling a usable alternative', async () => {
+    const store = await getStore();
+    store.setState({
+      imageProvidersConfig: {
+        ...store.getState().imageProvidersConfig,
+        'qwen-image': {
+          ...store.getState().imageProvidersConfig['qwen-image'],
+          apiKey: 'user-key',
+          enabled: true,
+        },
+      },
+      autoConfigApplied: true,
+    });
+    mockServerResponse({ image: { 'codex-image': { models: ['gpt-image-2'] } } });
+    await store.getState().fetchServerProviders();
+    store.setState({
+      imageProviderId: 'codex-image',
+      imageModelId: 'gpt-image-2',
+      imageGenerationEnabled: true,
+    });
+
+    mockServerResponse({});
+    await store.getState().fetchServerProviders();
+
+    expect(store.getState().imageProviderId).toBe('qwen-image');
+    expect(store.getState().imageModelId).toBe('qwen-image-max');
+    expect(store.getState().imageGenerationEnabled).toBe(true);
+  });
+
+  it('clears Codex and disables image generation on logout without a fallback', async () => {
+    const store = await getStore();
+    mockServerResponse({ image: { 'codex-image': { models: ['gpt-image-2'] } } });
+    await store.getState().fetchServerProviders();
+    expect(store.getState().imageProviderId).toBe('codex-image');
+
+    mockServerResponse({});
+    await store.getState().fetchServerProviders();
+
+    expect(store.getState().imageProviderId).toBe('');
+    expect(store.getState().imageModelId).toBe('');
+    expect(store.getState().imageGenerationEnabled).toBe(false);
   });
 });
 
