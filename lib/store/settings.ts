@@ -33,8 +33,10 @@ import {
 
 const log = createLogger('Settings');
 let latestServerProvidersRequest = 0;
+let userLLMSelectionRevision = 0;
 interface PendingCodexSelectionRestore {
   requestGeneration: number;
+  selectionRevision: number;
   intent: { modelId: string };
   fallback: { providerId: ProviderId; modelId: string };
 }
@@ -1071,7 +1073,10 @@ export const useSettingsStore = create<SettingsState>()(
         ...defaultWebSearchConfig,
 
         // Actions
-        setModel: (providerId, modelId) => set({ providerId, modelId }),
+        setModel: (providerId, modelId) => {
+          userLLMSelectionRevision += 1;
+          set({ providerId, modelId });
+        },
 
         setCodexFastMode: (enabled) => set({ codexFastMode: enabled }),
 
@@ -1516,11 +1521,13 @@ export const useSettingsStore = create<SettingsState>()(
         // Fetch server-configured providers and merge into local state
         fetchServerProviders: async () => {
           const requestGeneration = ++latestServerProvidersRequest;
+          const selectionRevisionAtRequest = userLLMSelectionRevision;
           const selectedAtRequest = get();
           const pendingAtRequest = pendingCodexSelectionRestore;
           const inheritsPendingCodexIntent = Boolean(
             selectedAtRequest.providerId !== 'openai-codex' &&
             pendingAtRequest &&
+            pendingAtRequest.selectionRevision === selectionRevisionAtRequest &&
             matchesLLMSelection(selectedAtRequest, pendingAtRequest.fallback),
           );
           const codexSelectionIntent =
@@ -1531,12 +1538,13 @@ export const useSettingsStore = create<SettingsState>()(
                 : null;
           if (!codexSelectionIntent) pendingCodexSelectionRestore = null;
           let scrubbedSelection: { providerId: ProviderId; modelId: string } | null = null;
+          let scrubbedSelectionRevision: number | null = null;
           const clearPendingCodexRestore = () => {
             if (pendingCodexSelectionRestore?.requestGeneration === requestGeneration) {
               pendingCodexSelectionRestore = null;
             }
           };
-          const scrubOAuthState = () => {
+          const scrubOAuthState = (preserveCodexRestore = true) => {
             if (requestGeneration !== latestServerProvidersRequest) return;
             set((state) => {
               const providersConfig = resetOAuthProviderState(state.providersConfig);
@@ -1546,7 +1554,9 @@ export const useSettingsStore = create<SettingsState>()(
                 state.modelId,
               );
               const canPreserveCodexIntent = Boolean(
+                preserveCodexRestore &&
                 codexSelectionIntent &&
+                userLLMSelectionRevision === selectionRevisionAtRequest &&
                 (state.providerId === 'openai-codex' ||
                   (inheritsPendingCodexIntent &&
                     pendingAtRequest &&
@@ -1554,8 +1564,10 @@ export const useSettingsStore = create<SettingsState>()(
               );
               if (canPreserveCodexIntent && codexSelectionIntent) {
                 scrubbedSelection = selection;
+                scrubbedSelectionRevision = userLLMSelectionRevision;
                 pendingCodexSelectionRestore = {
                   requestGeneration,
+                  selectionRevision: userLLMSelectionRevision,
                   intent: codexSelectionIntent,
                   fallback: selection,
                 };
@@ -1572,6 +1584,11 @@ export const useSettingsStore = create<SettingsState>()(
               };
             });
           };
+          const finalizeFailedSync = () => {
+            if (requestGeneration !== latestServerProvidersRequest) return;
+            scrubOAuthState(false);
+            clearPendingCodexRestore();
+          };
 
           // Account identity is intentionally absent from this browser DTO.
           // Drop account-scoped OAuth state before every refresh, then publish
@@ -1581,7 +1598,7 @@ export const useSettingsStore = create<SettingsState>()(
             const res = await fetch('/api/server-providers');
             if (requestGeneration !== latestServerProvidersRequest) return;
             if (!res.ok) {
-              clearPendingCodexRestore();
+              finalizeFailedSync();
               return;
             }
             // Managed providers expose only their allowed model list (LLM/image)
@@ -1878,6 +1895,7 @@ export const useSettingsStore = create<SettingsState>()(
               const shouldRestoreCodexSelection = Boolean(
                 codexSelectionIntent &&
                 scrubbedSelection &&
+                scrubbedSelectionRevision === userLLMSelectionRevision &&
                 state.providerId === scrubbedSelection.providerId &&
                 state.modelId === scrubbedSelection.modelId &&
                 newProvidersConfig['openai-codex']?.isServerConfigured &&
@@ -2136,11 +2154,10 @@ export const useSettingsStore = create<SettingsState>()(
               };
             });
             clearPendingCodexRestore();
-          } catch (e) {
-            scrubOAuthState();
-            clearPendingCodexRestore();
+          } catch {
+            finalizeFailedSync();
             // Silently fail — server providers are optional
-            log.warn('Failed to fetch server providers:', e);
+            log.warn('Failed to fetch server providers');
           }
         },
       };

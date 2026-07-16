@@ -1685,7 +1685,7 @@ describe('fetchServerProviders — LLM cross-provider fallback', () => {
     );
 
     const sync = store.getState().fetchServerProviders();
-    store.setState({ providerId: 'openai', modelId: 'gpt-4o-mini' });
+    store.getState().setModel('openai', 'gpt-4o-mini');
     releaseLatest({
       ok: true,
       json: async () => fullServerResponse(richCodexResponse('gpt-live')),
@@ -1696,6 +1696,85 @@ describe('fetchServerProviders — LLM cross-provider fallback', () => {
       providerId: 'openai',
       modelId: 'gpt-4o-mini',
     });
+  });
+
+  it('does not restore Codex after the user explicitly reselects the exact scrub fallback', async () => {
+    const store = await getStore();
+    selectCodexWithOpenAIFallback(store);
+    let release!: (value: {
+      ok: true;
+      json(): Promise<ReturnType<typeof fullServerResponse>>;
+    }) => void;
+    mockFetch.mockReturnValueOnce(
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+    );
+
+    const sync = store.getState().fetchServerProviders();
+    expect(store.getState()).toMatchObject({ providerId: 'openai', modelId: 'gpt-4o' });
+    store.getState().setModel('openai', 'gpt-4o');
+    release({
+      ok: true,
+      json: async () => fullServerResponse(richCodexResponse('gpt-live')),
+    });
+    await sync;
+
+    expect(store.getState()).toMatchObject({ providerId: 'openai', modelId: 'gpt-4o' });
+    mockServerResponse(richCodexResponse('gpt-live'));
+    await store.getState().fetchServerProviders();
+    expect(store.getState()).toMatchObject({ providerId: 'openai', modelId: 'gpt-4o' });
+  });
+
+  it.each(['non-OK', 'rejection'] as const)(
+    're-scrubs a mid-flight Codex reselection after a %s sync failure without stale restore',
+    async (failureMode) => {
+      const store = await getStore();
+      selectCodexWithOpenAIFallback(store);
+      let resolveRequest!: (value: { ok: false; status: number }) => void;
+      let rejectRequest!: (reason: Error) => void;
+      mockFetch.mockReturnValueOnce(
+        new Promise((resolve, reject) => {
+          resolveRequest = resolve;
+          rejectRequest = reject;
+        }),
+      );
+
+      const sync = store.getState().fetchServerProviders();
+      store.getState().setModel('openai-codex', 'gpt-live');
+      if (failureMode === 'non-OK') resolveRequest({ ok: false, status: 503 });
+      else rejectRequest(new Error('network detail must stay private'));
+      await sync;
+
+      expect(store.getState()).toMatchObject({
+        providerId: 'openai',
+        modelId: 'gpt-4o',
+        codexFastMode: false,
+      });
+      expect(store.getState().providersConfig['openai-codex'].isServerConfigured).toBe(false);
+
+      mockServerResponse(richCodexResponse('gpt-live'));
+      await store.getState().fetchServerProviders();
+      expect(store.getState()).toMatchObject({ providerId: 'openai', modelId: 'gpt-4o' });
+    },
+  );
+
+  it('preserves a valid non-Codex user selection while finalizing a failed sync', async () => {
+    const store = await getStore();
+    selectCodexWithOpenAIFallback(store);
+    let rejectRequest!: (reason: Error) => void;
+    mockFetch.mockReturnValueOnce(
+      new Promise((_resolve, reject) => {
+        rejectRequest = reject;
+      }),
+    );
+
+    const sync = store.getState().fetchServerProviders();
+    store.getState().setModel('openai', 'gpt-4o-mini');
+    rejectRequest(new Error('network detail'));
+    await sync;
+
+    expect(store.getState()).toMatchObject({ providerId: 'openai', modelId: 'gpt-4o-mini' });
   });
 });
 
