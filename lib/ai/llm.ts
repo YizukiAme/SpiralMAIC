@@ -11,6 +11,7 @@ import { PROVIDERS } from './providers';
 import { thinkingContext } from './thinking-context';
 import { getModelMetadataKey } from './model-metadata';
 import { getCanonicalModelId } from './model-aliases';
+import { getCodexLanguageModelThinking, hasCodexLanguageModelMetadata } from './codex-model';
 import type { ThinkingCapability, ThinkingConfig } from '@/lib/types/provider';
 import {
   getThinkingMode,
@@ -140,6 +141,7 @@ function buildThinkingProviderOptions(
   providerId: string | undefined,
   modelId: string,
   config: ThinkingConfig,
+  model?: LanguageModel,
 ): ProviderOptions | undefined {
   const lookupModelId = providerId ? getCanonicalModelId(providerId, modelId) : modelId;
   // Wrapped native models expose the SDK provider name (for example
@@ -147,10 +149,15 @@ function buildThinkingProviderOptions(
   // provider mapping, then use a model id only when that id is unique across
   // registries. This lets native Codex-only models retain their subscription
   // metadata without guessing when an id is shared by multiple providers.
-  const info =
-    (providerId
-      ? MODEL_THINKING_MAP.get(getModelMetadataKey(providerId, lookupModelId))
-      : undefined) ?? UNIQUE_MODEL_THINKING_MAP.get(lookupModelId);
+  const hasRuntimeMetadata = providerId === 'openai-codex' && hasCodexLanguageModelMetadata(model);
+  const runtimeThinking = hasRuntimeMetadata ? getCodexLanguageModelThinking(model) : undefined;
+  const info = hasRuntimeMetadata
+    ? runtimeThinking
+      ? { thinking: runtimeThinking }
+      : undefined
+    : ((providerId
+        ? MODEL_THINKING_MAP.get(getModelMetadataKey(providerId, lookupModelId))
+        : undefined) ?? UNIQUE_MODEL_THINKING_MAP.get(lookupModelId));
   if (!info?.thinking) return undefined; // model has no thinking capability
   const thinking = info.thinking;
   if (thinking.control === 'none') return undefined;
@@ -233,6 +240,7 @@ export function resolveThinkingProviderOptions(
     normalizeProviderId(provider, modelId),
     modelId,
     thinkingConfig,
+    model,
   );
 }
 
@@ -255,7 +263,12 @@ function injectProviderOptions<T extends GenerateTextParams | StreamTextParams>(
   const providerId = getModelProviderId(params);
 
   if (thinking) {
-    const opts = buildThinkingProviderOptions(providerId, modelId, thinking);
+    const opts = buildThinkingProviderOptions(
+      providerId,
+      modelId,
+      thinking,
+      typeof params.model === 'object' ? params.model : undefined,
+    );
     if (opts) return { ...params, providerOptions: opts };
   }
 

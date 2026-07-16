@@ -29,6 +29,16 @@ function boundedString(value: unknown, maxLength: number): string | undefined {
   return normalized.length > 0 && normalized.length <= maxLength ? normalized : undefined;
 }
 
+function deepFreeze<T>(value: T): T {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    for (const child of Object.values(value as Record<string, unknown>)) {
+      deepFreeze(child);
+    }
+    Object.freeze(value);
+  }
+  return value;
+}
+
 export function isCodexThinkingEffort(value: unknown): value is ThinkingEffort {
   return typeof value === 'string' && THINKING_EFFORTS.has(value as ThinkingEffort);
 }
@@ -130,7 +140,7 @@ export function rebuildCodexModelCatalog(value: unknown): ModelInfo[] | null {
   return rebuilt;
 }
 
-const BUNDLED_MODELS: ModelInfo[] = [
+const BUNDLED_MODELS: readonly ModelInfo[] = deepFreeze([
   {
     id: 'gpt-5.6-sol',
     name: 'GPT-5.6 Sol',
@@ -191,7 +201,7 @@ const BUNDLED_MODELS: ModelInfo[] = [
     },
     source: 'probed',
   },
-];
+] satisfies ModelInfo[]);
 
 export function getBundledCodexModelCatalog(): ModelInfo[] {
   return rebuildCodexModelCatalog(BUNDLED_MODELS)!;

@@ -1,5 +1,5 @@
 import { wrapLanguageModel, type LanguageModelMiddleware } from 'ai';
-import type { ModelServiceTier } from '@/lib/types/provider';
+import type { ModelInfo, ModelServiceTier, ThinkingCapability } from '@/lib/types/provider';
 
 type LanguageModelV3 = Parameters<typeof wrapLanguageModel>[0]['model'];
 type CodexStreamResult = Awaited<ReturnType<LanguageModelV3['doStream']>>;
@@ -8,6 +8,49 @@ type CodexStreamPart =
   CodexStreamResult['stream'] extends ReadableStream<infer Part> ? Part : never;
 type CodexContent = CodexGenerateResult['content'][number];
 type CodexProviderMetadata = NonNullable<CodexGenerateResult['providerMetadata']>;
+
+const codexRuntimeThinking = new WeakMap<object, ThinkingCapability | null>();
+
+function cloneThinkingCapability(thinking: ThinkingCapability): ThinkingCapability {
+  return {
+    ...thinking,
+    ...(thinking.effortValues ? { effortValues: [...thinking.effortValues] } : {}),
+    ...(thinking.levelValues ? { levelValues: [...thinking.levelValues] } : {}),
+    ...(thinking.budgetRange ? { budgetRange: { ...thinking.budgetRange } } : {}),
+    ...(thinking.anthropicThinking
+      ? {
+          anthropicThinking: {
+            ...thinking.anthropicThinking,
+            ...(thinking.anthropicThinking.budgetByEffort
+              ? { budgetByEffort: { ...thinking.anthropicThinking.budgetByEffort } }
+              : {}),
+          },
+        }
+      : {}),
+  };
+}
+
+/** Bind safe discovery metadata to one server-created Codex model instance. */
+export function bindCodexLanguageModelMetadata<T>(model: T, modelInfo: ModelInfo): T {
+  if (!model || typeof model !== 'object') {
+    throw new TypeError('Codex runtime metadata requires a language model object');
+  }
+  const thinking = modelInfo.capabilities?.thinking;
+  codexRuntimeThinking.set(model, thinking ? cloneThinkingCapability(thinking) : null);
+  return model;
+}
+
+/** Distinguish an explicit no-thinking discovery result from an unbound model. */
+export function hasCodexLanguageModelMetadata(model: unknown): boolean {
+  return Boolean(model && typeof model === 'object' && codexRuntimeThinking.has(model));
+}
+
+/** Read only the request capability carried by the resolved Codex model. */
+export function getCodexLanguageModelThinking(model: unknown): ThinkingCapability | undefined {
+  if (!model || typeof model !== 'object') return undefined;
+  const thinking = codexRuntimeThinking.get(model);
+  return thinking ? cloneThinkingCapability(thinking) : undefined;
+}
 
 export const CODEX_RESPONSES_BASE_URL = 'https://chatgpt.com/backend-api/codex';
 export const CODEX_RESPONSES_ENDPOINT = `${CODEX_RESPONSES_BASE_URL}/responses`;
@@ -465,10 +508,14 @@ function createCodexLanguageModelMiddleware(
 
 export function wrapCodexLanguageModel(
   model: LanguageModelV3,
-  options: { serviceTier?: ModelServiceTier } = {},
+  options: { serviceTier?: ModelServiceTier; modelInfo?: ModelInfo } = {},
 ): LanguageModelV3 {
-  return wrapLanguageModel({
+  const wrapped = wrapLanguageModel({
     model,
     middleware: createCodexLanguageModelMiddleware(options.serviceTier),
+    // Preserve the product/provider identity across the native OpenAI SDK
+    // wrapper. Request metadata must never resolve this model as public OpenAI.
+    providerId: 'openai-codex',
   });
+  return options.modelInfo ? bindCodexLanguageModelMetadata(wrapped, options.modelInfo) : wrapped;
 }

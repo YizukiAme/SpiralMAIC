@@ -9,6 +9,7 @@ import type { NextRequest } from 'next/server';
 import { getModel, parseModelString, type ModelWithInfo } from '@/lib/ai/providers';
 import type { ModelServiceTier, ThinkingConfig } from '@/lib/types/provider';
 import { rebuildCodexModelInfo } from '@/lib/ai/codex-catalog';
+import { bindCodexLanguageModelMetadata } from '@/lib/ai/codex-model';
 import {
   isServerConfiguredProvider,
   resolveApiKey,
@@ -89,11 +90,8 @@ export async function resolveModel(params: {
     }
 
     const { tokenProvider, modelDiscovery } = getCodexAuthRuntime();
-    await tokenProvider.getValidCredentials();
-    const discoveredModels = await modelDiscovery.getModels();
-    const discoveredModel = rebuildCodexModelInfo(
-      discoveredModels.find((model) => model.id === modelId),
-    );
+    const modelCapability = await modelDiscovery.getModelCapability(modelId);
+    const discoveredModel = rebuildCodexModelInfo(modelCapability?.modelInfo);
     if (!discoveredModel) {
       throw new Error('Codex model is unavailable for the connected account');
     }
@@ -105,17 +103,19 @@ export async function resolveModel(params: {
     }
     const transport = createCodexResponsesTransport({
       tokenProvider,
+      capabilityLease: modelCapability!.capabilityLease,
       sessionId: deriveCodexUpstreamSessionId(
         params.logicalSession ?? createEphemeralCodexLogicalSession(),
       ),
     });
-    const { model } = getModel({
+    const { model: unboundModel } = getModel({
       providerId,
       modelId,
       apiKey: '',
       customFetch: transport,
       ...(serviceTier ? { serviceTier } : {}),
     });
+    const model = bindCodexLanguageModelMetadata(unboundModel, discoveredModel);
 
     return {
       model,

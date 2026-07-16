@@ -3,9 +3,12 @@ import packageMetadata from '../../../package.json';
 import { CODEX_RESPONSES_ENDPOINT } from '@/lib/ai/codex-model';
 
 import {
+  isCodexCapabilityLeaseCurrent,
   isCodexCredentialsChangedError,
+  refreshCodexCapabilityLease,
   refreshCodexCredentialsIfCurrent,
   type CodexTokenProvider,
+  type InternalCodexCapabilityLease,
 } from './token-provider';
 import {
   createEphemeralCodexLogicalSession,
@@ -52,6 +55,8 @@ interface CreateCodexResponsesTransportOptions {
   tokenProvider: CodexTokenProvider;
   upstreamFetch?: typeof globalThis.fetch;
   sessionId?: CodexUpstreamSessionId;
+  /** @internal Account/catalog capability selected during model resolution. */
+  capabilityLease?: InternalCodexCapabilityLease;
 }
 
 const REMOVED_BODY_FIELDS = [
@@ -185,13 +190,24 @@ export function createCodexResponsesTransport(
 
     const body = normalizeBody(init?.body, sessionId);
     let originalCredentials: { accessToken: string; accountId: string } | null = null;
+    let capabilityLease = options.capabilityLease;
     const request = async (
       forceRefresh: boolean,
       expected?: { accessToken: string; accountId: string },
     ): Promise<Response> => {
       let credentials: { accessToken: string; accountId: string };
       try {
-        if (forceRefresh) {
+        if (capabilityLease) {
+          if (capabilityLease.credentialLease.tokenProvider !== options.tokenProvider) {
+            throw errorForStatus(401);
+          }
+          if (forceRefresh) {
+            capabilityLease = await refreshCodexCapabilityLease(capabilityLease);
+          } else if (!(await isCodexCapabilityLeaseCurrent(capabilityLease))) {
+            throw errorForStatus(401);
+          }
+          credentials = capabilityLease.credentialLease.credentials;
+        } else if (forceRefresh) {
           const scopedExpected = expected ?? originalCredentials;
           if (!scopedExpected) throw errorForStatus(401);
           credentials = await refreshCodexCredentialsIfCurrent(
@@ -205,6 +221,9 @@ export function createCodexResponsesTransport(
       } catch (error) {
         if (isCodexCredentialsChangedError(error)) throw errorForStatus(401);
         throw error;
+      }
+      if (capabilityLease && !(await isCodexCapabilityLeaseCurrent(capabilityLease))) {
+        throw errorForStatus(401);
       }
       try {
         return await upstreamFetch(CODEX_RESPONSES_ENDPOINT, {

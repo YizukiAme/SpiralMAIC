@@ -16,6 +16,14 @@ const mocks = vi.hoisted(() => {
   const codexTokenProvider = {
     getValidCredentials: vi.fn(async () => ({ accessToken: 'token', accountId: 'account' })),
   };
+  const capabilityLease = {
+    credentialLease: {
+      tokenProvider: codexTokenProvider,
+      credentials: { accessToken: 'token', accountId: 'account' },
+      lifecycleGeneration: 1,
+    },
+    isCatalogCurrent: () => true,
+  };
   const codexModelDiscovery = {
     getModels: vi.fn<() => Promise<ModelInfo[]>>(async () => [
       {
@@ -24,6 +32,12 @@ const mocks = vi.hoisted(() => {
         capabilities: { serviceTiers: ['priority'] },
       },
     ]),
+    getModelCapability: vi.fn(async (modelId: string) => {
+      const modelInfo = (await codexModelDiscovery.getModels()).find(
+        (model: ModelInfo) => model.id === modelId,
+      );
+      return modelInfo ? { modelInfo, capabilityLease } : null;
+    }),
   };
   return {
     getModelCalls: [] as Array<Record<string, unknown>>,
@@ -34,9 +48,11 @@ const mocks = vi.hoisted(() => {
     })),
     codexTokenProvider,
     codexModelDiscovery,
+    capabilityLease,
     codexTransport: vi.fn(),
     createCodexResponsesTransport: vi.fn(
-      (_options: { tokenProvider: unknown; sessionId?: string }) => vi.fn(),
+      (_options: { tokenProvider: unknown; sessionId?: string; capabilityLease?: unknown }) =>
+        vi.fn(),
     ),
   };
 });
@@ -101,6 +117,7 @@ describe('resolveModel — per-stage resolution order', () => {
         capabilities: { serviceTiers: ['priority'] },
       },
     ]);
+    mocks.codexModelDiscovery.getModelCapability.mockClear();
     mocks.createCodexResponsesTransport.mockClear();
     mocks.createCodexResponsesTransport.mockReturnValue(mocks.codexTransport);
     delete process.env.MODEL_ROUTES;
@@ -203,10 +220,11 @@ describe('resolveModel — per-stage resolution order', () => {
     });
 
     expect(mocks.getCodexOAuthAvailability).toHaveBeenCalledTimes(1);
-    expect(mocks.codexTokenProvider.getValidCredentials).toHaveBeenCalledWith();
+    expect(mocks.codexModelDiscovery.getModelCapability).toHaveBeenCalledWith('gpt-5.4');
     expect(mocks.createCodexResponsesTransport).toHaveBeenCalledWith({
       tokenProvider: mocks.codexTokenProvider,
       sessionId: expect.stringMatching(/^oma_[A-Za-z0-9_-]{43}$/),
+      capabilityLease: mocks.capabilityLease,
     });
     expect(mocks.getModelCalls.at(-1)).toEqual({
       providerId: 'openai-codex',
@@ -239,6 +257,7 @@ describe('resolveModel — per-stage resolution order', () => {
     expect(mocks.createCodexResponsesTransport).toHaveBeenCalledWith({
       tokenProvider: mocks.codexTokenProvider,
       sessionId: deriveCodexUpstreamSessionId(logicalSession),
+      capabilityLease: mocks.capabilityLease,
     });
   });
 
@@ -374,7 +393,7 @@ describe('resolveModel — per-stage resolution order', () => {
   });
 
   it('rejects disconnected Codex credentials before constructing a model', async () => {
-    mocks.codexTokenProvider.getValidCredentials.mockRejectedValueOnce(
+    mocks.codexModelDiscovery.getModelCapability.mockRejectedValueOnce(
       new Error('Codex credentials are unavailable'),
     );
     const { resolveModel } = await import('@/lib/server/resolve-model');

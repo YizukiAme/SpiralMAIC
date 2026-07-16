@@ -1,15 +1,22 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { constants } from 'node:fs';
-import { chmod, lstat, mkdir, open, rename, unlink } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { constants, type Stats } from 'node:fs';
+import { chmod, lstat, mkdir, open, rename, stat, unlink, type FileHandle } from 'node:fs/promises';
+import { dirname, join, parse, relative, resolve, sep } from 'node:path';
 
-import { CODEX_COMPATIBILITY_VERSION, rebuildCodexModelCatalog } from '@/lib/ai/codex-catalog';
+import {
+  CODEX_COMPATIBILITY_VERSION,
+  CODEX_MODEL_CATALOG_LIMITS,
+  isCodexThinkingEffort,
+  rebuildCodexModelCatalog,
+} from '@/lib/ai/codex-catalog';
 import type { ModelInfo } from '@/lib/types/provider';
 
 export const CODEX_MODEL_CACHE_FILE_NAME = 'openai-codex-models.v1.json';
 export const CODEX_MODEL_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+export const CODEX_MODEL_CACHE_MAX_BYTES = 1024 * 1024;
 const CODEX_MODEL_CACHE_SCHEMA_VERSION = 1;
 const ACCOUNT_SCOPE_NAMESPACE = 'openmaic-codex-models-v1';
+const MAX_THINKING_EFFORTS = 7;
 
 export interface CodexModelCatalogCacheEntry {
   models: ModelInfo[];
@@ -31,14 +38,51 @@ export interface CodexModelCatalogStore {
   clear(): Promise<void>;
 }
 
-interface FileCodexModelCatalogStoreOptions {
+export interface CodexModelCacheFileSystem {
+  chmod: typeof chmod;
+  lstat: typeof lstat;
+  mkdir: typeof mkdir;
+  open: typeof open;
+  rename: typeof rename;
+  stat: typeof stat;
+  unlink: typeof unlink;
+}
+
+export interface FileCodexModelCatalogStoreOptions {
   /** Data directory. Defaults to `<cwd>/data`; the store adds `cache/`. */
   baseDir?: string;
+  /** Injectable filesystem adapter for alternate runtimes and failure testing. */
+  fs?: Partial<CodexModelCacheFileSystem>;
 }
 
 interface MutationQueue {
   tail: Promise<void>;
 }
+
+interface DirectoryComponentIdentity {
+  path: string;
+  kind: 'directory' | 'trusted-system-symlink';
+  dev: number;
+  ino: number;
+  uid: number;
+  followedDev?: number;
+  followedIno?: number;
+  followedUid?: number;
+}
+
+interface DirectoryChainSnapshot {
+  components: DirectoryComponentIdentity[];
+}
+
+const DEFAULT_CACHE_FS: CodexModelCacheFileSystem = Object.freeze({
+  chmod,
+  lstat,
+  mkdir,
+  open,
+  rename,
+  stat,
+  unlink,
+});
 
 const MUTATION_QUEUES_KEY = Symbol.for('openmaic.codex.model-cache.mutations.v1');
 const mutationQueueHost = globalThis as unknown as Record<PropertyKey, unknown>;
@@ -59,8 +103,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function hasOnlyKeys(value: Record<string, unknown>, allowed: ReadonlySet<string>): boolean {
-  return Object.keys(value).every((key) => allowed.has(key));
+function hasExactKeys(
+  value: Record<string, unknown>,
+  required: ReadonlySet<string>,
+  optional: ReadonlySet<string> = new Set(),
+): boolean {
+  const keys = Object.keys(value);
+  return (
+    [...required].every((key) => Object.prototype.hasOwnProperty.call(value, key)) &&
+    keys.every((key) => required.has(key) || optional.has(key))
+  );
 }
 
 const TOP_LEVEL_KEYS = new Set([
@@ -70,34 +122,108 @@ const TOP_LEVEL_KEYS = new Set([
   'accountScope',
   'models',
 ]);
-const MODEL_KEYS = new Set(['id', 'name', 'contextWindow', 'capabilities', 'source']);
-const CAPABILITY_KEYS = new Set(['streaming', 'tools', 'vision', 'thinking', 'serviceTiers']);
-const THINKING_KEYS = new Set([
+const MODEL_REQUIRED_KEYS = new Set(['id', 'name', 'capabilities', 'source']);
+const MODEL_OPTIONAL_KEYS = new Set(['contextWindow']);
+const CAPABILITY_REQUIRED_KEYS = new Set(['streaming', 'tools']);
+const CAPABILITY_OPTIONAL_KEYS = new Set(['vision', 'thinking', 'serviceTiers']);
+const THINKING_REQUIRED_KEYS = new Set([
   'control',
   'requestAdapter',
   'defaultMode',
   'effortValues',
-  'defaultEffort',
   'toggleable',
   'budgetAdjustable',
   'defaultEnabled',
 ]);
+const THINKING_OPTIONAL_KEYS = new Set(['defaultEffort']);
 
-function hasStrictModelKeys(value: unknown): boolean {
-  if (!isRecord(value) || !hasOnlyKeys(value, MODEL_KEYS)) return false;
-  if (value.capabilities !== undefined) {
-    if (!isRecord(value.capabilities) || !hasOnlyKeys(value.capabilities, CAPABILITY_KEYS)) {
-      return false;
-    }
-    if (
-      value.capabilities.thinking !== undefined &&
-      (!isRecord(value.capabilities.thinking) ||
-        !hasOnlyKeys(value.capabilities.thinking, THINKING_KEYS))
-    ) {
-      return false;
-    }
+function isCanonicalString(value: unknown, maxLength: number): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= maxLength &&
+    value === value.trim()
+  );
+}
+
+function isCanonicalThinking(value: unknown): boolean {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, THINKING_REQUIRED_KEYS, THINKING_OPTIONAL_KEYS) ||
+    value.control !== 'effort' ||
+    value.requestAdapter !== 'openai' ||
+    !Array.isArray(value.effortValues) ||
+    value.effortValues.length < 1 ||
+    value.effortValues.length > MAX_THINKING_EFFORTS ||
+    !value.effortValues.every(isCodexThinkingEffort) ||
+    new Set(value.effortValues).size !== value.effortValues.length ||
+    value.budgetAdjustable !== true
+  ) {
+    return false;
   }
-  return true;
+
+  const toggleable = value.effortValues.includes('none');
+  if (
+    value.toggleable !== toggleable ||
+    value.defaultMode !== (toggleable ? 'disabled' : 'enabled') ||
+    value.defaultEnabled !== !toggleable
+  ) {
+    return false;
+  }
+  return (
+    value.defaultEffort === undefined ||
+    (isCodexThinkingEffort(value.defaultEffort) && value.effortValues.includes(value.defaultEffort))
+  );
+}
+
+function isCanonicalCapabilities(value: unknown): boolean {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, CAPABILITY_REQUIRED_KEYS, CAPABILITY_OPTIONAL_KEYS) ||
+    value.streaming !== true ||
+    value.tools !== true ||
+    (value.vision !== undefined && value.vision !== true) ||
+    (value.thinking !== undefined && !isCanonicalThinking(value.thinking))
+  ) {
+    return false;
+  }
+  return (
+    value.serviceTiers === undefined ||
+    (Array.isArray(value.serviceTiers) &&
+      value.serviceTiers.length === 1 &&
+      value.serviceTiers[0] === 'priority')
+  );
+}
+
+function isCanonicalModel(value: unknown): boolean {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, MODEL_REQUIRED_KEYS, MODEL_OPTIONAL_KEYS) ||
+    !isCanonicalString(value.id, CODEX_MODEL_CATALOG_LIMITS.maxIdLength) ||
+    !isCanonicalString(value.name, CODEX_MODEL_CATALOG_LIMITS.maxNameLength) ||
+    value.source !== 'probed' ||
+    !isCanonicalCapabilities(value.capabilities)
+  ) {
+    return false;
+  }
+  return (
+    value.contextWindow === undefined ||
+    (Number.isSafeInteger(value.contextWindow) &&
+      (value.contextWindow as number) >= 1 &&
+      (value.contextWindow as number) <= CODEX_MODEL_CATALOG_LIMITS.maxContextWindow)
+  );
+}
+
+function isCanonicalModelArray(value: unknown): value is unknown[] {
+  if (
+    !Array.isArray(value) ||
+    value.length < 1 ||
+    value.length > CODEX_MODEL_CATALOG_LIMITS.maxModels ||
+    !value.every(isCanonicalModel)
+  ) {
+    return false;
+  }
+  return new Set(value.map((model) => (model as Record<string, unknown>).id)).size === value.length;
 }
 
 function accountScope(accountId: string): string {
@@ -108,10 +234,51 @@ function accountScope(accountId: string): string {
   return `${ACCOUNT_SCOPE_NAMESPACE}:sha256:${digest}`;
 }
 
-async function fsyncDirectoryBestEffort(directory: string): Promise<void> {
-  let handle: Awaited<ReturnType<typeof open>> | undefined;
+function pathComponents(path: string): string[] {
+  const absolutePath = resolve(path);
+  const root = parse(absolutePath).root;
+  const parts = relative(root, absolutePath).split(sep).filter(Boolean);
+  let current = root;
+  return parts.map((part) => {
+    current = join(current, part);
+    return current;
+  });
+}
+
+function sameIdentity(
+  left: DirectoryComponentIdentity,
+  right: DirectoryComponentIdentity,
+): boolean {
+  return (
+    left.path === right.path &&
+    left.kind === right.kind &&
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.uid === right.uid &&
+    left.followedDev === right.followedDev &&
+    left.followedIno === right.followedIno &&
+    left.followedUid === right.followedUid
+  );
+}
+
+function sameFile(left: Pick<Stats, 'dev' | 'ino'>, right: Pick<Stats, 'dev' | 'ino'>): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function isMissing(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException).code === 'ENOENT';
+}
+
+async function fsyncDirectoryBestEffort(
+  directory: string,
+  expected: DirectoryComponentIdentity,
+  fs: CodexModelCacheFileSystem,
+): Promise<void> {
+  let handle: FileHandle | undefined;
   try {
-    handle = await open(directory, 'r');
+    handle = await fs.open(directory, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const openedStat = await handle.stat();
+    if (!openedStat.isDirectory() || !sameFile(openedStat, expected)) return;
     await handle.sync();
   } catch {
     // The cache file itself is fsynced before rename. Some filesystems do not
@@ -119,6 +286,19 @@ async function fsyncDirectoryBestEffort(directory: string): Promise<void> {
   } finally {
     await handle?.close().catch(() => undefined);
   }
+}
+
+async function readOpenedFileCapped(handle: FileHandle): Promise<Buffer | null> {
+  // Read at most one sentinel byte beyond the policy limit. This remains
+  // bounded even if another process appends after the initial fstat.
+  const buffer = Buffer.allocUnsafe(CODEX_MODEL_CACHE_MAX_BYTES + 1);
+  let offset = 0;
+  while (offset < buffer.length) {
+    const { bytesRead } = await handle.read(buffer, offset, buffer.length - offset, offset);
+    if (bytesRead === 0) break;
+    offset += bytesRead;
+  }
+  return offset > CODEX_MODEL_CACHE_MAX_BYTES ? null : buffer.subarray(0, offset);
 }
 
 async function runMutation<T>(coordinationKey: string, operation: () => Promise<T>): Promise<T> {
@@ -145,12 +325,163 @@ export class FileCodexModelCatalogStore implements CodexModelCatalogStore {
   readonly cacheDir: string;
   readonly cachePath: string;
   readonly coordinationKey: string;
+  private readonly fs: CodexModelCacheFileSystem;
+  private readonly effectiveUid = process.getuid?.();
 
   constructor(options: FileCodexModelCatalogStoreOptions = {}) {
     this.baseDir = resolve(options.baseDir ?? join(process.cwd(), 'data'));
     this.cacheDir = join(this.baseDir, 'cache');
     this.cachePath = join(this.cacheDir, CODEX_MODEL_CACHE_FILE_NAME);
     this.coordinationKey = `file:${resolve(this.cachePath)}`;
+    this.fs = { ...DEFAULT_CACHE_FS, ...options.fs };
+  }
+
+  private async inspectDirectoryComponent(path: string): Promise<DirectoryComponentIdentity> {
+    const pathStat = await this.fs.lstat(path);
+    if (pathStat.isSymbolicLink()) {
+      const followed = await this.fs.stat(path);
+      // macOS exposes stable root-owned aliases such as /var -> /private/var.
+      // Those are outside the user-controlled cache tree; user-owned links are
+      // always rejected.
+      if (
+        this.effectiveUid === undefined ||
+        pathStat.uid !== 0 ||
+        !followed.isDirectory() ||
+        followed.uid !== 0 ||
+        ((followed.mode & 0o022) !== 0 && (followed.mode & 0o1000) === 0)
+      ) {
+        throw new Error('Unsafe Codex model cache ancestor');
+      }
+      return {
+        path,
+        kind: 'trusted-system-symlink',
+        dev: pathStat.dev,
+        ino: pathStat.ino,
+        uid: pathStat.uid,
+        followedDev: followed.dev,
+        followedIno: followed.ino,
+        followedUid: followed.uid,
+      };
+    }
+    if (!pathStat.isDirectory()) throw new Error('Unsafe Codex model cache ancestor');
+    if (
+      this.effectiveUid !== undefined &&
+      pathStat.uid !== 0 &&
+      pathStat.uid !== this.effectiveUid
+    ) {
+      throw new Error('Unsafe Codex model cache ancestor owner');
+    }
+    if ((pathStat.mode & 0o022) !== 0 && (pathStat.mode & 0o1000) === 0) {
+      throw new Error('Unsafe Codex model cache ancestor permissions');
+    }
+    return {
+      path,
+      kind: 'directory',
+      dev: pathStat.dev,
+      ino: pathStat.ino,
+      uid: pathStat.uid,
+    };
+  }
+
+  private requireCurrentUserDirectory(identity: DirectoryComponentIdentity): void {
+    if (
+      identity.kind !== 'directory' ||
+      (this.effectiveUid !== undefined && identity.uid !== this.effectiveUid)
+    ) {
+      throw new Error('Unsafe Codex model cache directory owner');
+    }
+  }
+
+  private async captureDirectoryChain(target: string): Promise<DirectoryChainSnapshot> {
+    const components: DirectoryComponentIdentity[] = [];
+    for (const component of pathComponents(target)) {
+      components.push(await this.inspectDirectoryComponent(component));
+    }
+    return { components };
+  }
+
+  private async assertStableDirectoryChain(snapshot: DirectoryChainSnapshot): Promise<void> {
+    const current = await this.captureDirectoryChain(this.cacheDir);
+    if (
+      current.components.length !== snapshot.components.length ||
+      !current.components.every((component, index) =>
+        sameIdentity(component, snapshot.components[index]!),
+      )
+    ) {
+      throw new Error('Codex model cache directory changed during operation');
+    }
+  }
+
+  private getCacheDirectoryIdentity(snapshot: DirectoryChainSnapshot): DirectoryComponentIdentity {
+    const identity = snapshot.components.find((component) => component.path === this.cacheDir);
+    if (!identity) throw new Error('Missing Codex model cache directory identity');
+    return identity;
+  }
+
+  private async captureSafeDirectories(): Promise<DirectoryChainSnapshot> {
+    const snapshot = await this.captureDirectoryChain(this.cacheDir);
+    const baseIdentity = snapshot.components.find((component) => component.path === this.baseDir);
+    const cacheIdentity = snapshot.components.find((component) => component.path === this.cacheDir);
+    if (!baseIdentity || !cacheIdentity) throw new Error('Missing Codex model cache directories');
+    this.requireCurrentUserDirectory(baseIdentity);
+    this.requireCurrentUserDirectory(cacheIdentity);
+    return snapshot;
+  }
+
+  private async ensureSafeDirectories(): Promise<DirectoryChainSnapshot> {
+    for (const component of pathComponents(this.cacheDir)) {
+      try {
+        const existing = await this.inspectDirectoryComponent(component);
+        if (component === this.baseDir || component === this.cacheDir) {
+          this.requireCurrentUserDirectory(existing);
+        }
+      } catch (error) {
+        if (!isMissing(error)) throw error;
+        const parentSnapshot = await this.captureDirectoryChain(dirname(component));
+        try {
+          await this.fs.mkdir(component, { mode: 0o700 });
+        } catch (mkdirError) {
+          if ((mkdirError as NodeJS.ErrnoException).code !== 'EEXIST') throw mkdirError;
+        }
+        const created = await this.inspectDirectoryComponent(component);
+        this.requireCurrentUserDirectory(created);
+        const currentParent = await this.captureDirectoryChain(dirname(component));
+        if (
+          currentParent.components.length !== parentSnapshot.components.length ||
+          !currentParent.components.every((entry, index) =>
+            sameIdentity(entry, parentSnapshot.components[index]!),
+          )
+        ) {
+          throw new Error('Codex model cache parent changed during creation');
+        }
+      }
+    }
+    return this.captureSafeDirectories();
+  }
+
+  private async lstatSafeFile(
+    path: string,
+    snapshot: DirectoryChainSnapshot,
+    allowMissing: boolean,
+  ): Promise<Stats | null> {
+    await this.assertStableDirectoryChain(snapshot);
+    let pathStat: Stats;
+    try {
+      pathStat = await this.fs.lstat(path);
+    } catch (error) {
+      await this.assertStableDirectoryChain(snapshot);
+      if (allowMissing && isMissing(error)) return null;
+      throw error;
+    }
+    await this.assertStableDirectoryChain(snapshot);
+    if (
+      pathStat.isSymbolicLink() ||
+      !pathStat.isFile() ||
+      (this.effectiveUid !== undefined && pathStat.uid !== this.effectiveUid)
+    ) {
+      throw new Error('Unsafe Codex model cache file');
+    }
+    return pathStat;
   }
 
   async load(accountId: string, now = Date.now()): Promise<CodexModelCatalogCacheEntry | null> {
@@ -158,56 +489,59 @@ export class FileCodexModelCatalogStore implements CodexModelCatalogStore {
       return null;
     }
 
+    let handle: FileHandle | undefined;
     try {
-      const baseStat = await lstat(this.baseDir);
-      if (baseStat.isSymbolicLink() || !baseStat.isDirectory()) return null;
-    } catch {
-      return null;
-    }
+      const snapshot = await this.captureSafeDirectories();
+      await this.assertStableDirectoryChain(snapshot);
+      await this.fs.chmod(this.cacheDir, 0o700);
+      await this.assertStableDirectoryChain(snapshot);
 
-    let directoryStat: Awaited<ReturnType<typeof lstat>>;
-    try {
-      directoryStat = await lstat(this.cacheDir);
-      if (directoryStat.isSymbolicLink() || !directoryStat.isDirectory()) return null;
-      await chmod(this.cacheDir, 0o700);
-    } catch {
-      return null;
-    }
-
-    let pathStat: Awaited<ReturnType<typeof lstat>>;
-    try {
-      pathStat = await lstat(this.cachePath);
-      if (pathStat.isSymbolicLink() || !pathStat.isFile()) return null;
-    } catch {
-      return null;
-    }
-
-    let handle: Awaited<ReturnType<typeof open>> | undefined;
-    try {
-      handle = await open(this.cachePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+      const pathStat = await this.lstatSafeFile(this.cachePath, snapshot, false);
+      if (!pathStat) return null;
+      await this.assertStableDirectoryChain(snapshot);
+      handle = await this.fs.open(this.cachePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+      await this.assertStableDirectoryChain(snapshot);
       const openedStat = await handle.stat();
+      const postOpenPathStat = await this.lstatSafeFile(this.cachePath, snapshot, false);
       if (
+        !postOpenPathStat ||
         !openedStat.isFile() ||
-        openedStat.dev !== pathStat.dev ||
-        openedStat.ino !== pathStat.ino
+        !sameFile(openedStat, pathStat) ||
+        !sameFile(openedStat, postOpenPathStat) ||
+        (this.effectiveUid !== undefined && openedStat.uid !== this.effectiveUid) ||
+        openedStat.size > CODEX_MODEL_CACHE_MAX_BYTES
       ) {
         return null;
       }
       await handle.chmod(0o600);
-      const parsed: unknown = JSON.parse(await handle.readFile('utf8'));
-      if (!isRecord(parsed) || !hasOnlyKeys(parsed, TOP_LEVEL_KEYS)) return null;
+      const raw = await readOpenedFileCapped(handle);
+      if (!raw) return null;
+      const postReadOpenedStat = await handle.stat();
+      if (
+        postReadOpenedStat.size !== openedStat.size ||
+        postReadOpenedStat.size !== raw.byteLength ||
+        postReadOpenedStat.size > CODEX_MODEL_CACHE_MAX_BYTES
+      ) {
+        return null;
+      }
+      await this.assertStableDirectoryChain(snapshot);
+      const postReadPathStat = await this.lstatSafeFile(this.cachePath, snapshot, false);
+      if (!postReadPathStat || !sameFile(openedStat, postReadPathStat)) return null;
+      const parsed: unknown = JSON.parse(raw.toString('utf8'));
+      if (!isRecord(parsed) || !hasExactKeys(parsed, TOP_LEVEL_KEYS)) return null;
       if (
         parsed.version !== CODEX_MODEL_CACHE_SCHEMA_VERSION ||
         parsed.compatibilityVersion !== CODEX_COMPATIBILITY_VERSION ||
         parsed.accountScope !== accountScope(accountId) ||
-        !Number.isFinite(parsed.validatedAt)
+        !Number.isSafeInteger(parsed.validatedAt) ||
+        (parsed.validatedAt as number) < 0 ||
+        !isCanonicalModelArray(parsed.models)
       ) {
         return null;
       }
       const validatedAt = parsed.validatedAt as number;
       const age = now - validatedAt;
-      if (validatedAt < 0 || age < 0 || age >= CODEX_MODEL_CACHE_TTL_MS) return null;
-      if (!Array.isArray(parsed.models) || !parsed.models.every(hasStrictModelKeys)) return null;
+      if (age < 0 || age >= CODEX_MODEL_CACHE_TTL_MS) return null;
       const models = rebuildCodexModelCatalog(parsed.models);
       return models ? { models, validatedAt } : null;
     } catch {
@@ -229,47 +563,22 @@ export class FileCodexModelCatalogStore implements CodexModelCatalogStore {
       if (
         typeof accountId !== 'string' ||
         accountId.length === 0 ||
-        !Number.isFinite(validatedAt) ||
+        !Number.isSafeInteger(validatedAt) ||
         validatedAt < 0
       ) {
         throw new Error('Invalid Codex model cache metadata');
       }
       const safeModels = rebuildCodexModelCatalog(models);
-      if (!safeModels) throw new Error('Invalid Codex model cache schema');
+      if (!safeModels || !isCanonicalModelArray(safeModels)) {
+        throw new Error('Invalid Codex model cache schema');
+      }
       if (options.shouldCommit && !(await options.shouldCommit())) return false;
 
-      try {
-        const baseStat = await lstat(this.baseDir);
-        if (baseStat.isSymbolicLink() || !baseStat.isDirectory()) {
-          throw new Error('Unsafe Codex model cache base directory');
-        }
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-        await mkdir(this.baseDir, { recursive: true, mode: 0o700 });
-        const baseStat = await lstat(this.baseDir);
-        if (baseStat.isSymbolicLink() || !baseStat.isDirectory()) {
-          throw new Error('Unsafe Codex model cache base directory');
-        }
-      }
-      try {
-        await mkdir(this.cacheDir, { mode: 0o700 });
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      }
-      const directoryStat = await lstat(this.cacheDir);
-      if (directoryStat.isSymbolicLink() || !directoryStat.isDirectory()) {
-        throw new Error('Unsafe Codex model cache directory');
-      }
-      await chmod(this.cacheDir, 0o700);
-
-      try {
-        const targetStat = await lstat(this.cachePath);
-        if (targetStat.isSymbolicLink() || !targetStat.isFile()) {
-          throw new Error('Unsafe Codex model cache file');
-        }
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      }
+      const snapshot = await this.ensureSafeDirectories();
+      await this.assertStableDirectoryChain(snapshot);
+      await this.fs.chmod(this.cacheDir, 0o700);
+      await this.assertStableDirectoryChain(snapshot);
+      await this.lstatSafeFile(this.cachePath, snapshot, true);
 
       const disk = {
         version: CODEX_MODEL_CACHE_SCHEMA_VERSION,
@@ -278,26 +587,69 @@ export class FileCodexModelCatalogStore implements CodexModelCatalogStore {
         accountScope: accountScope(accountId),
         models: safeModels,
       };
+      const serialized = `${JSON.stringify(disk)}\n`;
+      if (Buffer.byteLength(serialized, 'utf8') > CODEX_MODEL_CACHE_MAX_BYTES) {
+        throw new Error('Codex model cache exceeds maximum size');
+      }
       const temporaryPath = join(
         this.cacheDir,
         `.${CODEX_MODEL_CACHE_FILE_NAME}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`,
       );
-      let handle: Awaited<ReturnType<typeof open>> | undefined;
+      let handle: FileHandle | undefined;
+      let temporaryStat: Stats | undefined;
       let renamed = false;
       try {
-        handle = await open(temporaryPath, 'wx', 0o600);
-        await handle.writeFile(`${JSON.stringify(disk)}\n`, 'utf8');
+        await this.assertStableDirectoryChain(snapshot);
+        handle = await this.fs.open(
+          temporaryPath,
+          constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+          0o600,
+        );
+        await this.assertStableDirectoryChain(snapshot);
+        temporaryStat = await handle.stat();
+        if (
+          !temporaryStat.isFile() ||
+          (this.effectiveUid !== undefined && temporaryStat.uid !== this.effectiveUid)
+        ) {
+          throw new Error('Unsafe Codex model cache temporary file');
+        }
+        await handle.writeFile(serialized, 'utf8');
         await handle.chmod(0o600);
         await handle.sync();
         await handle.close();
         handle = undefined;
-        await rename(temporaryPath, this.cachePath);
+
+        if (options.shouldCommit && !(await options.shouldCommit())) return false;
+        await this.assertStableDirectoryChain(snapshot);
+        const closedTemporaryStat = await this.lstatSafeFile(temporaryPath, snapshot, false);
+        if (!closedTemporaryStat || !sameFile(closedTemporaryStat, temporaryStat)) {
+          throw new Error('Codex model cache temporary file changed before commit');
+        }
+        await this.fs.rename(temporaryPath, this.cachePath);
         renamed = true;
-        await fsyncDirectoryBestEffort(this.cacheDir);
+        await this.assertStableDirectoryChain(snapshot);
+        const committedStat = await this.lstatSafeFile(this.cachePath, snapshot, false);
+        if (!committedStat || !sameFile(committedStat, temporaryStat)) {
+          throw new Error('Codex model cache target changed during commit');
+        }
+        const cacheIdentity = this.getCacheDirectoryIdentity(snapshot);
+        await fsyncDirectoryBestEffort(this.cacheDir, cacheIdentity, this.fs);
+        await this.assertStableDirectoryChain(snapshot);
         return true;
       } finally {
         await handle?.close().catch(() => undefined);
-        if (!renamed) await unlink(temporaryPath).catch(() => undefined);
+        if (!renamed && temporaryStat) {
+          try {
+            const currentTemporaryStat = await this.lstatSafeFile(temporaryPath, snapshot, true);
+            if (currentTemporaryStat && sameFile(currentTemporaryStat, temporaryStat)) {
+              await this.assertStableDirectoryChain(snapshot);
+              await this.fs.unlink(temporaryPath);
+              await this.assertStableDirectoryChain(snapshot);
+            }
+          } catch {
+            // Never chase cleanup through a directory whose identity changed.
+          }
+        }
       }
     });
   }
@@ -305,17 +657,23 @@ export class FileCodexModelCatalogStore implements CodexModelCatalogStore {
   clear(): Promise<void> {
     return runMutation(this.coordinationKey, async () => {
       try {
-        const baseStat = await lstat(this.baseDir);
-        if (baseStat.isSymbolicLink() || !baseStat.isDirectory()) return;
-        const directoryStat = await lstat(this.cacheDir);
-        if (directoryStat.isSymbolicLink() || !directoryStat.isDirectory()) return;
-        const targetStat = await lstat(this.cachePath);
-        if (targetStat.isSymbolicLink() || !targetStat.isFile()) return;
-        await unlink(this.cachePath);
-        await fsyncDirectoryBestEffort(this.cacheDir);
+        const snapshot = await this.captureSafeDirectories();
+        const target = await this.lstatSafeFile(this.cachePath, snapshot, true);
+        if (!target) return;
+        await this.assertStableDirectoryChain(snapshot);
+        await this.fs.unlink(this.cachePath);
+        await this.assertStableDirectoryChain(snapshot);
+        const cacheIdentity = this.getCacheDirectoryIdentity(snapshot);
+        await fsyncDirectoryBestEffort(this.cacheDir, cacheIdentity, this.fs);
+        await this.assertStableDirectoryChain(snapshot);
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        if (!isMissing(error)) throw error;
       }
     });
   }
 }
+
+// Node does not expose openat/renameat/unlinkat primitives relative to a held
+// directory descriptor. The recorded dev+ino chain and immediate pre/post
+// checks fail closed on detected swaps, but a same-user swap in the final
+// check-to-syscall window remains a portable TOCTOU residual.

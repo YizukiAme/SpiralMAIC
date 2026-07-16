@@ -2,6 +2,7 @@ import { CodexLoginManager } from './login-manager';
 import { FileCodexModelCatalogStore, type CodexModelCatalogStore } from './model-cache-store';
 import { CodexModelDiscovery, getCodexCredentialGeneration } from './models';
 import {
+  invalidateCodexCredentialLeases,
   ManagedCodexTokenProvider,
   type CodexClock,
   type TokenExchangeFetch,
@@ -27,7 +28,8 @@ interface CreateCodexAuthRuntimeOptions {
   clock?: CodexClock;
 }
 
-const RUNTIME_KEY = Symbol.for('openmaic.codex.oauth.auth-runtime.v4');
+// v5 adds account/catalog capability leases; never reuse a pre-lease HMR runtime.
+const RUNTIME_KEY = Symbol.for('openmaic.codex.oauth.auth-runtime.v5');
 const runtimeHost = globalThis as unknown as Record<PropertyKey, unknown>;
 
 function isCodexAuthRuntime(value: unknown): value is CodexAuthRuntime {
@@ -52,7 +54,10 @@ export function createCodexAuthRuntime(
   });
   const loginManager = new CodexLoginManager({
     vault,
-    onCredentialsReplaced: clearModelCatalog,
+    onCredentialsReplaced: async () => {
+      invalidateCodexCredentialLeases(tokenProvider);
+      await clearModelCatalog();
+    },
     ...(options.oauthFetch ? { oauthFetch: options.oauthFetch } : {}),
     ...(options.clock ? { clock: options.clock } : {}),
   });
