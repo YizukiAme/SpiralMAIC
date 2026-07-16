@@ -179,6 +179,7 @@ function getASRProviderName(providerId: ASRProviderId, t: (key: string) => strin
 // ─── Image/Video provider name helpers ───
 const IMAGE_PROVIDER_NAMES: Record<ImageProviderId, string> = {
   seedream: 'providerSeedream',
+  'codex-image': 'providerCodexImage',
   'openai-image': 'providerOpenAIImage',
   'qwen-image': 'providerQwenImage',
   'nano-banana': 'providerNanoBanana',
@@ -190,6 +191,7 @@ const IMAGE_PROVIDER_NAMES: Record<ImageProviderId, string> = {
 
 const IMAGE_PROVIDER_ICONS: Record<ImageProviderId, string> = {
   seedream: '/logos/doubao.svg',
+  'codex-image': '/logos/openai.svg',
   'openai-image': '/logos/openai.svg',
   'qwen-image': '/logos/bailian.svg',
   'nano-banana': '/logos/gemini.svg',

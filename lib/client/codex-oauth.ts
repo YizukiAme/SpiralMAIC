@@ -486,7 +486,9 @@ export class CodexOAuthClient {
 }
 
 interface CodexProviderState {
-  fetchServerProviders: () => Promise<void>;
+  fetchServerProviders: (options?: {
+    reconcileOAuthImageSelectionImmediately?: boolean;
+  }) => Promise<void>;
   providersConfig: Record<string, { isServerConfigured?: boolean; models?: Array<{ id: string }> }>;
   setModel: (providerId: 'openai-codex', modelId: string) => void;
 }
@@ -504,7 +506,9 @@ export async function syncCodexProviderAndSelect(
 export async function syncServerProvidersAfterAccessUnlock(
   getState: () => Pick<CodexProviderState, 'fetchServerProviders'>,
 ): Promise<void> {
-  await getState().fetchServerProviders();
+  await getState().fetchServerProviders({
+    reconcileOAuthImageSelectionImmediately: true,
+  });
 }
 
 export function getProviderBadgeTranslationKey(provider: {

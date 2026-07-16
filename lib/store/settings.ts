@@ -20,7 +20,7 @@ import { DEFAULT_VOXCPM_BACKEND, VOXCPM_MODEL_ID, VOXCPM_VLLM_MODEL_ID } from '@
 import { PDF_PROVIDERS } from '@/lib/pdf/constants';
 import type { PDFProviderId } from '@/lib/pdf/types';
 import type { ImageProviderId, VideoProviderId } from '@/lib/media/types';
-import { IMAGE_PROVIDERS } from '@/lib/media/image-providers';
+import { IMAGE_PROVIDERS, getImageProviderCredentialMode } from '@/lib/media/image-providers';
 import { VIDEO_PROVIDERS } from '@/lib/media/video-providers';
 import { WEB_SEARCH_PROVIDERS, buildWebSearchFallbackOrder } from '@/lib/web-search/constants';
 import type { BaiduSubSources, WebSearchProviderId } from '@/lib/web-search/types';
@@ -41,6 +41,11 @@ interface PendingCodexSelectionRestore {
   fallback: { providerId: ProviderId; modelId: string };
 }
 let pendingCodexSelectionRestore: PendingCodexSelectionRestore | null = null;
+interface PendingOAuthImageUsability {
+  requestGeneration: number;
+  providerIds: Set<ImageProviderId>;
+}
+let pendingOAuthImageUsability: PendingOAuthImageUsability | null = null;
 
 function matchesLLMSelection(
   state: { providerId: ProviderId; modelId: string },
@@ -214,6 +219,8 @@ export interface SettingsState {
 
   // Media generation toggles
   imageGenerationEnabled: boolean;
+  /** null until the user explicitly chooses on/off; survives provider outages. */
+  imageGenerationPreference: boolean | null;
   videoGenerationEnabled: boolean;
   reviewOutlineEnabled: boolean;
 
@@ -419,7 +426,9 @@ export interface SettingsState {
   setBaiduSubSources: (sources: Partial<BaiduSubSources>) => void;
 
   // Server provider actions
-  fetchServerProviders: () => Promise<void>;
+  fetchServerProviders: (options?: {
+    reconcileOAuthImageSelectionImmediately?: boolean;
+  }) => Promise<void>;
 }
 
 // Initialize default providers config
@@ -502,12 +511,87 @@ function resolveMediaModels<T extends { id: string; name: string }>(
     : [...builtInModels, ...customModels];
 }
 
+type ImageProviderSettings = SettingsState['imageProvidersConfig'][ImageProviderId];
+
+function sanitizeOAuthImageProviderConfig(
+  providerId: ImageProviderId,
+  config: ImageProviderSettings,
+): ImageProviderSettings {
+  if (getImageProviderCredentialMode(IMAGE_PROVIDERS[providerId]) !== 'oauth') {
+    return config;
+  }
+  return {
+    ...config,
+    apiKey: '',
+    baseUrl: '',
+    customModels: [],
+    replaceBuiltInModels: false,
+  };
+}
+
+function resetOAuthImageProviderState(
+  config: SettingsState['imageProvidersConfig'],
+): SettingsState['imageProvidersConfig'] {
+  const next = { ...config };
+  for (const providerId of Object.keys(IMAGE_PROVIDERS) as ImageProviderId[]) {
+    if (getImageProviderCredentialMode(IMAGE_PROVIDERS[providerId]) !== 'oauth') continue;
+    next[providerId] = {
+      ...sanitizeOAuthImageProviderConfig(providerId, next[providerId]),
+      isServerConfigured: false,
+    };
+  }
+  return next;
+}
+
+function resolveImageProviderModels(
+  providerId: ImageProviderId,
+  config?: ImageProviderSettings,
+): Array<{ id: string; name: string }> {
+  const provider = IMAGE_PROVIDERS[providerId];
+  const builtInModels = provider?.models ?? [];
+  if (provider && getImageProviderCredentialMode(provider) === 'oauth') {
+    return builtInModels;
+  }
+  return resolveMediaModels(builtInModels, config);
+}
+
 function isUsableMediaProvider(
-  provider: { requiresApiKey: boolean } | undefined,
+  provider: { requiresApiKey: boolean; credentialMode?: 'api-key' | 'oauth' | 'none' } | undefined,
   config: { apiKey?: string; enabled?: boolean; isServerConfigured?: boolean } | undefined,
 ): boolean {
   if (!provider || config?.enabled === false) return false;
-  return !provider.requiresApiKey || !!config?.apiKey || !!config?.isServerConfigured;
+  const credentialMode = getImageProviderCredentialMode(provider);
+  if (credentialMode === 'oauth') return config?.isServerConfigured === true;
+  if (credentialMode === 'none') return true;
+  return !!config?.apiKey || !!config?.isServerConfigured;
+}
+
+/** Server-sync compatibility: existing image providers retain their legacy key/server semantics. */
+function isUsableSyncedImageProvider(
+  provider: { requiresApiKey: boolean; credentialMode?: 'api-key' | 'oauth' | 'none' } | undefined,
+  config: { apiKey?: string; enabled?: boolean; isServerConfigured?: boolean } | undefined,
+): boolean {
+  if (!provider || !config) return false;
+  const credentialMode = getImageProviderCredentialMode(provider);
+  if (credentialMode === 'oauth' || credentialMode === 'none') {
+    return isUsableMediaProvider(provider, config);
+  }
+  return !!config.apiKey || !!config.isServerConfigured;
+}
+
+function buildImageProviderFallbackOrder(
+  config: SettingsState['imageProvidersConfig'],
+  excludedProviderId?: ImageProviderId,
+): ImageProviderId[] {
+  const usable = (Object.keys(IMAGE_PROVIDERS) as ImageProviderId[]).filter(
+    (providerId) =>
+      providerId !== excludedProviderId &&
+      isUsableSyncedImageProvider(IMAGE_PROVIDERS[providerId], config[providerId]),
+  );
+  return [
+    ...usable.filter((providerId) => config[providerId].isServerConfigured),
+    ...usable.filter((providerId) => !config[providerId].isServerConfigured),
+  ];
 }
 
 // Initialize default audio config
@@ -584,6 +668,7 @@ const getDefaultImageConfig = () => ({
   imageModelId: 'doubao-seedream-5-0-260128',
   imageProvidersConfig: {
     seedream: { apiKey: '', baseUrl: '', enabled: false },
+    'codex-image': { apiKey: '', baseUrl: '', enabled: true },
     'openai-image': { apiKey: '', baseUrl: '', enabled: false },
     'qwen-image': { apiKey: '', baseUrl: '', enabled: false },
     'nano-banana': { apiKey: '', baseUrl: '', enabled: false },
@@ -679,7 +764,11 @@ function ensureValidProviderSelections(state: Partial<SettingsState>): void {
   }
   ensureBaiduSubSources(state);
 
-  if (!hasProviderId(IMAGE_PROVIDERS, state.imageProviderId)) {
+  if (
+    state.imageProviderId === undefined ||
+    (state.imageProviderId !== ('' as ImageProviderId) &&
+      !hasProviderId(IMAGE_PROVIDERS, state.imageProviderId))
+  ) {
     state.imageProviderId = defaultImageConfig.imageProviderId;
   }
 
@@ -796,17 +885,47 @@ function ensureBuiltInProviders(state: Partial<SettingsState>): void {
 }
 
 function distrustPersistedOAuthSelection(state: Partial<SettingsState>): void {
-  if (!state.providersConfig || !state.providerId) return;
-  const selected = state.providersConfig[state.providerId];
-  if (selected?.credentialMode !== 'oauth' || selected.isServerConfigured) return;
+  if (state.providersConfig && state.providerId) {
+    const selected = state.providersConfig[state.providerId];
+    if (selected?.credentialMode === 'oauth' && !selected.isServerConfigured) {
+      const resolved = resolveLLMSelection(
+        state.providersConfig,
+        state.providerId,
+        state.modelId ?? '',
+      );
+      state.providerId = resolved.providerId;
+      state.modelId = resolved.modelId;
+    }
+  }
 
-  const resolved = resolveLLMSelection(
-    state.providersConfig,
-    state.providerId,
-    state.modelId ?? '',
-  );
-  state.providerId = resolved.providerId;
-  state.modelId = resolved.modelId;
+  if (!state.imageProvidersConfig) return;
+  for (const providerId of Object.keys(IMAGE_PROVIDERS) as ImageProviderId[]) {
+    if (IMAGE_PROVIDERS[providerId].credentialMode !== 'oauth') continue;
+    const config = state.imageProvidersConfig[providerId];
+    if (!config) continue;
+    state.imageProvidersConfig[providerId] = {
+      ...sanitizeOAuthImageProviderConfig(providerId, config),
+      isServerConfigured: false,
+    };
+  }
+
+  const selectedImageProvider = state.imageProviderId
+    ? IMAGE_PROVIDERS[state.imageProviderId]
+    : undefined;
+  if (selectedImageProvider?.credentialMode !== 'oauth') return;
+
+  const fallback = buildImageProviderFallbackOrder(
+    state.imageProvidersConfig,
+    state.imageProviderId,
+  )[0];
+  state.imageProviderId = fallback ?? ('' as ImageProviderId);
+  state.imageModelId = fallback
+    ? resolveSelectedModel(
+        state.imageModelId ?? '',
+        resolveImageProviderModels(fallback, state.imageProvidersConfig[fallback]),
+      )
+    : '';
+  if (!fallback) state.imageGenerationEnabled = false;
 }
 
 /**
@@ -1048,6 +1167,7 @@ export const useSettingsStore = create<SettingsState>()(
 
         // Media generation toggles (off by default)
         imageGenerationEnabled: false,
+        imageGenerationPreference: null,
         videoGenerationEnabled: false,
         reviewOutlineEnabled: false,
 
@@ -1262,20 +1382,40 @@ export const useSettingsStore = create<SettingsState>()(
             imageProviderId: providerId,
             imageModelId: resolveSelectedModel(
               state.imageModelId,
-              resolveMediaModels(
-                IMAGE_PROVIDERS[providerId]?.models ?? [],
-                state.imageProvidersConfig[providerId],
-              ),
+              resolveImageProviderModels(providerId, state.imageProvidersConfig[providerId]),
             ),
           })),
-        setImageModelId: (modelId) => set({ imageModelId: modelId }),
+        setImageModelId: (modelId) =>
+          set((state) => {
+            const selectedProvider = IMAGE_PROVIDERS[state.imageProviderId];
+            return {
+              imageModelId:
+                selectedProvider && getImageProviderCredentialMode(selectedProvider) === 'oauth'
+                  ? resolveSelectedModel(
+                      modelId,
+                      resolveImageProviderModels(
+                        state.imageProviderId,
+                        state.imageProvidersConfig[state.imageProviderId],
+                      ),
+                    )
+                  : modelId,
+            };
+          }),
 
         setImageProviderConfig: (providerId, config) =>
           set((state) => {
-            const mergedProvider = {
-              ...state.imageProvidersConfig[providerId],
+            const currentProvider = state.imageProvidersConfig[providerId];
+            let mergedProvider: ImageProviderSettings = {
+              ...currentProvider,
               ...config,
             };
+            if (getImageProviderCredentialMode(IMAGE_PROVIDERS[providerId]) === 'oauth') {
+              mergedProvider = sanitizeOAuthImageProviderConfig(providerId, {
+                ...mergedProvider,
+                // Only a successful server sync may publish managed state.
+                isServerConfigured: currentProvider.isServerConfigured,
+              });
+            }
             const imageProvidersConfig = {
               ...state.imageProvidersConfig,
               [providerId]: mergedProvider,
@@ -1294,8 +1434,8 @@ export const useSettingsStore = create<SettingsState>()(
                 );
                 const fallback =
                   usableFallback ?? providerIds.find((id) => id !== providerId) ?? providerId;
-                const fallbackModels = resolveMediaModels(
-                  IMAGE_PROVIDERS[fallback]?.models ?? [],
+                const fallbackModels = resolveImageProviderModels(
+                  fallback,
                   imageProvidersConfig[fallback],
                 );
                 return {
@@ -1308,10 +1448,7 @@ export const useSettingsStore = create<SettingsState>()(
               // Atomic invariant (#580): a config edit on the active image
               // provider (e.g. deleting the selected custom model) must not
               // leave imageModelId pointing at a model that no longer exists.
-              const models = resolveMediaModels(
-                IMAGE_PROVIDERS[providerId]?.models ?? [],
-                mergedProvider,
-              );
+              const models = resolveImageProviderModels(providerId, mergedProvider);
               const imageModelId = resolveSelectedModel(state.imageModelId, models);
               if (imageModelId) {
                 return { ...base, imageModelId };
@@ -1387,10 +1524,15 @@ export const useSettingsStore = create<SettingsState>()(
         setImageGenerationEnabled: (enabled) => {
           if (enabled) {
             const cfg = get().imageProvidersConfig;
-            const hasUsable = Object.values(cfg).some((c) => c.isServerConfigured || c.apiKey);
+            const hasUsable = (Object.keys(IMAGE_PROVIDERS) as ImageProviderId[]).some((id) =>
+              isUsableSyncedImageProvider(IMAGE_PROVIDERS[id], cfg[id]),
+            );
             if (!hasUsable) return;
           }
-          set({ imageGenerationEnabled: enabled });
+          set({
+            imageGenerationEnabled: enabled,
+            imageGenerationPreference: enabled,
+          });
         },
         setVideoGenerationEnabled: (enabled) => {
           if (enabled) {
@@ -1519,10 +1661,28 @@ export const useSettingsStore = create<SettingsState>()(
           }),
 
         // Fetch server-configured providers and merge into local state
-        fetchServerProviders: async () => {
+        fetchServerProviders: async (options) => {
           const requestGeneration = ++latestServerProvidersRequest;
           const selectionRevisionAtRequest = userLLMSelectionRevision;
           const selectedAtRequest = get();
+          const currentlyUsableOAuthImageProviders = new Set(
+            (Object.keys(IMAGE_PROVIDERS) as ImageProviderId[]).filter(
+              (providerId) =>
+                getImageProviderCredentialMode(IMAGE_PROVIDERS[providerId]) === 'oauth' &&
+                isUsableSyncedImageProvider(
+                  IMAGE_PROVIDERS[providerId],
+                  selectedAtRequest.imageProvidersConfig[providerId],
+                ),
+            ),
+          );
+          const usableOAuthImageProvidersAtRequest = new Set([
+            ...(pendingOAuthImageUsability?.providerIds ?? []),
+            ...currentlyUsableOAuthImageProviders,
+          ]);
+          pendingOAuthImageUsability = {
+            requestGeneration,
+            providerIds: new Set(usableOAuthImageProvidersAtRequest),
+          };
           const pendingAtRequest = pendingCodexSelectionRestore;
           const inheritsPendingCodexIntent = Boolean(
             selectedAtRequest.providerId !== 'openai-codex' &&
@@ -1544,10 +1704,19 @@ export const useSettingsStore = create<SettingsState>()(
               pendingCodexSelectionRestore = null;
             }
           };
-          const scrubOAuthState = (preserveCodexRestore = true) => {
+          const clearPendingOAuthImageUsability = () => {
+            if (pendingOAuthImageUsability?.requestGeneration === requestGeneration) {
+              pendingOAuthImageUsability = null;
+            }
+          };
+          const scrubOAuthState = (
+            preserveCodexRestore = true,
+            reconcileImageSelection = false,
+          ) => {
             if (requestGeneration !== latestServerProvidersRequest) return;
             set((state) => {
               const providersConfig = resetOAuthProviderState(state.providersConfig);
+              const imageProvidersConfig = resetOAuthImageProviderState(state.imageProvidersConfig);
               const selection = resolveLLMSelection(
                 providersConfig,
                 state.providerId,
@@ -1574,26 +1743,50 @@ export const useSettingsStore = create<SettingsState>()(
               } else {
                 clearPendingCodexRestore();
               }
+              const selectedImageProvider = IMAGE_PROVIDERS[state.imageProviderId];
+              const shouldReconcileImage = Boolean(
+                reconcileImageSelection &&
+                selectedImageProvider &&
+                getImageProviderCredentialMode(selectedImageProvider) === 'oauth',
+              );
+              const imageFallback = shouldReconcileImage
+                ? buildImageProviderFallbackOrder(imageProvidersConfig, state.imageProviderId)[0]
+                : undefined;
               return {
                 providersConfig,
+                imageProvidersConfig,
                 codexFastMode: false,
                 ...(selection.providerId !== state.providerId && {
                   providerId: selection.providerId,
                 }),
                 ...(selection.modelId !== state.modelId && { modelId: selection.modelId }),
+                ...(shouldReconcileImage && {
+                  imageProviderId: imageFallback ?? ('' as ImageProviderId),
+                  imageModelId: imageFallback
+                    ? resolveSelectedModel(
+                        state.imageModelId,
+                        resolveImageProviderModels(
+                          imageFallback,
+                          imageProvidersConfig[imageFallback],
+                        ),
+                      )
+                    : '',
+                  ...(!imageFallback ? { imageGenerationEnabled: false } : {}),
+                }),
               };
             });
           };
           const finalizeFailedSync = () => {
             if (requestGeneration !== latestServerProvidersRequest) return;
-            scrubOAuthState(false);
+            scrubOAuthState(false, true);
             clearPendingCodexRestore();
+            clearPendingOAuthImageUsability();
           };
 
           // Account identity is intentionally absent from this browser DTO.
           // Drop account-scoped OAuth state before every refresh, then publish
           // only the latest successful response.
-          scrubOAuthState();
+          scrubOAuthState(true, options?.reconcileOAuthImageSelectionImmediately === true);
           try {
             const res = await fetch('/api/server-providers');
             if (requestGeneration !== latestServerProvidersRequest) return;
@@ -1794,8 +1987,11 @@ export const useSettingsStore = create<SettingsState>()(
               for (const pid of Object.keys(newImageConfig)) {
                 const key = pid as ImageProviderId;
                 if (newImageConfig[key]) {
+                  const isOAuth = IMAGE_PROVIDERS[key]?.credentialMode === 'oauth';
                   newImageConfig[key] = {
-                    ...newImageConfig[key],
+                    ...(isOAuth
+                      ? sanitizeOAuthImageProviderConfig(key, newImageConfig[key])
+                      : newImageConfig[key]),
                     isServerConfigured: false,
                   };
                 }
@@ -1883,7 +2079,24 @@ export const useSettingsStore = create<SettingsState>()(
               const ttsFallback = buildFallback<TTSProviderId>(newTTSConfig);
               const asrFallback = buildFallback<ASRProviderId>(newASRConfig);
               const pdfFallback = buildFallback<PDFProviderId>(newPDFConfig);
-              const imageFallback = buildFallback<ImageProviderId>(newImageConfig);
+              const imageProviderIds = Object.keys(IMAGE_PROVIDERS) as ImageProviderId[];
+              const priorUsableImageProviders = imageProviderIds.filter((providerId) =>
+                Boolean(
+                  isUsableSyncedImageProvider(
+                    IMAGE_PROVIDERS[providerId],
+                    state.imageProvidersConfig[providerId],
+                  ) ||
+                  (usableOAuthImageProvidersAtRequest.has(providerId) &&
+                    state.imageProvidersConfig[providerId]?.enabled !== false),
+                ),
+              );
+              const currentlyUsableImageProviders = imageProviderIds.filter((providerId) =>
+                isUsableSyncedImageProvider(
+                  IMAGE_PROVIDERS[providerId],
+                  newImageConfig[providerId],
+                ),
+              );
+              const imageFallback = buildImageProviderFallbackOrder(newImageConfig);
               const videoFallback = buildFallback<VideoProviderId>(newVideoConfig);
               const webSearchFallback = buildWebSearchFallbackOrder(newWebSearchConfig);
 
@@ -1920,11 +2133,19 @@ export const useSettingsStore = create<SettingsState>()(
                 pdfFallback,
                 'unpdf' as PDFProviderId,
               );
-              let validImageProvider = validateProvider(
-                state.imageProviderId,
-                newImageConfig,
-                imageFallback,
+              const selectedImageProviderIsUsable = isUsableSyncedImageProvider(
+                IMAGE_PROVIDERS[state.imageProviderId],
+                newImageConfig[state.imageProviderId],
               );
+              // Codex is the automatic image fallback only when no other usable
+              // provider exists. This also covers multiple providers becoming
+              // available in the same server sync.
+              const nonCodexImageFallback = imageFallback.find(
+                (providerId) => providerId !== 'codex-image',
+              );
+              let validImageProvider = selectedImageProviderIsUsable
+                ? state.imageProviderId
+                : (nonCodexImageFallback ?? imageFallback[0] ?? ('' as ImageProviderId));
               let validVideoProvider = validateProvider(
                 state.videoProviderId,
                 newVideoConfig,
@@ -1967,8 +2188,8 @@ export const useSettingsStore = create<SettingsState>()(
                   )
                 : '';
               const imageModels = validImageProvider
-                ? resolveMediaModels(
-                    IMAGE_PROVIDERS[validImageProvider as ImageProviderId]?.models ?? [],
+                ? resolveImageProviderModels(
+                    validImageProvider as ImageProviderId,
                     newImageConfig[validImageProvider as ImageProviderId],
                   )
                 : [];
@@ -1999,11 +2220,16 @@ export const useSettingsStore = create<SettingsState>()(
               let autoTtsVoice: string | undefined;
               let autoAsrProvider: ASRProviderId | undefined;
               let autoPdfProvider: PDFProviderId | undefined;
-              let autoImageProvider: ImageProviderId | undefined;
-              let autoImageModel: string | undefined;
               let autoVideoProvider: VideoProviderId | undefined;
               let autoVideoModel: string | undefined;
-              let autoImageEnabled: boolean | undefined;
+              let autoImageEnabled =
+                !state.imageGenerationEnabled &&
+                (state.imageGenerationPreference === true ||
+                  (state.imageGenerationPreference === null &&
+                    validImageProvider === 'codex-image' &&
+                    priorUsableImageProviders.length === 0))
+                  ? true
+                  : undefined;
               let autoVideoEnabled: boolean | undefined;
               let autoTtsEnabled: boolean | undefined;
 
@@ -2045,17 +2271,17 @@ export const useSettingsStore = create<SettingsState>()(
                   autoAsrProvider = serverAsrIds[0];
                 }
 
-                // Image: first server provider
                 const serverImageIds = Object.keys(data.image) as ImageProviderId[];
+                const usableServerImageIds = serverImageIds.filter((providerId) =>
+                  currentlyUsableImageProviders.includes(providerId),
+                );
                 if (
-                  serverImageIds.length > 0 &&
-                  !newImageConfig[state.imageProviderId]?.isServerConfigured
+                  usableServerImageIds.length > 0 &&
+                  !state.imageGenerationEnabled &&
+                  state.imageGenerationPreference !== false &&
+                  (usableServerImageIds.some((providerId) => providerId !== 'codex-image') ||
+                    priorUsableImageProviders.length === 0)
                 ) {
-                  autoImageProvider = serverImageIds[0];
-                  const models = IMAGE_PROVIDERS[autoImageProvider]?.models;
-                  if (models?.length) autoImageModel = models[0].id;
-                }
-                if (serverImageIds.length > 0 && !state.imageGenerationEnabled) {
                   autoImageEnabled = true;
                 }
 
@@ -2125,8 +2351,8 @@ export const useSettingsStore = create<SettingsState>()(
                 ...(validVideoModel !== state.videoModelId && {
                   videoModelId: validVideoModel,
                 }),
-                ...(shouldDisableImage && { imageGenerationEnabled: false }),
-                ...(shouldDisableVideo && { videoGenerationEnabled: false }),
+                ...(shouldDisableImage ? { imageGenerationEnabled: false } : {}),
+                ...(shouldDisableVideo ? { videoGenerationEnabled: false } : {}),
                 // First-run auto-select overrides validation (autoConfigApplied guard).
                 // On first sync, auto-select picks the best provider. On subsequent syncs,
                 // auto* variables stay undefined so only validation spreads take effect.
@@ -2136,10 +2362,6 @@ export const useSettingsStore = create<SettingsState>()(
                   ttsVoice: autoTtsVoice,
                 }),
                 ...(autoAsrProvider && { asrProviderId: autoAsrProvider }),
-                ...(autoImageProvider && {
-                  imageProviderId: autoImageProvider,
-                }),
-                ...(autoImageModel && { imageModelId: autoImageModel }),
                 ...(autoVideoProvider && {
                   videoProviderId: autoVideoProvider,
                 }),
@@ -2154,6 +2376,7 @@ export const useSettingsStore = create<SettingsState>()(
               };
             });
             clearPendingCodexRestore();
+            clearPendingOAuthImageUsability();
           } catch {
             finalizeFailedSync();
             // Silently fail — server providers are optional
@@ -2164,7 +2387,7 @@ export const useSettingsStore = create<SettingsState>()(
     },
     {
       name: 'settings-storage',
-      version: 5,
+      version: 6,
       // A rich Codex catalog is account-scoped server truth. Keep it in live
       // UI state, but persist only the audited bundled snapshot so browser
       // storage can never become a second last-known-good cache.
@@ -2177,6 +2400,17 @@ export const useSettingsStore = create<SettingsState>()(
             models: getBundledCodexModelCatalog(),
             isServerConfigured: false,
             serverModels: undefined,
+          },
+        },
+        imageProvidersConfig: {
+          ...state.imageProvidersConfig,
+          'codex-image': {
+            ...state.imageProvidersConfig['codex-image'],
+            apiKey: '',
+            baseUrl: '',
+            customModels: [],
+            replaceBuiltInModels: false,
+            isServerConfigured: false,
           },
         },
       }),
@@ -2280,6 +2514,11 @@ export const useSettingsStore = create<SettingsState>()(
         // Add default media generation toggles if missing
         if (state.imageGenerationEnabled === undefined) {
           state.imageGenerationEnabled = false;
+        }
+        if (version < 6 && state.imageGenerationPreference === undefined) {
+          // Existing installs have already presented the toggle, so preserve
+          // their current on/off value as explicit intent across provider loss.
+          state.imageGenerationPreference = state.imageGenerationEnabled;
         }
         if (state.videoGenerationEnabled === undefined) {
           state.videoGenerationEnabled = false;
