@@ -2,6 +2,8 @@ export const CODEX_ACCEPTANCE_ACCESS_CODE_ENV = 'OPENMAIC_ACCEPTANCE_ACCESS_CODE
 
 export type AcceptanceOutcome = 'PASS' | 'FAIL' | 'SKIP';
 
+export type CodexImageFailureSource = 'upstream-http' | 'network' | 'invalid-response' | 'timeout';
+
 export type SafeErrorCategory =
   | 'argument'
   | 'auth'
@@ -26,6 +28,8 @@ export interface SafeReport {
   modelId?: string;
   httpStatus?: number;
   errorCategory?: SafeErrorCategory;
+  failureSource?: CodexImageFailureSource;
+  upstreamStatus?: number;
   authenticated?: boolean;
   available?: boolean;
   connected?: boolean;
@@ -44,18 +48,22 @@ export interface SafeReport {
   assistantContinued?: boolean;
   applicationStopped?: boolean;
   refreshed?: boolean;
+  mimeType?: 'image/png';
   modelCount?: number;
   fastModelCount?: number;
   eventCount?: number;
   outlineCount?: number;
   sceneCount?: number;
   toolCallCount?: number;
+  width?: number;
+  height?: number;
 }
 
 export interface AcceptanceOptions {
   baseUrl: string;
   expectSignedOut: boolean;
   editorMode: 'enabled' | 'disabled';
+  includeImage: boolean;
   accessCode?: string;
 }
 

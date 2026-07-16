@@ -16,6 +16,7 @@ export {
 } from './codex-acceptance-validators';
 
 export const ACCEPTANCE_JSON_MAX_BYTES = 1024 * 1024;
+export const ACCEPTANCE_IMAGE_JSON_MAX_BYTES = 32 * 1024 * 1024;
 
 function validateRequestOrigin(url: string): void {
   let parsed: URL;
@@ -39,20 +40,23 @@ export async function safeFetch(
   timeoutMs: number,
 ): Promise<Response> {
   validateRequestOrigin(url);
+  const requestSignal = init.signal ?? AbortSignal.timeout(timeoutMs);
   try {
     return await fetcher(url, {
       ...init,
       // Never replay an access code, session cookie, or generation payload to
       // a redirect target. The configured origin is the full trust boundary.
       redirect: 'error',
-      signal: init.signal ?? AbortSignal.timeout(timeoutMs),
+      signal: requestSignal,
     });
   } catch {
-    fail('network');
+    const reason = requestSignal.reason as { name?: unknown } | undefined;
+    const source = requestSignal.aborted && reason?.name === 'TimeoutError' ? 'timeout' : 'network';
+    fail('network', undefined, source);
   }
 }
 
-export async function requireJson(response: Response): Promise<unknown> {
+async function requireBoundedJson(response: Response, maxBytes: number): Promise<unknown> {
   if (!response.ok) {
     await cancelResponseBody(response);
     fail(errorCategoryForStatus(response.status), response.status);
@@ -64,7 +68,7 @@ export async function requireJson(response: Response): Promise<unknown> {
     if (
       !/^\d{1,16}$/.test(normalizedLength) ||
       !Number.isSafeInteger(declaredLength) ||
-      declaredLength > ACCEPTANCE_JSON_MAX_BYTES
+      declaredLength > maxBytes
     ) {
       await cancelResponseBody(response);
       fail('invalid-json', response.status);
@@ -85,7 +89,7 @@ export async function requireJson(response: Response): Promise<unknown> {
       if (done) break;
       if (!value) continue;
       totalBytes += value.byteLength;
-      if (totalBytes > ACCEPTANCE_JSON_MAX_BYTES) {
+      if (totalBytes > maxBytes) {
         await reader.cancel().catch(() => undefined);
         fail('invalid-json', response.status);
       }
@@ -106,6 +110,36 @@ export async function requireJson(response: Response): Promise<unknown> {
   } catch {
     fail('invalid-json', response.status);
   }
+}
+
+export async function requireJson(response: Response): Promise<unknown> {
+  return requireBoundedJson(response, ACCEPTANCE_JSON_MAX_BYTES);
+}
+
+export async function requireCodexImageJson(response: Response): Promise<unknown> {
+  if (!response.ok) {
+    await cancelResponseBody(response);
+    const source = response.headers.get('x-openmaic-codex-image-error-source');
+    const safeSource =
+      source === 'upstream-http' ||
+      source === 'network' ||
+      source === 'invalid-response' ||
+      source === 'timeout'
+        ? source
+        : undefined;
+    const rawUpstreamStatus = response.headers.get('x-openmaic-codex-image-upstream-status');
+    const upstreamStatus = rawUpstreamStatus === null ? undefined : Number(rawUpstreamStatus);
+    const safeUpstreamStatus =
+      safeSource === 'upstream-http' &&
+      /^\d{3}$/.test(rawUpstreamStatus ?? '') &&
+      Number.isInteger(upstreamStatus) &&
+      (upstreamStatus as number) >= 100 &&
+      (upstreamStatus as number) <= 599
+        ? upstreamStatus
+        : undefined;
+    fail(errorCategoryForStatus(response.status), response.status, safeSource, safeUpstreamStatus);
+  }
+  return requireBoundedJson(response, ACCEPTANCE_IMAGE_JSON_MAX_BYTES);
 }
 
 export function headers(cookie?: string, extra?: HeadersInit): Headers {
