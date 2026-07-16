@@ -697,6 +697,7 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
               token_type_hint: 'refresh_token',
               client_id: CODEX_OAUTH_CLIENT_ID,
             }),
+            redirect: 'error',
             signal,
           });
         },
@@ -737,6 +738,7 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
             method: 'POST',
             headers: { 'content-type': 'application/x-www-form-urlencoded' },
             body,
+            redirect: 'error',
             signal: requestSignal,
           });
           if (response.status === 401 || response.status >= 500) {

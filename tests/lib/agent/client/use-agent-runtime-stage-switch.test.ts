@@ -32,7 +32,7 @@ const mocks = vi.hoisted(() => {
     fetchInit: undefined as RequestInit | undefined,
     responseController: undefined as ReadableStreamDefaultController<Uint8Array> | undefined,
     rememberActiveSession: vi.fn(),
-    saveSession: vi.fn(async () => undefined),
+    saveSession: vi.fn(async (_record: { stageId: string; messages: unknown[] }) => undefined),
   };
 });
 
@@ -228,5 +228,73 @@ describe('useAgentRuntime stage ownership', () => {
     expect(mocks.runtimeOptions?.isRunning).toBe(true);
     expect(JSON.stringify(mocks.runtimeOptions?.messages)).toContain('stage B prompt');
     expect(JSON.stringify(mocks.runtimeOptions?.messages)).not.toContain('stage A history');
+  });
+
+  it('does not save a settled stage-A thread under stage B and still saves stage B normally', async () => {
+    let stageARun: Promise<void> | undefined;
+    await act(async () => {
+      stageARun = Promise.resolve(
+        mocks.runtimeOptions?.onNew({
+          role: 'user',
+          content: [{ type: 'text', text: 'stage A race prompt' }],
+        }),
+      );
+      await flushEffects();
+    });
+    const stageAController = mocks.responseController;
+    expect(stageAController).toBeDefined();
+    expect(mocks.runtimeOptions?.isRunning).toBe(true);
+    mocks.saveSession.mockClear();
+
+    await act(async () => {
+      stageAController?.close();
+      mocks.responseController = undefined;
+      await stageARun;
+      switchStage('stage-b');
+      await flushEffects();
+    });
+
+    expect(
+      mocks.saveSession.mock.calls.some(
+        ([record]) =>
+          record.stageId === 'stage-b' && JSON.stringify(record.messages).includes('stage A'),
+      ),
+    ).toBe(false);
+
+    mocks.saveSession.mockClear();
+    let stageBRun: Promise<void> | undefined;
+    await act(async () => {
+      stageBRun = Promise.resolve(
+        mocks.runtimeOptions?.onNew({
+          role: 'user',
+          content: [{ type: 'text', text: 'stage B normal prompt' }],
+        }),
+      );
+      await flushEffects();
+    });
+    const stageBController = mocks.responseController;
+    expect(stageBController).toBeDefined();
+
+    await act(async () => {
+      stageBController?.close();
+      mocks.responseController = undefined;
+      await stageBRun;
+      await flushEffects();
+    });
+    await vi.waitFor(() =>
+      expect(mocks.saveSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          stageId: 'stage-b',
+          messages: expect.arrayContaining([
+            expect.objectContaining({
+              role: 'user',
+              content: expect.arrayContaining([
+                expect.objectContaining({ type: 'text', text: 'stage B normal prompt' }),
+              ]),
+            }),
+          ]),
+        }),
+      ),
+    );
   });
 });

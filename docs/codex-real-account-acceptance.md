@@ -91,11 +91,13 @@ ambiguous timeout/DNS/network failure, or a live lock owner makes it refuse to p
 permission to write. Run the helper from the same checkout so it targets the same local `data/`
 directory. It prints no credentials.
 
-The helper's logical release does not unlink the authoritative runtime lock while the helper process
-is alive. After the helper exits, its owner file can remain as a dead-owner tombstone. Do not
-manually delete the runtime lock: the next process reopens it without following symlinks, verifies
-the recorded PID plus device/inode identity, confirms that the owner PID is dead, and then reclaims
-it safely. A remaining file by itself does not mean the prior process is still running.
+The helper publishes its own cryptographically unique claim in the private lock directory. Its final
+scoped release unlinks only that claim; it cannot move or delete a successor claim. A server keeps
+its process-lifetime claim through the run. After a crash or ordinary restart, the next process
+reclaims only a unique claim whose hashed scope matches and whose OS process start identity proves
+the recorded owner is dead or its PID was reused. A live, malformed, foreign-scope, or otherwise
+unverifiable claim fails closed. Do not remove a claim merely because its PID looks stale, and never
+remove or inspect the OAuth credential vault while recovering the runtime lock.
 
 Restart the one local process and rerun the normal harness:
 
@@ -128,6 +130,11 @@ pnpm --silent accept:codex -- --base-url http://localhost:3000
 
 The login must survive. Do not scale the service, run a second container over the named volume, or
 run the local offline refresh helper against a volume still mounted by the app.
+
+`docker compose restart openmaic` restarts the existing container, so the verifiable container scope
+remains stable and a new PID 1 start identity safely replaces the old claim. Recreating a crashed
+container can produce a different scope; that case intentionally fails closed and requires the
+operator recovery described in the deployment guide after every volume user is confirmed stopped.
 
 ## 6. Logout, cache deletion, provider fallback, and relogin
 

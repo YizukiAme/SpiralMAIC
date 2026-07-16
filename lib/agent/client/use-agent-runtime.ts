@@ -253,6 +253,10 @@ export function useAgentRuntime(opts: UseAgentRuntimeOptions) {
     if (isRunning || messages.length === 0) return;
     const sid = useStageStore.getState().stage?.id;
     if (!sid) return;
+    // A stage switch and the previous run's final state update can batch into
+    // the same render. The render then observes stage B with stage A messages;
+    // never mint or persist a B session until the message ownership ref agrees.
+    if (messagesStageIdRef.current !== sid) return;
     let sessionId =
       activeSessionStageIdRef.current === sid ? activeSessionIdRef.current : undefined;
     if (!sessionId) {

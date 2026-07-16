@@ -118,6 +118,11 @@ export function normalizePublicBaseUrl(raw: string | undefined): string {
   ) {
     fail('argument');
   }
+  const loopback =
+    parsed.hostname === 'localhost' ||
+    parsed.hostname === '[::1]' ||
+    /^127(?:\.\d{1,3}){3}$/.test(parsed.hostname);
+  if (parsed.protocol === 'http:' && !loopback) fail('argument');
   return parsed.origin;
 }
 

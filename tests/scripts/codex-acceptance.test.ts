@@ -199,6 +199,24 @@ describe('Codex acceptance argument parsing', () => {
   });
 
   it.each([
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.42:3000',
+    'http://127.1:3000',
+    'http://2130706433:3000',
+    'http://[::1]:3000',
+  ])('allows cleartext acceptance only for loopback origin %s', (baseUrl) => {
+    expect(parseAcceptanceArgs(['--base-url', baseUrl]).baseUrl).toMatch(/^http:/);
+  });
+
+  it.each(['http://example.test:3000', 'http://192.168.1.10:3000', 'http://[::2]:3000'])(
+    'rejects a remote cleartext acceptance origin %s',
+    (baseUrl) => {
+      expect(() => parseAcceptanceArgs(['--base-url', baseUrl])).toThrowError('argument');
+    },
+  );
+
+  it.each([
     [[]],
     [['--base-url']],
     [['--base-url', 'file:///tmp/openmaic']],

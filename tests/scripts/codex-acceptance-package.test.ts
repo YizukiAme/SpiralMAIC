@@ -151,15 +151,20 @@ describe('Codex acceptance package and documentation contracts', () => {
     expect(runbook).toMatch(/log[\s\S]*localStorage[\s\S]*git diff/i);
   });
 
-  it('documents inode-safe lifetime ownership and dead-owner tombstone reclamation', async () => {
+  it('documents unique-claim ownership, PID reuse, and fail-closed scope recovery', async () => {
     const deployment = await readFile(resolve('docs/codex-oauth-deployment.md'), 'utf8');
     const runbook = await readFile(resolve('docs/codex-real-account-acceptance.md'), 'utf8');
 
-    expect(deployment).toMatch(/device(?:\s+|\/)inode|inode(?:\s+|\/)device/i);
-    expect(deployment).toMatch(/dead-owner tombstone/i);
-    expect(deployment).toMatch(/logical release[\s\S]*does not unlink/i);
-    expect(runbook).toMatch(/do not\s+manually delete[\s\S]*runtime lock/i);
-    expect(runbook).toMatch(/next process[\s\S]*reclaims/i);
+    expect(deployment).toMatch(/private lock directory/i);
+    expect(deployment).toMatch(/unique claim/i);
+    expect(deployment).toMatch(/process start identity/i);
+    expect(deployment).toMatch(/PID reuse/i);
+    expect(deployment).toMatch(/unverifiable[\s\S]*fail(?:s)? closed/i);
+    expect(deployment).toMatch(/scoped[\s\S]*unlink[\s\S]*own/i);
+    expect(deployment).toContain('.openmaic-codex-runtime.lock');
+    expect(deployment).toMatch(/legacy v1 lock file[\s\S]*stop[\s\S]*verify[\s\S]*remove/i);
+    expect(runbook).toMatch(/docker compose restart/i);
+    expect(runbook).toMatch(/next process[\s\S]*reclaims[\s\S]*unique claim/i);
   });
 
   it('uses one quiet fail-closed secret shape for log, storage, staged, and unstaged scans', async () => {
