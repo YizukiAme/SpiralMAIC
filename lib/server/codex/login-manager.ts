@@ -373,6 +373,7 @@ export class CodexLoginManager {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ client_id: CODEX_OAUTH_CLIENT_ID }),
+          redirect: 'error',
           signal,
         });
         if (response.status === 404 || response.status >= 500) {
@@ -507,6 +508,7 @@ export class CodexLoginManager {
               device_auth_id: attempt.deviceAuthId,
               user_code: attempt.userCode,
             }),
+            redirect: 'error',
             signal,
           });
           if (response.status === 403 || response.status === 404) {

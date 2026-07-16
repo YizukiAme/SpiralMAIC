@@ -156,10 +156,12 @@ describe('offline Codex force-refresh safety', () => {
   });
 
   it('never emits credentials or raw refresh failures', async () => {
+    const release = vi.fn();
     const report = await runOfflineCodexRefresh(
       { baseUrl: 'http://localhost:3000', confirmedAppStopped: true },
       {
         probe: vi.fn(async () => 'stopped' as const),
+        acquireLock: vi.fn(() => ({ release })),
         refresh: vi.fn(async () => {
           throw Object.assign(new Error('token-secret refresh-token-secret account-secret'), {
             code: 'UPSTREAM_ERROR',
@@ -171,6 +173,7 @@ describe('offline Codex force-refresh safety', () => {
     const output = formatSafeReport(report);
 
     expect(report).toMatchObject({ outcome: 'FAIL', errorCategory: 'upstream' });
+    expect(release).toHaveBeenCalledTimes(1);
     expect(output).not.toMatch(/token-secret|refresh-token|account-secret|raw-provider-secret/);
   });
 

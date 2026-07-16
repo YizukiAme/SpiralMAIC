@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto';
-import { describe, expect, it, vi } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import {
   CODEX_OAUTH_DEVICE_TOKEN_ENDPOINT,
@@ -14,6 +17,18 @@ import type { CodexAuthRuntime } from '@/lib/server/codex/runtime';
 import type { CodexOAuthCredentials } from '@/lib/server/codex/vault';
 
 const NOW = 1_700_000_000_000;
+const originalWorkingDirectory = process.cwd();
+let isolatedWorkingDirectory: string;
+
+beforeAll(async () => {
+  isolatedWorkingDirectory = await mkdtemp(join(tmpdir(), 'spiralmaic-codex-runtime-'));
+  process.chdir(isolatedWorkingDirectory);
+});
+
+afterAll(async () => {
+  process.chdir(originalWorkingDirectory);
+  await rm(isolatedWorkingDirectory, { recursive: true, force: true });
+});
 
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {

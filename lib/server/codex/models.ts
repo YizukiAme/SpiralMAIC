@@ -35,6 +35,7 @@ export { CODEX_COMPATIBILITY_VERSION } from '@/lib/ai/codex-catalog';
 export const CODEX_MODELS_ENDPOINT = `https://chatgpt.com/backend-api/codex/models?client_version=${CODEX_COMPATIBILITY_VERSION}`;
 export const CODEX_MODELS_CACHE_TTL_MS = 5 * 60 * 1000;
 export const CODEX_MODELS_REQUEST_TIMEOUT_MS = 5_000;
+const CODEX_MODELS_RESPONSE_MAX_BYTES = 1024 * 1024;
 
 export function getCodexFallbackModels(): ModelInfo[] {
   return getBundledCodexModelCatalog();
@@ -85,6 +86,7 @@ interface CodexModelsRequestAuthOptions {
 
 interface CodexModelsRequestResult {
   response: Response;
+  payload?: unknown;
   credentialLease: InternalCodexCredentialLease;
 }
 
@@ -343,6 +345,79 @@ async function cancelResponseBody(response: Response): Promise<void> {
   await response.body?.cancel().catch(() => undefined);
 }
 
+async function readBoundedJsonResponse(
+  response: Response,
+  signal: AbortSignal,
+): Promise<{ response: Response; payload: unknown }> {
+  if (signal.aborted) {
+    await cancelResponseBody(response);
+    throw new CodexModelsError(CODEX_MODELS_ERROR_CODES.NETWORK_ERROR);
+  }
+  const declaredLength = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declaredLength) && declaredLength > CODEX_MODELS_RESPONSE_MAX_BYTES) {
+    await cancelResponseBody(response);
+    throw new CodexModelsError(CODEX_MODELS_ERROR_CODES.INVALID_RESPONSE);
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) throw new CodexModelsError(CODEX_MODELS_ERROR_CODES.INVALID_RESPONSE);
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  const cancel = () => {
+    void reader.cancel().catch(() => undefined);
+  };
+  signal.addEventListener('abort', cancel, { once: true });
+  try {
+    if (signal.aborted) {
+      await reader.cancel().catch(() => undefined);
+      throw new CodexModelsError(CODEX_MODELS_ERROR_CODES.NETWORK_ERROR);
+    }
+    while (true) {
+      const { done, value } = await reader.read();
+      if (signal.aborted) {
+        throw new CodexModelsError(CODEX_MODELS_ERROR_CODES.NETWORK_ERROR);
+      }
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > CODEX_MODELS_RESPONSE_MAX_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        throw new CodexModelsError(CODEX_MODELS_ERROR_CODES.INVALID_RESPONSE);
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    if (error instanceof CodexModelsError) throw error;
+    throw new CodexModelsError(
+      signal.aborted
+        ? CODEX_MODELS_ERROR_CODES.NETWORK_ERROR
+        : CODEX_MODELS_ERROR_CODES.INVALID_RESPONSE,
+    );
+  } finally {
+    signal.removeEventListener('abort', cancel);
+  }
+
+  const body = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  let payload: unknown;
+  try {
+    payload = JSON.parse(new TextDecoder().decode(body));
+  } catch {
+    throw new CodexModelsError(CODEX_MODELS_ERROR_CODES.INVALID_RESPONSE);
+  }
+  return {
+    response: new Response(body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    }),
+    payload,
+  };
+}
+
 async function withModelsRequestTimeout<T>(
   inputSignal: AbortSignal | null | undefined,
   operation: (signal: AbortSignal) => Promise<T>,
@@ -472,7 +547,11 @@ function createCodexModelsRequest(options: CreateCodexModelsTransportOptions): C
         response = await request(true);
       }
 
-      if (response.status === 304 || response.ok) return { response, credentialLease };
+      if (response.status === 304) return { response, credentialLease };
+      if (response.ok) {
+        const buffered = await readBoundedJsonResponse(response, signal);
+        return { ...buffered, credentialLease };
+      }
       await cancelResponseBody(response);
       if (response.status === 401) {
         throw new CodexModelsError(CODEX_MODELS_ERROR_CODES.AUTH_REQUIRED, response.status);
@@ -863,7 +942,7 @@ export class CodexModelDiscovery {
         },
         authOptions,
       );
-      const { response, credentialLease } = requestResult;
+      const { response, payload, credentialLease } = requestResult;
       if (
         credentialLease.credentials.accountId !== accountId ||
         !(await isCodexCredentialLeaseCurrent(credentialLease))
@@ -888,12 +967,6 @@ export class CodexModelDiscovery {
         return revalidatedModels;
       }
 
-      let payload: unknown;
-      try {
-        payload = await response.json();
-      } catch {
-        throw new CodexModelsError(CODEX_MODELS_ERROR_CODES.INVALID_RESPONSE);
-      }
       const models = parseCodexModels(payload);
       if (!(await this.isCurrentGeneration(generation, invalidationGeneration))) return [];
       const etag = response.headers.get('etag') || undefined;

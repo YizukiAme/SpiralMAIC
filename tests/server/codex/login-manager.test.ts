@@ -188,6 +188,7 @@ describe('CodexLoginManager browser flow', () => {
     });
     expect(tokenRequests).toHaveLength(1);
     expect(tokenRequests[0].input).toBe(CODEX_OAUTH_TOKEN_ENDPOINT);
+    expect(tokenRequests[0].init.redirect).toBe('error');
     expect(vault.current).toEqual({
       version: 1,
       accessToken,
@@ -821,6 +822,30 @@ describe('CodexLoginManager browser flow', () => {
 });
 
 describe('CodexLoginManager device flow', () => {
+  it('rejects a device-start redirect without invoking its secret-bearing target', async () => {
+    const redirectTarget = vi.fn(() =>
+      jsonResponse({
+        device_auth_id: 'redirected-device-id',
+        user_code: 'REDIRECTED',
+      }),
+    );
+    const manager = new CodexLoginManager({
+      vault: new MemoryVault(),
+      oauthFetch: async (_input, init) => {
+        if (init.redirect !== 'error') return redirectTarget();
+        throw new TypeError('redirect rejected');
+      },
+    });
+    managers.push(manager);
+
+    await expect(manager.begin('device')).resolves.toEqual({
+      method: 'device',
+      status: 'failed',
+      errorCode: 'NETWORK_ERROR',
+    });
+    expect(redirectTarget).not.toHaveBeenCalled();
+  });
+
   it('starts device auth with the exact request and a sanitized capped attempt', async () => {
     const requests: Array<{ input: string; init: RequestInit }> = [];
     const manager = new CodexLoginManager({
@@ -942,6 +967,8 @@ describe('CodexLoginManager device flow', () => {
     expect(requests).toHaveLength(2);
     expect(requests[1].input).toBe(CODEX_OAUTH_DEVICE_TOKEN_ENDPOINT);
     expect(requests[1].init.method).toBe('POST');
+    expect(requests[0].init.redirect).toBe('error');
+    expect(requests[1].init.redirect).toBe('error');
     expect(requests[1].init.headers).toEqual({ 'content-type': 'application/json' });
     expect(JSON.parse(requests[1].init.body as string)).toEqual({
       device_auth_id: 'private-device-id',
@@ -1281,6 +1308,7 @@ describe('CodexLoginManager device flow', () => {
     expect(completed).toMatchObject({ method: 'device', status: 'complete' });
     expect(requests).toHaveLength(3);
     expect(requests[2].input).toBe(CODEX_OAUTH_TOKEN_ENDPOINT);
+    expect(requests.every((request) => request.init.redirect === 'error')).toBe(true);
     expect(Object.fromEntries(requests[2].init.body as URLSearchParams)).toEqual({
       grant_type: 'authorization_code',
       client_id: 'app_EMoamEEZ73f0CkXaXp7hrann',

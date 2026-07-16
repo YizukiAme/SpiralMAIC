@@ -33,6 +33,19 @@ import {
 
 const log = createLogger('Settings');
 let latestServerProvidersRequest = 0;
+interface PendingCodexSelectionRestore {
+  requestGeneration: number;
+  intent: { modelId: string };
+  fallback: { providerId: ProviderId; modelId: string };
+}
+let pendingCodexSelectionRestore: PendingCodexSelectionRestore | null = null;
+
+function matchesLLMSelection(
+  state: { providerId: ProviderId; modelId: string },
+  selection: { providerId: ProviderId; modelId: string },
+): boolean {
+  return state.providerId === selection.providerId && state.modelId === selection.modelId;
+}
 
 function getOAuthProviderBaselineModels(providerId: ProviderId): ModelInfo[] {
   const registryProvider = PROVIDERS[providerId];
@@ -1503,15 +1516,59 @@ export const useSettingsStore = create<SettingsState>()(
         // Fetch server-configured providers and merge into local state
         fetchServerProviders: async () => {
           const requestGeneration = ++latestServerProvidersRequest;
+          const selectedAtRequest = get();
+          const pendingAtRequest = pendingCodexSelectionRestore;
+          const inheritsPendingCodexIntent = Boolean(
+            selectedAtRequest.providerId !== 'openai-codex' &&
+            pendingAtRequest &&
+            matchesLLMSelection(selectedAtRequest, pendingAtRequest.fallback),
+          );
+          const codexSelectionIntent =
+            selectedAtRequest.providerId === 'openai-codex'
+              ? { modelId: selectedAtRequest.modelId }
+              : inheritsPendingCodexIntent
+                ? (pendingAtRequest?.intent ?? null)
+                : null;
+          if (!codexSelectionIntent) pendingCodexSelectionRestore = null;
+          let scrubbedSelection: { providerId: ProviderId; modelId: string } | null = null;
+          const clearPendingCodexRestore = () => {
+            if (pendingCodexSelectionRestore?.requestGeneration === requestGeneration) {
+              pendingCodexSelectionRestore = null;
+            }
+          };
           const scrubOAuthState = () => {
             if (requestGeneration !== latestServerProvidersRequest) return;
             set((state) => {
               const providersConfig = resetOAuthProviderState(state.providersConfig);
-              const codexBaseline = providersConfig['openai-codex']?.models[0]?.id ?? '';
+              const selection = resolveLLMSelection(
+                providersConfig,
+                state.providerId,
+                state.modelId,
+              );
+              const canPreserveCodexIntent = Boolean(
+                codexSelectionIntent &&
+                (state.providerId === 'openai-codex' ||
+                  (inheritsPendingCodexIntent &&
+                    pendingAtRequest &&
+                    matchesLLMSelection(state, pendingAtRequest.fallback))),
+              );
+              if (canPreserveCodexIntent && codexSelectionIntent) {
+                scrubbedSelection = selection;
+                pendingCodexSelectionRestore = {
+                  requestGeneration,
+                  intent: codexSelectionIntent,
+                  fallback: selection,
+                };
+              } else {
+                clearPendingCodexRestore();
+              }
               return {
                 providersConfig,
                 codexFastMode: false,
-                ...(state.providerId === 'openai-codex' && { modelId: codexBaseline }),
+                ...(selection.providerId !== state.providerId && {
+                  providerId: selection.providerId,
+                }),
+                ...(selection.modelId !== state.modelId && { modelId: selection.modelId }),
               };
             });
           };
@@ -1523,7 +1580,10 @@ export const useSettingsStore = create<SettingsState>()(
           try {
             const res = await fetch('/api/server-providers');
             if (requestGeneration !== latestServerProvidersRequest) return;
-            if (!res.ok) return;
+            if (!res.ok) {
+              clearPendingCodexRestore();
+              return;
+            }
             // Managed providers expose only their allowed model list (LLM/image)
             // and presence (the "managed" flag) — never a base URL.
             const data = (await res.json()) as {
@@ -1815,6 +1875,15 @@ export const useSettingsStore = create<SettingsState>()(
                 newProvidersConfig,
                 llmFallback,
               );
+              const shouldRestoreCodexSelection = Boolean(
+                codexSelectionIntent &&
+                scrubbedSelection &&
+                state.providerId === scrubbedSelection.providerId &&
+                state.modelId === scrubbedSelection.modelId &&
+                newProvidersConfig['openai-codex']?.isServerConfigured &&
+                isLLMProviderConfigured(newProvidersConfig['openai-codex']),
+              );
+              if (shouldRestoreCodexSelection) validLLMProvider = 'openai-codex';
               const validTTSProvider = validateProvider(
                 state.ttsProviderId,
                 newTTSConfig,
@@ -1871,7 +1940,13 @@ export const useSettingsStore = create<SettingsState>()(
                 ? (newProvidersConfig[validLLMProvider as ProviderId]?.models ?? [])
                 : [];
               const validLLMModel = validLLMProvider
-                ? resolveSelectedLLMModel(validLLMProvider as ProviderId, state.modelId, llmModels)
+                ? resolveSelectedLLMModel(
+                    validLLMProvider as ProviderId,
+                    shouldRestoreCodexSelection
+                      ? (codexSelectionIntent?.modelId ?? state.modelId)
+                      : state.modelId,
+                    llmModels,
+                  )
                 : '';
               const imageModels = validImageProvider
                 ? resolveMediaModels(
@@ -2060,8 +2135,10 @@ export const useSettingsStore = create<SettingsState>()(
                 ...(autoTtsEnabled !== undefined && { ttsEnabled: autoTtsEnabled }),
               };
             });
+            clearPendingCodexRestore();
           } catch (e) {
             scrubOAuthState();
+            clearPendingCodexRestore();
             // Silently fail — server providers are optional
             log.warn('Failed to fetch server providers:', e);
           }

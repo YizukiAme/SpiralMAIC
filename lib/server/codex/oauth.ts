@@ -95,6 +95,7 @@ export async function exchangeAuthorizationCode(
             redirect_uri: options.redirectUri,
             code_verifier: options.verifier,
           }),
+          redirect: 'error',
           signal,
         });
         if (!response.ok) {

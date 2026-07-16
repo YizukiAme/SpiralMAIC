@@ -119,6 +119,7 @@ describe('Codex OAuth authorization helpers', () => {
     expect(requests).toHaveLength(1);
     expect(requests[0].input).toBe(CODEX_OAUTH_TOKEN_ENDPOINT);
     expect(requests[0].init.method).toBe('POST');
+    expect(requests[0].init.redirect).toBe('error');
     expect(requests[0].init.headers).toEqual({
       'content-type': 'application/x-www-form-urlencoded',
     });
@@ -139,6 +140,22 @@ describe('Codex OAuth authorization helpers', () => {
       updatedAt: NOW,
     });
     expect(JSON.stringify(credentials)).not.toContain(idToken);
+  });
+
+  it('rejects a token redirect without invoking its secret-bearing target', async () => {
+    const redirectTarget = vi.fn(() => validExchangeResponse());
+    const tokenExchangeFetch = vi.fn(async (_input: string, init: RequestInit) => {
+      if (init.redirect !== 'error') return redirectTarget();
+      throw new TypeError('redirect rejected');
+    });
+
+    await expect(
+      exchangeAuthorizationCode(exchangeOptions({ tokenExchangeFetch })),
+    ).rejects.toMatchObject({
+      code: CODEX_OAUTH_ERROR_CODES.NETWORK_ERROR,
+      retryable: true,
+    });
+    expect(redirectTarget).not.toHaveBeenCalled();
   });
 
   it('falls back to access-token identity and JWT expiry when expires_in is absent', async () => {

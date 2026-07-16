@@ -321,6 +321,7 @@ describe('ManagedCodexTokenProvider', () => {
     const [endpoint, init] = tokenExchangeFetch.mock.calls[0] as [string, RequestInit];
     expect(endpoint).toBe(CODEX_OAUTH_TOKEN_ENDPOINT);
     expect(init.method).toBe('POST');
+    expect(init.redirect).toBe('error');
     expect(init.headers).toEqual({ 'content-type': 'application/x-www-form-urlencoded' });
     const body = init.body as URLSearchParams;
     expect(body.get('grant_type')).toBe('refresh_token');
@@ -868,12 +869,53 @@ describe('ManagedCodexTokenProvider', () => {
     const [endpoint, init] = revokeFetch.mock.calls[0] as [string, RequestInit];
     expect(endpoint).toBe('https://auth.openai.com/oauth/revoke');
     expect(init.method).toBe('POST');
+    expect(init.redirect).toBe('error');
     expect(init.headers).toEqual({ 'content-type': 'application/json' });
     expect(JSON.parse(init.body as string)).toEqual({
       token: 'captured-refresh-token',
       token_type_hint: 'refresh_token',
       client_id: CODEX_OAUTH_CLIENT_ID,
     });
+  });
+
+  it('never follows refresh or revoke redirects with OAuth secrets', async () => {
+    const refreshTarget = vi.fn(() =>
+      jsonResponse({
+        access_token: unsignedJwt({ chatgpt_account_id: 'current-account' }),
+        expires_in: 300,
+      }),
+    );
+    const refreshVault = new MemoryVault(credentials({ expiresAt: NOW }));
+    const refreshProvider = createProvider(
+      refreshVault,
+      vi.fn(async (_input: string, init: RequestInit) => {
+        if (init.redirect !== 'error') return refreshTarget();
+        throw new TypeError('redirect rejected');
+      }),
+    );
+
+    await expect(refreshProvider.getValidCredentials({ forceRefresh: true })).rejects.toMatchObject(
+      {
+        code: CODEX_OAUTH_ERROR_CODES.NETWORK_ERROR,
+        retryable: true,
+      },
+    );
+    expect(refreshTarget).not.toHaveBeenCalled();
+    expect(refreshVault.current).not.toBeNull();
+
+    const revokeTarget = vi.fn(() => new Response(null, { status: 200 }));
+    const revokeVault = new MemoryVault(credentials());
+    const revokeProvider = createProvider(
+      revokeVault,
+      vi.fn(async (_input: string, init: RequestInit) => {
+        if (init.redirect !== 'error') return revokeTarget();
+        throw new TypeError('redirect rejected');
+      }),
+    );
+
+    await expect(revokeProvider.logout()).resolves.toBeUndefined();
+    expect(revokeTarget).not.toHaveBeenCalled();
+    expect(revokeVault.current).toBeNull();
   });
 
   it.each([

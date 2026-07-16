@@ -469,6 +469,102 @@ describe('Codex models transport boundary', () => {
     }
   });
 
+  it('keeps the timeout active while a successful response body is stalled', async () => {
+    vi.useFakeTimers();
+    try {
+      let upstreamSignal: AbortSignal | undefined;
+      const transport = createCodexModelsTransport({
+        tokenProvider: createTokenProvider(),
+        upstreamFetch: vi.fn(async (_input, init) => {
+          upstreamSignal = init?.signal ?? undefined;
+          return new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(new TextEncoder().encode('{"models":['));
+              },
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          );
+        }),
+      });
+
+      const request = transport(CODEX_MODELS_ENDPOINT);
+      const rejection = expect(request).rejects.toMatchObject({ code: 'NETWORK_ERROR' });
+      await vi.advanceTimersByTimeAsync(CODEX_MODELS_REQUEST_TIMEOUT_MS);
+
+      await rejection;
+      expect(upstreamSignal?.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the parent abort active after successful response headers arrive', async () => {
+    const parent = new AbortController();
+    const headersReturned = deferred<void>();
+    const transport = createCodexModelsTransport({
+      tokenProvider: createTokenProvider(),
+      upstreamFetch: vi.fn(async () => {
+        headersReturned.resolve();
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('{"models":['));
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }),
+    });
+
+    const request = transport(CODEX_MODELS_ENDPOINT, { signal: parent.signal });
+    await headersReturned.promise;
+    parent.abort();
+
+    await expect(request).rejects.toMatchObject({ code: 'NETWORK_ERROR' });
+  });
+
+  it('cancels a successful response body when abort wins before body reading starts', async () => {
+    const parent = new AbortController();
+    const cancelBody = vi.fn();
+    const transport = createCodexModelsTransport({
+      tokenProvider: createTokenProvider(),
+      upstreamFetch: vi.fn(async () => {
+        // A custom fetch may resolve despite observing an abort. Exercise the
+        // gap between response resolution and installing the body listener.
+        parent.abort();
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            cancel: cancelBody,
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }),
+    });
+
+    await expect(transport(CODEX_MODELS_ENDPOINT, { signal: parent.signal })).rejects.toMatchObject(
+      { code: 'NETWORK_ERROR' },
+    );
+    await vi.waitFor(() => expect(cancelBody).toHaveBeenCalledTimes(1));
+  });
+
+  it('rejects an oversized successful model catalog without retaining its body', async () => {
+    const transport = createCodexModelsTransport({
+      tokenProvider: createTokenProvider(),
+      upstreamFetch: vi.fn(
+        async () =>
+          new Response(JSON.stringify({ models: [], padding: 'x'.repeat(2 * 1024 * 1024) }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+      ),
+    });
+
+    await expect(transport(CODEX_MODELS_ENDPOINT)).rejects.toMatchObject({
+      code: 'INVALID_RESPONSE',
+    });
+  });
+
   it('force-refreshes credentials and replays exactly once after a 401', async () => {
     let currentCredentials = { accessToken: 'old-access', accountId: 'account-id' };
     const tokenProvider = {
