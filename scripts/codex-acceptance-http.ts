@@ -1,6 +1,36 @@
-import { errorCategoryForStatus, exactKeys, fail, isRecord } from './codex-acceptance-report';
+import {
+  errorCategoryForStatus,
+  exactKeys,
+  fail,
+  isRecord,
+  normalizePublicBaseUrl,
+} from './codex-acceptance-report';
 import type { AcceptanceOptions, Fetcher, SafeReport } from './codex-acceptance-types';
 import { parseJsonSse } from './codex-acceptance-validators';
+export {
+  ACCEPTANCE_SSE_MAX_BYTES,
+  ACCEPTANCE_SSE_MAX_DATA_LINES,
+  ACCEPTANCE_SSE_MAX_EVENTS,
+  ACCEPTANCE_SSE_MAX_FRAME_BYTES,
+  ACCEPTANCE_SSE_MAX_FRAMES,
+} from './codex-acceptance-validators';
+
+export const ACCEPTANCE_JSON_MAX_BYTES = 1024 * 1024;
+
+function validateRequestOrigin(url: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    fail('argument');
+  }
+  if (parsed.username || parsed.password) fail('argument');
+  normalizePublicBaseUrl(parsed.origin);
+}
+
+async function cancelResponseBody(response: Response): Promise<void> {
+  await response.body?.cancel().catch(() => undefined);
+}
 
 export async function safeFetch(
   fetcher: Fetcher,
@@ -8,6 +38,7 @@ export async function safeFetch(
   init: RequestInit,
   timeoutMs: number,
 ): Promise<Response> {
+  validateRequestOrigin(url);
   try {
     return await fetcher(url, {
       ...init,
@@ -22,9 +53,56 @@ export async function safeFetch(
 }
 
 export async function requireJson(response: Response): Promise<unknown> {
-  if (!response.ok) fail(errorCategoryForStatus(response.status), response.status);
+  if (!response.ok) {
+    await cancelResponseBody(response);
+    fail(errorCategoryForStatus(response.status), response.status);
+  }
+  const rawDeclaredLength = response.headers.get('content-length');
+  if (rawDeclaredLength !== null) {
+    const normalizedLength = rawDeclaredLength.trim();
+    const declaredLength = Number(normalizedLength);
+    if (
+      !/^\d{1,16}$/.test(normalizedLength) ||
+      !Number.isSafeInteger(declaredLength) ||
+      declaredLength > ACCEPTANCE_JSON_MAX_BYTES
+    ) {
+      await cancelResponseBody(response);
+      fail('invalid-json', response.status);
+    }
+  }
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   try {
-    return await response.json();
+    reader = response.body?.getReader();
+  } catch {
+    fail('invalid-json', response.status);
+  }
+  if (!reader) fail('invalid-json', response.status);
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      totalBytes += value.byteLength;
+      if (totalBytes > ACCEPTANCE_JSON_MAX_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        fail('invalid-json', response.status);
+      }
+      chunks.push(value);
+    }
+  } catch {
+    await reader.cancel().catch(() => undefined);
+    fail('invalid-json', response.status);
+  }
+  const body = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return JSON.parse(new TextDecoder().decode(body));
   } catch {
     fail('invalid-json', response.status);
   }
@@ -152,18 +230,35 @@ export function validateAuthStatus(
 }
 
 export async function responseEvents(response: Response): Promise<unknown[]> {
-  if (!response.ok) fail(errorCategoryForStatus(response.status), response.status);
+  if (!response.ok) {
+    await cancelResponseBody(response);
+    fail(errorCategoryForStatus(response.status), response.status);
+  }
   if (!response.headers.get('content-type')?.toLowerCase().includes('text/event-stream')) {
+    await cancelResponseBody(response);
     fail('invalid-sse', response.status);
   }
   if (!response.body) fail('invalid-sse', response.status);
   const reader = response.body.getReader();
   async function* chunks(): AsyncGenerator<Uint8Array> {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) return;
-      if (value) yield value;
+    let completed = false;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) {
+          completed = true;
+          return;
+        }
+        if (value) yield value;
+      }
+    } finally {
+      if (!completed) await reader.cancel().catch(() => undefined);
     }
   }
-  return parseJsonSse(chunks());
+  try {
+    return await parseJsonSse(chunks());
+  } catch {
+    await reader.cancel().catch(() => undefined);
+    fail('invalid-sse', response.status);
+  }
 }

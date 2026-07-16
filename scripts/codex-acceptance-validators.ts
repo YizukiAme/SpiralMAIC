@@ -2,27 +2,52 @@ import { rebuildCodexModelCatalog } from '@/lib/ai/codex-catalog';
 
 import { SAFE_MODEL_ID, exactKeys, fail, isRecord, jsonEqual } from './codex-acceptance-report';
 
-interface SseFrame {
-  event: string;
-  data: string;
-}
+export const ACCEPTANCE_SSE_MAX_BYTES = 2 * 1024 * 1024;
+export const ACCEPTANCE_SSE_MAX_FRAME_BYTES = 256 * 1024;
+export const ACCEPTANCE_SSE_MAX_FRAMES = 512;
+export const ACCEPTANCE_SSE_MAX_DATA_LINES = 2_048;
+export const ACCEPTANCE_SSE_MAX_EVENTS = 256;
 
-async function collectSseFrames(
+export async function parseJsonSse(
   chunks: Iterable<string | Uint8Array> | AsyncIterable<string | Uint8Array>,
-): Promise<SseFrame[]> {
-  const frames: SseFrame[] = [];
+): Promise<unknown[]> {
+  const events: unknown[] = [];
   const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
   let buffer = '';
   let event = 'message';
   let data: string[] = [];
+  let frameTouched = false;
+  let frameBytes = 0;
+  let totalBytes = 0;
+  let frameCount = 0;
+  let dataLineCount = 0;
 
   const dispatch = () => {
-    if (data.length > 0) frames.push({ event, data: data.join('\n') });
+    if (frameTouched) {
+      frameCount += 1;
+      if (frameCount > ACCEPTANCE_SSE_MAX_FRAMES) fail('invalid-sse');
+    }
+    if (data.length > 0) {
+      const payload = data.join('\n');
+      if (!(event === 'close' && payload === '{}')) {
+        if (events.length >= ACCEPTANCE_SSE_MAX_EVENTS) fail('invalid-sse');
+        try {
+          events.push(JSON.parse(payload));
+        } catch {
+          fail('invalid-sse');
+        }
+      }
+    }
     event = 'message';
     data = [];
+    frameTouched = false;
+    frameBytes = 0;
   };
 
   const consumeLine = (lineWithPossibleCr: string) => {
+    frameBytes += encoder.encode(lineWithPossibleCr).byteLength + 1;
+    if (frameBytes > ACCEPTANCE_SSE_MAX_FRAME_BYTES) fail('invalid-sse');
     const line = lineWithPossibleCr.endsWith('\r')
       ? lineWithPossibleCr.slice(0, -1)
       : lineWithPossibleCr;
@@ -31,15 +56,24 @@ async function collectSseFrames(
       return;
     }
     if (line.startsWith(':')) return;
+    frameTouched = true;
     const separator = line.indexOf(':');
     const field = separator < 0 ? line : line.slice(0, separator);
     let value = separator < 0 ? '' : line.slice(separator + 1);
     if (value.startsWith(' ')) value = value.slice(1);
     if (field === 'event') event = value || 'message';
-    else if (field === 'data') data.push(value);
+    else if (field === 'data') {
+      dataLineCount += 1;
+      if (dataLineCount > ACCEPTANCE_SSE_MAX_DATA_LINES) fail('invalid-sse');
+      data.push(value);
+    }
   };
 
   for await (const chunk of chunks) {
+    const chunkBytes =
+      typeof chunk === 'string' ? encoder.encode(chunk).byteLength : chunk.byteLength;
+    totalBytes += chunkBytes;
+    if (totalBytes > ACCEPTANCE_SSE_MAX_BYTES) fail('invalid-sse');
     buffer += typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
     let newline = buffer.indexOf('\n');
     while (newline >= 0) {
@@ -51,22 +85,6 @@ async function collectSseFrames(
   buffer += decoder.decode();
   if (buffer) consumeLine(buffer);
   dispatch();
-  return frames;
-}
-
-export async function parseJsonSse(
-  chunks: Iterable<string | Uint8Array> | AsyncIterable<string | Uint8Array>,
-): Promise<unknown[]> {
-  const frames = await collectSseFrames(chunks);
-  const events: unknown[] = [];
-  for (const frame of frames) {
-    if (frame.event === 'close' && frame.data === '{}') continue;
-    try {
-      events.push(JSON.parse(frame.data));
-    } catch {
-      fail('invalid-sse');
-    }
-  }
   return events;
 }
 

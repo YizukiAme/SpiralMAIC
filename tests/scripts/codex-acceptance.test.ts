@@ -14,6 +14,17 @@ import {
   type SafeReport,
 } from '@/scripts/codex-acceptance-lib';
 import type { GeneratedSlideContent } from '@/lib/types/generation';
+import {
+  ACCEPTANCE_JSON_MAX_BYTES,
+  ACCEPTANCE_SSE_MAX_BYTES,
+  ACCEPTANCE_SSE_MAX_DATA_LINES,
+  ACCEPTANCE_SSE_MAX_EVENTS,
+  ACCEPTANCE_SSE_MAX_FRAME_BYTES,
+  ACCEPTANCE_SSE_MAX_FRAMES,
+  requireJson,
+  responseEvents,
+  safeFetch,
+} from '@/scripts/codex-acceptance-http';
 
 function json(body: unknown, status = 200, headers?: HeadersInit): Response {
   return Response.json(body, { status, headers });
@@ -300,6 +311,109 @@ describe('SSE and JSON validation', () => {
     ]);
   });
 
+  it('rejects a JSON response larger than the bounded acceptance budget', async () => {
+    const sentinel = 'oversized-json-private-sentinel';
+    const response = new Response(
+      JSON.stringify({ sentinel, padding: 'x'.repeat(ACCEPTANCE_JSON_MAX_BYTES) }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+
+    const error = (await requireJson(response).catch((caught) => caught)) as Error;
+    expect(error.message).toBe('invalid-json');
+    expect(error.message).not.toContain(sentinel);
+  });
+
+  it('prechecks declared JSON length and cancels the unread response body', async () => {
+    const cancel = vi.fn();
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        cancel,
+      }),
+      {
+        status: 200,
+        headers: {
+          'content-type': 'application/json',
+          'content-length': String(ACCEPTANCE_JSON_MAX_BYTES + 1),
+        },
+      },
+    );
+
+    await expect(requireJson(response)).rejects.toThrowError('invalid-json');
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an oversized SSE chunk and closes the chunk source without retaining raw data', async () => {
+    const sentinel = 'oversized-sse-private-sentinel';
+    const oversized = `data: ${JSON.stringify({ sentinel, padding: 'x'.repeat(ACCEPTANCE_SSE_MAX_BYTES) })}\n\n`;
+    const returned = vi.fn(async () => ({ done: true as const, value: undefined }));
+    let delivered = false;
+    const chunks: AsyncIterable<string> = {
+      [Symbol.asyncIterator]() {
+        return {
+          async next() {
+            if (delivered) return { done: true as const, value: undefined };
+            delivered = true;
+            return { done: false as const, value: oversized };
+          },
+          return: returned,
+        };
+      },
+    };
+
+    const error = (await parseJsonSse(chunks).catch((caught) => caught)) as Error;
+    expect(error.message).toBe('invalid-sse');
+    expect(error.message).not.toContain(sentinel);
+    expect(returned).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects one oversized SSE frame below the total byte ceiling', async () => {
+    const frame = `data: ${JSON.stringify({ padding: 'x'.repeat(ACCEPTANCE_SSE_MAX_FRAME_BYTES) })}\n\n`;
+
+    await expect(parseJsonSse([frame])).rejects.toThrowError('invalid-sse');
+  });
+
+  it('bounds SSE frame, data-line, and parsed-event counts independently', async () => {
+    const tooManyFrames = Array.from(
+      { length: ACCEPTANCE_SSE_MAX_FRAMES + 1 },
+      () => 'event: close\ndata: {}\n\n',
+    );
+    const tooManyDataLines = [
+      `${Array.from(
+        { length: ACCEPTANCE_SSE_MAX_DATA_LINES + 1 },
+        (_value, index) =>
+          `data: ${index === 0 ? '[' : ''}0${index < ACCEPTANCE_SSE_MAX_DATA_LINES ? ',' : ']'}`,
+      ).join('\n')}\n\n`,
+    ];
+    const tooManyEvents = Array.from(
+      { length: ACCEPTANCE_SSE_MAX_EVENTS + 1 },
+      () => 'data: {"type":"bounded"}\n\n',
+    );
+
+    await expect(parseJsonSse(tooManyFrames)).rejects.toThrowError('invalid-sse');
+    await expect(parseJsonSse(tooManyDataLines)).rejects.toThrowError('invalid-sse');
+    await expect(parseJsonSse(tooManyEvents)).rejects.toThrowError('invalid-sse');
+  });
+
+  it('cancels the response reader when SSE parsing overflows', async () => {
+    const cancel = vi.fn();
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(
+            new TextEncoder().encode(
+              `data: ${JSON.stringify({ padding: 'x'.repeat(ACCEPTANCE_SSE_MAX_BYTES) })}\n\n`,
+            ),
+          );
+        },
+        cancel,
+      }),
+      { status: 200, headers: { 'content-type': 'text/event-stream' } },
+    );
+
+    await expect(responseEvents(response)).rejects.toThrowError('invalid-sse');
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
   it('requires an incremental outline before the completion event', () => {
     expect(validateOutlineEvents(outlineEvents)).toEqual({
       eventCount: 3,
@@ -567,6 +681,48 @@ describe('SSE and JSON validation', () => {
 });
 
 describe('black-box acceptance flow', () => {
+  it('rejects a direct remote HTTP runner call before sending an access code', async () => {
+    const accessCode = 'direct-runner-access-secret';
+    const fetcher = vi.fn(async () => json({ success: true }));
+
+    const reports = await runCodexAcceptance(
+      {
+        baseUrl: 'http://remote.example',
+        expectSignedOut: false,
+        editorMode: 'enabled',
+        accessCode,
+      },
+      { fetcher },
+    );
+
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(reports).toEqual([{ outcome: 'FAIL', stage: 'arguments', errorCategory: 'argument' }]);
+    expect(reports.map(formatSafeReport).join('\n')).not.toContain(accessCode);
+  });
+
+  it.each(['http://127.0.0.1:3000', 'https://remote.example'])(
+    'keeps direct runner support for safe origin %s',
+    async (baseUrl) => {
+      const fetcher = connectedFetch(false, false);
+      const reports = await runCodexAcceptance(
+        { baseUrl, expectSignedOut: false, editorMode: 'disabled' },
+        { fetcher },
+      );
+
+      expect(fetcher).toHaveBeenCalled();
+      expect(acceptanceExitCode(reports)).toBe(0);
+    },
+  );
+
+  it('rejects remote HTTP at the low-level fetch boundary before invoking the fetcher', async () => {
+    const fetcher = vi.fn(async () => json({ success: true }));
+
+    await expect(
+      safeFetch(fetcher, 'http://remote.example/api/access-code/verify', {}, 1_000),
+    ).rejects.toThrowError('argument');
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it('requires Fast when advertised, uses priority on the same model, and accepts editor ordering', async () => {
     const fetcher = connectedFetch(true);
     const reports = await runCodexAcceptance(

@@ -8,7 +8,7 @@ import {
   safeFetch,
   validateAuthStatus,
 } from './codex-acceptance-http';
-import { fail, isRecord, safeFailure } from './codex-acceptance-report';
+import { fail, isRecord, normalizePublicBaseUrl, safeFailure } from './codex-acceptance-report';
 import type {
   AcceptanceDependencies,
   AcceptanceOptions,
@@ -71,9 +71,15 @@ async function runOutlineRequest(
 }
 
 export async function runCodexAcceptance(
-  options: AcceptanceOptions,
+  unsafeOptions: AcceptanceOptions,
   dependencies: AcceptanceDependencies = {},
 ): Promise<SafeReport[]> {
+  let options: AcceptanceOptions;
+  try {
+    options = { ...unsafeOptions, baseUrl: normalizePublicBaseUrl(unsafeOptions.baseUrl) };
+  } catch (error) {
+    return [safeFailure('arguments', error)];
+  }
   const fetcher = dependencies.fetcher ?? fetch;
   const timeoutMs = dependencies.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   const reports: SafeReport[] = [];
