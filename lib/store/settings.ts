@@ -9,8 +9,8 @@ import type { ProviderId } from '@/lib/ai/providers';
 import type { ProvidersConfig } from '@/lib/types/settings';
 import { PROVIDERS } from '@/lib/ai/providers';
 import { findModelById, getCanonicalModelId } from '@/lib/ai/model-aliases';
-import { rebuildCodexModelCatalog } from '@/lib/ai/codex-catalog';
-import type { ModelServiceTier, ThinkingConfig } from '@/lib/types/provider';
+import { getBundledCodexModelCatalog, rebuildCodexModelCatalog } from '@/lib/ai/codex-catalog';
+import type { ModelInfo, ModelServiceTier, ThinkingConfig } from '@/lib/types/provider';
 import { getThinkingConfigKey, supportsConfigurableThinking } from '@/lib/ai/thinking-config';
 import type { TTSProviderId, ASRProviderId, BuiltInTTSProviderId } from '@/lib/audio/types';
 import type { AgentVoiceOverride } from '@/lib/audio/voice-resolver';
@@ -34,21 +34,25 @@ import {
 const log = createLogger('Settings');
 let latestServerProvidersRequest = 0;
 
+function getOAuthProviderBaselineModels(providerId: ProviderId): ModelInfo[] {
+  const registryProvider = PROVIDERS[providerId];
+  if (!registryProvider) return [];
+  return providerId === 'openai-codex'
+    ? getBundledCodexModelCatalog()
+    : registryProvider.models.map((model) => ({ ...model }));
+}
+
 function resetOAuthProviderState(providersConfig: ProvidersConfig): ProvidersConfig {
   const next = { ...providersConfig };
   for (const providerId of Object.keys(next) as ProviderId[]) {
     const registryProvider = PROVIDERS[providerId];
     if (!next[providerId] || registryProvider?.credentialMode !== 'oauth') continue;
 
-    const baselineModels =
-      providerId === 'openai-codex'
-        ? (rebuildCodexModelCatalog(registryProvider.models) ?? [])
-        : registryProvider.models.map((model) => ({ ...model }));
     next[providerId] = {
       ...next[providerId],
       apiKey: '',
       baseUrl: '',
-      models: baselineModels,
+      models: getOAuthProviderBaselineModels(providerId),
       name: registryProvider.name,
       type: registryProvider.type,
       icon: registryProvider.icon,
@@ -411,7 +415,10 @@ const getDefaultProvidersConfig = (): ProvidersConfig => {
     config[pid as ProviderId] = {
       apiKey: '',
       baseUrl: '',
-      models: provider.models,
+      models:
+        provider.credentialMode === 'oauth'
+          ? getOAuthProviderBaselineModels(pid as ProviderId)
+          : provider.models,
       name: provider.name,
       type: provider.type,
       defaultBaseUrl: provider.defaultBaseUrl,
@@ -747,7 +754,7 @@ function ensureBuiltInProviders(state: Partial<SettingsState>): void {
           ...defaultConfig[providerId],
           apiKey: '',
           baseUrl: '',
-          models: [...provider.models],
+          models: getOAuthProviderBaselineModels(providerId),
           isServerConfigured: false,
           serverModels: undefined,
         };
@@ -1551,7 +1558,7 @@ export const useSettingsStore = create<SettingsState>()(
                       ? {
                           apiKey: '',
                           baseUrl: '',
-                          models: [...registryProvider.models],
+                          models: getOAuthProviderBaselineModels(key),
                           name: registryProvider.name,
                           type: registryProvider.type,
                           icon: registryProvider.icon,
@@ -2073,7 +2080,7 @@ export const useSettingsStore = create<SettingsState>()(
           ...state.providersConfig,
           'openai-codex': {
             ...state.providersConfig['openai-codex'],
-            models: PROVIDERS['openai-codex'].models,
+            models: getBundledCodexModelCatalog(),
             isServerConfigured: false,
             serverModels: undefined,
           },

@@ -472,6 +472,74 @@ describe('fetchServerProviders — provider availability sync', () => {
 
   // ---- Server model list filtering ----
 
+  it('uses a fresh bundled Codex baseline after registry mutation, rehydrate, and reset', async () => {
+    const { PROVIDERS } = await import('@/lib/ai/providers');
+    const registryModels = PROVIDERS['openai-codex'].models as ModelInfo[];
+    const originalRegistryModels = structuredClone(registryModels);
+    const baselineIds = ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.2'];
+
+    try {
+      registryModels[0] = {
+        ...registryModels[0]!,
+        capabilities: {
+          ...registryModels[0]!.capabilities,
+          serviceTiers: ['priority'],
+        },
+      };
+      storage.set(
+        'settings-storage',
+        JSON.stringify({
+          state: {
+            providerId: 'openai-codex',
+            modelId: 'stale-live-model',
+            providersConfig: {
+              'openai-codex': {
+                apiKey: '',
+                baseUrl: '',
+                models: [{ id: 'stale-live-model', name: 'Stale Live Model' }],
+                name: 'Codex',
+                type: 'openai',
+                credentialMode: 'oauth',
+                isServerConfigured: true,
+              },
+            },
+          },
+          version: 5,
+        }),
+      );
+
+      const store = await getStore();
+      const expectFastClosedBaseline = () => {
+        const codex = store.getState().providersConfig['openai-codex'];
+        expect(codex.models.map((model) => model.id)).toEqual(baselineIds);
+        expect(codex.models.every((model) => !model.capabilities?.serviceTiers)).toBe(true);
+        expect(store.getState().codexFastMode).toBe(false);
+      };
+      expectFastClosedBaseline();
+
+      mockServerResponse(richCodexResponse());
+      await store.getState().fetchServerProviders();
+      store.getState().setCodexFastMode(true);
+      mockServerResponse({});
+      await store.getState().fetchServerProviders();
+      expectFastClosedBaseline();
+
+      const persisted = JSON.parse(storage.get('settings-storage')!) as {
+        state: { providersConfig: Record<string, { models: ModelInfo[] }> };
+      };
+      expect(
+        persisted.state.providersConfig['openai-codex'].models.map((model) => model.id),
+      ).toEqual(baselineIds);
+      expect(
+        persisted.state.providersConfig['openai-codex'].models.every(
+          (model) => !model.capabilities?.serviceTiers,
+        ),
+      ).toBe(true);
+    } finally {
+      registryModels.splice(0, registryModels.length, ...originalRegistryModels);
+    }
+  });
+
   it('filters models to only those the server allows', async () => {
     const store = await getStore();
     mockServerResponse({

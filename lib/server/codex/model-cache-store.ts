@@ -1,6 +1,16 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { constants, type Stats } from 'node:fs';
-import { chmod, lstat, mkdir, open, rename, stat, unlink, type FileHandle } from 'node:fs/promises';
+import {
+  chmod,
+  lstat,
+  mkdir,
+  open,
+  readlink,
+  rename,
+  stat,
+  unlink,
+  type FileHandle,
+} from 'node:fs/promises';
 import { dirname, join, parse, relative, resolve, sep } from 'node:path';
 
 import {
@@ -43,6 +53,7 @@ export interface CodexModelCacheFileSystem {
   lstat: typeof lstat;
   mkdir: typeof mkdir;
   open: typeof open;
+  readlink: typeof readlink;
   rename: typeof rename;
   stat: typeof stat;
   unlink: typeof unlink;
@@ -68,6 +79,8 @@ interface DirectoryComponentIdentity {
   followedDev?: number;
   followedIno?: number;
   followedUid?: number;
+  resolvedTarget?: string;
+  physicalChain?: DirectoryComponentIdentity[];
 }
 
 interface DirectoryChainSnapshot {
@@ -79,6 +92,7 @@ const DEFAULT_CACHE_FS: CodexModelCacheFileSystem = Object.freeze({
   lstat,
   mkdir,
   open,
+  readlink,
   rename,
   stat,
   unlink,
@@ -239,16 +253,21 @@ function pathComponents(path: string): string[] {
   const root = parse(absolutePath).root;
   const parts = relative(root, absolutePath).split(sep).filter(Boolean);
   let current = root;
-  return parts.map((part) => {
-    current = join(current, part);
-    return current;
-  });
+  return [
+    root,
+    ...parts.map((part) => {
+      current = join(current, part);
+      return current;
+    }),
+  ];
 }
 
 function sameIdentity(
   left: DirectoryComponentIdentity,
   right: DirectoryComponentIdentity,
 ): boolean {
+  const leftPhysicalChain = left.physicalChain ?? [];
+  const rightPhysicalChain = right.physicalChain ?? [];
   return (
     left.path === right.path &&
     left.kind === right.kind &&
@@ -257,12 +276,25 @@ function sameIdentity(
     left.uid === right.uid &&
     left.followedDev === right.followedDev &&
     left.followedIno === right.followedIno &&
-    left.followedUid === right.followedUid
+    left.followedUid === right.followedUid &&
+    left.resolvedTarget === right.resolvedTarget &&
+    leftPhysicalChain.length === rightPhysicalChain.length &&
+    leftPhysicalChain.every((component, index) =>
+      sameIdentity(component, rightPhysicalChain[index]!),
+    )
   );
 }
 
 function sameFile(left: Pick<Stats, 'dev' | 'ino'>, right: Pick<Stats, 'dev' | 'ino'>): boolean {
   return left.dev === right.dev && left.ino === right.ino;
+}
+
+function isGroupOrWorldWritable(value: Pick<Stats, 'mode'>): boolean {
+  return (value.mode & 0o022) !== 0;
+}
+
+function hasUnsafeDirectoryPermissions(value: Pick<Stats, 'mode'>): boolean {
+  return isGroupOrWorldWritable(value) && (value.mode & 0o1000) === 0;
 }
 
 function isMissing(error: unknown): boolean {
@@ -336,19 +368,49 @@ export class FileCodexModelCatalogStore implements CodexModelCatalogStore {
     this.fs = { ...DEFAULT_CACHE_FS, ...options.fs };
   }
 
-  private async inspectDirectoryComponent(path: string): Promise<DirectoryComponentIdentity> {
+  private async inspectDirectoryComponent(
+    path: string,
+    rootOwnedOnly = false,
+    activeAliases: ReadonlySet<string> = new Set(),
+  ): Promise<DirectoryComponentIdentity> {
     const pathStat = await this.fs.lstat(path);
     if (pathStat.isSymbolicLink()) {
+      const canonicalAlias = resolve(path);
+      if (activeAliases.has(canonicalAlias)) {
+        throw new Error('Unsafe Codex model cache ancestor cycle');
+      }
+      const nextAliases = new Set(activeAliases);
+      nextAliases.add(canonicalAlias);
+      const linkTarget = await this.fs.readlink(path);
+      const resolvedTarget = resolve(dirname(path), linkTarget);
+      const physicalSnapshot = await this.captureDirectoryChain(resolvedTarget, true, nextAliases);
       const followed = await this.fs.stat(path);
       // macOS exposes stable root-owned aliases such as /var -> /private/var.
-      // Those are outside the user-controlled cache tree; user-owned links are
-      // always rejected.
+      // The alias and every component of its expanded target must remain
+      // root-owned and free of unsafe write permissions. User-owned aliases,
+      // including aliases that merely end at a root-owned directory, fail closed.
+      const physicalTarget = physicalSnapshot.components.at(-1);
+      const physicalTargetDev =
+        physicalTarget?.kind === 'trusted-system-symlink'
+          ? physicalTarget.followedDev
+          : physicalTarget?.dev;
+      const physicalTargetIno =
+        physicalTarget?.kind === 'trusted-system-symlink'
+          ? physicalTarget.followedIno
+          : physicalTarget?.ino;
+      const physicalTargetUid =
+        physicalTarget?.kind === 'trusted-system-symlink'
+          ? physicalTarget.followedUid
+          : physicalTarget?.uid;
       if (
         this.effectiveUid === undefined ||
         pathStat.uid !== 0 ||
         !followed.isDirectory() ||
         followed.uid !== 0 ||
-        ((followed.mode & 0o022) !== 0 && (followed.mode & 0o1000) === 0)
+        hasUnsafeDirectoryPermissions(followed) ||
+        physicalTargetDev !== followed.dev ||
+        physicalTargetIno !== followed.ino ||
+        physicalTargetUid !== followed.uid
       ) {
         throw new Error('Unsafe Codex model cache ancestor');
       }
@@ -361,17 +423,21 @@ export class FileCodexModelCatalogStore implements CodexModelCatalogStore {
         followedDev: followed.dev,
         followedIno: followed.ino,
         followedUid: followed.uid,
+        resolvedTarget,
+        physicalChain: physicalSnapshot.components,
       };
     }
     if (!pathStat.isDirectory()) throw new Error('Unsafe Codex model cache ancestor');
     if (
-      this.effectiveUid !== undefined &&
-      pathStat.uid !== 0 &&
-      pathStat.uid !== this.effectiveUid
+      (rootOwnedOnly && pathStat.uid !== 0) ||
+      (!rootOwnedOnly &&
+        this.effectiveUid !== undefined &&
+        pathStat.uid !== 0 &&
+        pathStat.uid !== this.effectiveUid)
     ) {
       throw new Error('Unsafe Codex model cache ancestor owner');
     }
-    if ((pathStat.mode & 0o022) !== 0 && (pathStat.mode & 0o1000) === 0) {
+    if (hasUnsafeDirectoryPermissions(pathStat)) {
       throw new Error('Unsafe Codex model cache ancestor permissions');
     }
     return {
@@ -392,10 +458,16 @@ export class FileCodexModelCatalogStore implements CodexModelCatalogStore {
     }
   }
 
-  private async captureDirectoryChain(target: string): Promise<DirectoryChainSnapshot> {
+  private async captureDirectoryChain(
+    target: string,
+    rootOwnedOnly = false,
+    activeAliases: ReadonlySet<string> = new Set(),
+  ): Promise<DirectoryChainSnapshot> {
     const components: DirectoryComponentIdentity[] = [];
     for (const component of pathComponents(target)) {
-      components.push(await this.inspectDirectoryComponent(component));
+      components.push(
+        await this.inspectDirectoryComponent(component, rootOwnedOnly, activeAliases),
+      );
     }
     return { components };
   }
@@ -477,7 +549,8 @@ export class FileCodexModelCatalogStore implements CodexModelCatalogStore {
     if (
       pathStat.isSymbolicLink() ||
       !pathStat.isFile() ||
-      (this.effectiveUid !== undefined && pathStat.uid !== this.effectiveUid)
+      (this.effectiveUid !== undefined && pathStat.uid !== this.effectiveUid) ||
+      isGroupOrWorldWritable(pathStat)
     ) {
       throw new Error('Unsafe Codex model cache file');
     }
@@ -509,6 +582,7 @@ export class FileCodexModelCatalogStore implements CodexModelCatalogStore {
         !sameFile(openedStat, pathStat) ||
         !sameFile(openedStat, postOpenPathStat) ||
         (this.effectiveUid !== undefined && openedStat.uid !== this.effectiveUid) ||
+        isGroupOrWorldWritable(openedStat) ||
         openedStat.size > CODEX_MODEL_CACHE_MAX_BYTES
       ) {
         return null;
