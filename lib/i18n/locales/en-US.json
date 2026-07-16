@@ -1708,7 +1708,8 @@
         "FEATURE_DISABLED": "Enable Codex OAuth on the server to use this provider.",
         "SERVERLESS_UNSUPPORTED": "Codex OAuth requires a self-hosted Node server with persistent storage.",
         "ACCESS_CODE_REQUIRED": "Set ACCESS_CODE before enabling Codex OAuth in production.",
-        "DATA_DIR_UNWRITABLE": "The server cannot write to its data directory. Check /app/data permissions."
+        "DATA_DIR_UNWRITABLE": "The server cannot write to its data directory. Check /app/data permissions.",
+        "RUNTIME_LOCKED": "Another OpenMAIC Node process is already using the Codex auth data directory."
       },
       "connectedAs": "Connected as {email}",
       "connected": "Connected with ChatGPT",

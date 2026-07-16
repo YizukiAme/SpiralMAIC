@@ -1708,7 +1708,8 @@
         "FEATURE_DISABLED": "서버에서 Codex OAuth를 활성화해 주세요.",
         "SERVERLESS_UNSUPPORTED": "Codex OAuth에는 영구 저장소가 있는 자체 호스팅 Node 서버가 필요합니다.",
         "ACCESS_CODE_REQUIRED": "프로덕션에서 Codex OAuth를 활성화하기 전에 ACCESS_CODE를 설정하세요.",
-        "DATA_DIR_UNWRITABLE": "서버가 데이터 디렉터리에 쓸 수 없습니다. /app/data 권한을 확인하세요."
+        "DATA_DIR_UNWRITABLE": "서버가 데이터 디렉터리에 쓸 수 없습니다. /app/data 권한을 확인하세요.",
+        "RUNTIME_LOCKED": "다른 OpenMAIC Node 프로세스가 Codex 인증 데이터 디렉터리를 사용 중입니다."
       },
       "connectedAs": "{email}(으)로 연결됨",
       "connected": "ChatGPT에 연결됨",

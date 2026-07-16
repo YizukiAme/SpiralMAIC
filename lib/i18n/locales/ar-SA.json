@@ -1708,7 +1708,8 @@
         "FEATURE_DISABLED": "فعّل Codex OAuth على الخادم لاستخدام هذا المزوّد.",
         "SERVERLESS_UNSUPPORTED": "يتطلب Codex OAuth خادم Node مستضافاً ذاتياً مع تخزين دائم.",
         "ACCESS_CODE_REQUIRED": "اضبط ACCESS_CODE قبل تفعيل Codex OAuth في بيئة الإنتاج.",
-        "DATA_DIR_UNWRITABLE": "لا يستطيع الخادم الكتابة في مجلد البيانات. تحقق من صلاحيات /app/data."
+        "DATA_DIR_UNWRITABLE": "لا يستطيع الخادم الكتابة في مجلد البيانات. تحقق من صلاحيات /app/data.",
+        "RUNTIME_LOCKED": "تستخدم عملية OpenMAIC Node أخرى مجلد بيانات مصادقة Codex بالفعل."
       },
       "connectedAs": "متصل باسم {email}",
       "connected": "متصل بـ ChatGPT",

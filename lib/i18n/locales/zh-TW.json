@@ -1692,7 +1692,8 @@
         "FEATURE_DISABLED": "請在伺服器啟用 Codex OAuth 後使用此提供者。",
         "SERVERLESS_UNSUPPORTED": "Codex OAuth 需要具持久化儲存的自託管 Node 伺服器。",
         "ACCESS_CODE_REQUIRED": "正式環境啟用 Codex OAuth 前必須設定 ACCESS_CODE。",
-        "DATA_DIR_UNWRITABLE": "伺服器無法寫入資料目錄，請檢查 /app/data 權限。"
+        "DATA_DIR_UNWRITABLE": "伺服器無法寫入資料目錄，請檢查 /app/data 權限。",
+        "RUNTIME_LOCKED": "另一個 OpenMAIC Node 程序正在使用 Codex 驗證資料目錄。"
       },
       "connectedAs": "已連線為 {email}",
       "connected": "已連線 ChatGPT",

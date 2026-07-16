@@ -16,12 +16,14 @@ Run exactly one persistent OpenMAIC server as a single Node process:
 
 There is **no serverless support** and **no shared-volume horizontal scaling**. Do not place two
 OpenMAIC processes, containers, or maintenance commands over the same data directory. The OAuth
-vault and model cache coordinate mutations inside one Node process, not between replicas. A shared
-filesystem does not turn them into a distributed lock.
+runtime uses a private PID/liveness lock to reject a second supported local process or maintenance
+helper, and reclaims an owner only after that PID is dead. This is a local process-safety boundary,
+not a distributed coordination system; a shared filesystem does not make horizontal scaling safe.
 
 This constraint applies even when an orchestrator can mount the same persistent volume into
 multiple replicas: keep the deployment at `replica=1`. Rolling updates must stop the old process
-before the replacement starts writing `/app/data`.
+before starting the replacement. If overlap occurs, runtime-lock acquisition makes the replacement
+fail safely; it does not authorize overlapping replicas.
 
 ## Configuration
 
@@ -62,7 +64,8 @@ pnpm start
 
 Do not run both commands against the same checkout and `data/` directory. Stop the running app
 before invoking the offline force-refresh helper described in the
-[real-account acceptance runbook](codex-real-account-acceptance.md).
+[real-account acceptance runbook](codex-real-account-acceptance.md). The helper's HTTP probe is an
+additional operator check; the shared runtime lock is what excludes concurrent vault access.
 
 ## Docker
 

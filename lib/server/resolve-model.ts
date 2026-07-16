@@ -44,6 +44,30 @@ export interface ResolvedModel extends ModelWithInfo {
   serviceTier?: ModelServiceTier;
 }
 
+export interface ExpectedResolvedModel {
+  providerId: string;
+  modelId: string;
+}
+
+class ResolvedModelAssertionError extends Error {
+  readonly code = 'RESOLVED_MODEL_MISMATCH';
+
+  constructor() {
+    super('Resolved model does not match the request assertion');
+    this.name = 'ResolvedModelAssertionError';
+  }
+}
+
+export function getExpectedResolvedModelFromHeaders(
+  req: Pick<NextRequest, 'headers'>,
+): ExpectedResolvedModel | undefined {
+  const providerId = req.headers.get('x-openmaic-expected-provider');
+  const modelId = req.headers.get('x-openmaic-expected-model');
+  if (providerId === null && modelId === null) return undefined;
+  if (!providerId || !modelId) throw new ResolvedModelAssertionError();
+  return { providerId, modelId };
+}
+
 /**
  * Resolve a language model from explicit parameters.
  *
@@ -65,6 +89,7 @@ export async function resolveModel(params: {
   thinkingConfig?: ThinkingConfig;
   serviceTier?: ModelServiceTier;
   logicalSession?: CodexLogicalSession;
+  expectedResolvedModel?: ExpectedResolvedModel;
 }): Promise<ResolvedModel> {
   // Resolution order: stage route > x-model > DEFAULT_MODEL.
   // A configured stage route is the operator's deliberate per-stage choice and
@@ -82,6 +107,18 @@ export async function resolveModel(params: {
     );
   }
   const { providerId, modelId } = parseModelString(modelString);
+
+  // This is an assertion only: stage routing has already selected the model
+  // above, and the expected values never participate in that selection. Keep
+  // the check before provider discovery/model construction so a mismatch
+  // cannot send a generation request upstream.
+  if (
+    params.expectedResolvedModel &&
+    (params.expectedResolvedModel.providerId !== providerId ||
+      params.expectedResolvedModel.modelId !== modelId)
+  ) {
+    throw new ResolvedModelAssertionError();
+  }
 
   if (providerId === 'openai-codex') {
     const availability = await getCodexOAuthAvailability();
@@ -226,6 +263,7 @@ export async function resolveModelFromHeaders(
     providerType: req.headers.get('x-provider-type') || undefined,
     thinkingConfig,
     serviceTier: serviceTier ?? normalizeServiceTier(req.headers.get('x-service-tier')),
+    expectedResolvedModel: getExpectedResolvedModelFromHeaders(req),
     ...(logicalSession ? { logicalSession } : {}),
   });
 }

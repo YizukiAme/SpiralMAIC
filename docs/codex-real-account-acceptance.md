@@ -19,8 +19,9 @@ ACCESS_CODE=replace-with-a-local-instance-access-code
 NEXT_PUBLIC_MAIC_EDITOR_ENABLED=true
 ```
 
-The editor flag is optional. When it is false, the harness must report `SKIP stage=editor-tools`.
-Start exactly one process:
+The harness expects the editor route to be enabled by default, so a missing/404 route is a failure.
+When the flag is deliberately false, invoke the harness with `--editor-mode disabled`; only that
+explicit mode may report `SKIP stage=editor-tools`. Start exactly one process:
 
 ```bash
 pnpm dev
@@ -45,7 +46,7 @@ export OPENMAIC_ACCEPTANCE_ACCESS_CODE
 5. Run the black-box harness:
 
    ```bash
-   pnpm accept:codex -- --base-url http://localhost:3000
+   pnpm --silent accept:codex -- --base-url http://localhost:3000
    ```
 
 Every line must begin with `PASS`, `FAIL`, or `SKIP`. Expect connected auth, a strict catalog,
@@ -59,7 +60,7 @@ the selected catalog model advertises priority; it must be an explicit `SKIP` ot
 2. Verify the signed-out public state:
 
    ```bash
-   pnpm accept:codex -- --base-url http://localhost:3000 --expect-signed-out
+   pnpm --silent accept:codex -- --base-url http://localhost:3000 --expect-signed-out
    ```
 
    It must report disconnected auth and `providerPresent=false`. Signed-out mode does not perform a
@@ -71,26 +72,30 @@ the selected catalog model advertises priority; it must be an explicit `SKIP` ot
 
 ## 4. Offline force refresh and restart
 
-The force-refresh helper imports the production token-provider runtime and writes the same vault as
-the app. Stop the app first (for example, press `Ctrl-C` in the `pnpm dev` terminal). This ordering
-prevents **two vault writers**.
+The app holds a private runtime lock for its process lifetime. The force-refresh helper acquires the
+same lock atomically before it imports the production token-provider runtime, and holds it until the
+refresh finishes. This is the exclusion primitive that prevents **two vault writers**: if either the
+app or helper already owns the lock, the other process fails safely without touching OAuth state.
+Still stop the app first (for example, press `Ctrl-C` in the `pnpm dev` terminal).
 
 Confirm the server is no longer reachable, then run:
 
 ```bash
-pnpm refresh:codex -- --base-url http://localhost:3000 --confirm-app-stopped
+pnpm --silent refresh:codex -- --base-url http://localhost:3000 --confirm-app-stopped
 ```
 
-The confirmation flag is necessary but not sufficient: the command also probes `/api/health`. It
-continues only after a connection refusal. An active response or an ambiguous timeout/DNS/network
-failure makes the helper refuse to proceed; it is not permission to write. Run the helper from the
-same checkout so it targets the same local `data/` directory. It prints no credentials.
+The confirmation flag is necessary but not sufficient: the command also probes `/api/health`. That
+probe is an additional operator-safety check, not the exclusion primitive. The helper continues
+only after a connection refusal and successful runtime-lock acquisition. An active response, an
+ambiguous timeout/DNS/network failure, or a live lock owner makes it refuse to proceed; none is
+permission to write. Run the helper from the same checkout so it targets the same local `data/`
+directory. It prints no credentials.
 
 Restart the one local process and rerun the normal harness:
 
 ```bash
 pnpm dev
-pnpm accept:codex -- --base-url http://localhost:3000
+pnpm --silent accept:codex -- --base-url http://localhost:3000
 ```
 
 Then stop and start the local process once more without force refresh. The account and current
@@ -112,7 +117,7 @@ published base URL. Restart without removing the named volume:
 
 ```bash
 docker compose restart openmaic
-pnpm accept:codex -- --base-url http://localhost:3000
+pnpm --silent accept:codex -- --base-url http://localhost:3000
 ```
 
 The login must survive. Do not scale the service, run a second container over the named volume, or
@@ -145,10 +150,11 @@ Keep the app log in a local ignored file while testing. Review it without pastin
 ticket. A quiet scan avoids echoing a discovered secret:
 
 ```bash
+CODEX_SECRET_PATTERN='"?(?:access_token|accessToken|refresh_token|refreshToken|account_id|accountId|account_scope|accountScope|scope|device_auth_id|deviceAuthId|device_authorization_id|deviceAuthorizationId|code_verifier|codeVerifier|pkce_verifier|pkceVerifier|session_cookie|sessionCookie|cookie|authorization)"?\s*[:=]\s*"?[A-Za-z0-9._~+/=-]{6,}|(?:authorization|set-cookie|cookie)\s*:\s*[^\r\n]{6,}|openmaic_access=[A-Za-z0-9._~+/=-]{6,}|bearer\s+[A-Za-z0-9._~+/=-]{12,}|eyJ[A-Za-z0-9_-]{20,}(?:\.[A-Za-z0-9_-]{6,}){1,2}|sk-[A-Za-z0-9_-]{16,}'
 if [ ! -r .codex-acceptance.log ]; then
   echo 'FAIL: acceptance log is missing or unreadable'
 else
-  rg -q -i 'authorization:[[:space:]]*bearer|openmaic_access=|"(access_token|refresh_token)"|eyJ[A-Za-z0-9_-]{20,}' .codex-acceptance.log
+  rg -q -i -- "$CODEX_SECRET_PATTERN" .codex-acceptance.log >/dev/null 2>&1
   log_scan_status=$?
   if [ "$log_scan_status" -eq 0 ]; then
     echo 'FAIL: credential-shaped data found in log; investigate locally'
@@ -165,12 +171,9 @@ a safe outcome and count:
 
 ```js
 (() => {
+  const secretPattern = new RegExp(String.raw`"?(?:access_token|accessToken|refresh_token|refreshToken|account_id|accountId|account_scope|accountScope|scope|device_auth_id|deviceAuthId|device_authorization_id|deviceAuthorizationId|code_verifier|codeVerifier|pkce_verifier|pkceVerifier|session_cookie|sessionCookie|cookie|authorization)"?\s*[:=]\s*"?[A-Za-z0-9._~+/=-]{6,}|(?:authorization|set-cookie|cookie)\s*:\s*[^\r\n]{6,}|openmaic_access=[A-Za-z0-9._~+/=-]{6,}|bearer\s+[A-Za-z0-9._~+/=-]{12,}|eyJ[A-Za-z0-9_-]{20,}(?:\.[A-Za-z0-9_-]{6,}){1,2}|sk-[A-Za-z0-9_-]{16,}`, 'i');
   const suspectStorageEntryCount = Object.entries(localStorage).filter(
-    ([key, value]) =>
-      /codex.*(?:token|account|email)|(?:access|refresh)[_-]?token|openmaic_access/i.test(key) ||
-      /authorization:\s*bearer|openmaic_access=|"?(?:access|refresh)[_-]?token"?\s*:|eyJ[A-Za-z0-9_-]{20,}/i.test(
-        value,
-      ),
+    ([key, value]) => secretPattern.test(`${key}=${value}`),
   ).length;
   return {
     outcome: suspectStorageEntryCount === 0 ? 'PASS' : 'FAIL',
@@ -182,10 +185,11 @@ a safe outcome and count:
 The count must be zero. Finally scan the git diff quietly and check its shape:
 
 ```bash
+CODEX_SECRET_PATTERN='"?(?:access_token|accessToken|refresh_token|refreshToken|account_id|accountId|account_scope|accountScope|scope|device_auth_id|deviceAuthId|device_authorization_id|deviceAuthorizationId|code_verifier|codeVerifier|pkce_verifier|pkceVerifier|session_cookie|sessionCookie|cookie|authorization)"?\s*[:=]\s*"?[A-Za-z0-9._~+/=-]{6,}|(?:authorization|set-cookie|cookie)\s*:\s*[^\r\n]{6,}|openmaic_access=[A-Za-z0-9._~+/=-]{6,}|bearer\s+[A-Za-z0-9._~+/=-]{12,}|eyJ[A-Za-z0-9_-]{20,}(?:\.[A-Za-z0-9_-]{6,}){1,2}|sk-[A-Za-z0-9_-]{16,}'
 if ! git_delta=$(git diff --no-ext-diff HEAD); then
   echo 'FAIL: git diff could not be read'
 else
-  printf '%s' "$git_delta" | rg -q -i 'authorization:[[:space:]]*bearer|openmaic_access=[A-Za-z0-9._~+/=-]{12,}|sk-[A-Za-z0-9_-]{16,}|eyJ[A-Za-z0-9_-]{20,}'
+  printf '%s' "$git_delta" | rg -q -i -- "$CODEX_SECRET_PATTERN" >/dev/null 2>&1
   diff_scan_status=$?
   if [ "$diff_scan_status" -eq 0 ]; then
     echo 'FAIL: credential-shaped data found in staged or unstaged git diff; investigate locally'

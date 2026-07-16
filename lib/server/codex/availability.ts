@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { lstat, mkdir, open, rename, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
+import { ensureCodexRuntimeLock, isCodexRuntimeLockError } from './runtime-lock';
 
 import {
   CODEX_OAUTH_AVAILABILITY_REASONS,
@@ -89,6 +90,15 @@ export async function getCodexOAuthAvailability(
   const dataDir = options.dataDir ?? join(process.cwd(), 'data');
   if (!(await canWriteAuthDirectory(dataDir))) {
     return unavailable(CODEX_OAUTH_AVAILABILITY_REASONS.DATA_DIR_UNWRITABLE);
+  }
+  try {
+    ensureCodexRuntimeLock({ baseDir: dataDir });
+  } catch (error) {
+    return unavailable(
+      isCodexRuntimeLockError(error) && error.code === 'CODEX_RUNTIME_LOCKED'
+        ? CODEX_OAUTH_AVAILABILITY_REASONS.RUNTIME_LOCKED
+        : CODEX_OAUTH_AVAILABILITY_REASONS.DATA_DIR_UNWRITABLE,
+    );
   }
 
   const methods: CodexOAuthLoginMethod[] =
