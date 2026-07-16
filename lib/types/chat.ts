@@ -55,6 +55,51 @@ export interface ChatSession {
 }
 
 /**
+ * Advance the session's conflict-order clock without trusting wall time to be
+ * monotonic. Restored data may come from a clock ahead of this device, and the
+ * local clock itself can move backwards.
+ */
+export function nextChatUpdatedAt(
+  session: Pick<ChatSession, 'updatedAt'>,
+  now = Date.now(),
+): number {
+  return Math.max(now, session.updatedAt + 1);
+}
+
+/** Apply a lifecycle transition and advance the same conflict-order clock. */
+export function withChatSessionStatus(
+  session: ChatSession,
+  status: SessionStatus,
+  now = Date.now(),
+): ChatSession {
+  return { ...session, status, updatedAt: nextChatUpdatedAt(session, now) };
+}
+
+/** Advance conflict order once a streamed message segment is fully revealed. */
+export function withChatSegmentSealed(session: ChatSession, now = Date.now()): ChatSession {
+  return { ...session, updatedAt: nextChatUpdatedAt(session, now) };
+}
+
+/** Advance conflict order only when paced text has actually finished revealing. */
+export function withChatSegmentReveal(
+  session: ChatSession,
+  isComplete: boolean,
+  now = Date.now(),
+): ChatSession {
+  return isComplete ? withChatSegmentSealed(session, now) : session;
+}
+
+/** Mark streams that cannot survive a reload as interrupted without stale ordering. */
+export function interruptActiveChatSessions(
+  sessions: ChatSession[],
+  now = Date.now(),
+): ChatSession[] {
+  return sessions.map((session) =>
+    session.status === 'active' ? withChatSessionStatus(session, 'interrupted', now) : session,
+  );
+}
+
+/**
  * Session configuration
  */
 export interface SessionConfig {

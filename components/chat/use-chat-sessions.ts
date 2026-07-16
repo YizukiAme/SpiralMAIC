@@ -1,12 +1,16 @@
 'use client';
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import type {
-  ChatSession,
-  SessionType,
-  SessionStatus,
-  ChatMessageMetadata,
-  DirectorState,
+import {
+  interruptActiveChatSessions,
+  nextChatUpdatedAt,
+  withChatSegmentReveal,
+  withChatSessionStatus,
+  type ChatSession,
+  type SessionType,
+  type SessionStatus,
+  type ChatMessageMetadata,
+  type DirectorState,
 } from '@/lib/types/chat';
 import type { DiscussionRequest } from '@/components/roundtable';
 import type { Action, SpotlightAction, DiscussionAction } from '@/lib/types/action';
@@ -124,9 +128,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
     // Restore sessions from store (loaded from IndexedDB)
     const stored = useStageStore.getState().chats;
-    return stored.map((s) =>
-      s.status === 'active' ? { ...s, status: 'interrupted' as SessionStatus } : s,
-    );
+    return interruptActiveChatSessions(stored);
   });
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [expandedSessionIds, setExpandedSessionIds] = useState<Set<string>>(new Set());
@@ -154,11 +156,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
     stageIdRef.current = stageId;
     // Stage changed — reload sessions from store (already populated by loadFromStorage)
     const stored = useStageStore.getState().chats;
-    setSessions(
-      stored.map((s) =>
-        s.status === 'active' ? { ...s, status: 'interrupted' as SessionStatus } : s,
-      ),
-    );
+    setSessions(interruptActiveChatSessions(stored));
     setActiveSessionId(null);
     setExpandedSessionIds(new Set());
   }, [stageId]);
@@ -207,7 +205,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
           ? {
               ...s,
               status: 'error' as SessionStatus,
-              updatedAt: now,
+              updatedAt: nextChatUpdatedAt(s, now),
               messages: [
                 ...s.messages,
                 {
@@ -289,7 +287,11 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
             setSessions((prev) =>
               prev.map((s) =>
                 s.id === sessionId
-                  ? { ...s, messages: [...s.messages, newMsg], updatedAt: now }
+                  ? {
+                      ...s,
+                      messages: [...s.messages, newMsg],
+                      updatedAt: nextChatUpdatedAt(s, now),
+                    }
                   : s,
               ),
             );
@@ -304,7 +306,9 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
                 const msgs = s.messages.filter(
                   (m) => !(m.role === 'assistant' && m.parts.length === 0),
                 );
-                return msgs.length !== s.messages.length ? { ...s, messages: msgs } : s;
+                return msgs.length !== s.messages.length
+                  ? { ...s, messages: msgs, updatedAt: nextChatUpdatedAt(s) }
+                  : s;
               }),
             );
           },
@@ -313,12 +317,12 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
             messageId: string,
             partId: string,
             revealedText: string,
-            _isComplete: boolean,
+            isComplete: boolean,
           ) {
             setSessions((prev) =>
               prev.map((s) => {
                 if (s.id !== sessionId) return s;
-                return {
+                const revealed = {
                   ...s,
                   messages: s.messages.map((m) => {
                     if (m.id !== messageId) return m;
@@ -344,6 +348,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
                   }),
                   // Don't update updatedAt on every tick — avoids thrashing persistence sync
                 };
+                return withChatSegmentReveal(revealed, isComplete);
               }),
             );
           },
@@ -367,7 +372,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
                   messages: s.messages.map((m) =>
                     m.id === messageId ? { ...m, parts: [...m.parts, actionPart] } : m,
                   ),
-                  updatedAt: Date.now(),
+                  updatedAt: nextChatUpdatedAt(s),
                 };
               }),
             );
@@ -654,7 +659,11 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
             setSessions((prev) =>
               prev.map((s) =>
                 s.id === sessionId
-                  ? { ...s, status: 'completed' as SessionStatus, updatedAt: Date.now() }
+                  ? {
+                      ...s,
+                      status: 'completed' as SessionStatus,
+                      updatedAt: nextChatUpdatedAt(s),
+                    }
                   : s,
               ),
             );
@@ -775,7 +784,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
                 break;
               }
             }
-            return { ...s, messages, status: 'completed' as SessionStatus };
+            return { ...withChatSessionStatus(s, 'completed'), messages };
           }),
         );
         // Clear roundtable state via callbacks
@@ -783,9 +792,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
         onThinkingRef.current?.(null);
       } else {
         setSessions((prev) =>
-          prev.map((s) =>
-            s.id === sessionId ? { ...s, status: 'completed' as SessionStatus } : s,
-          ),
+          prev.map((s) => (s.id === sessionId ? withChatSessionStatus(s, 'completed') : s)),
         );
       }
 
@@ -876,7 +883,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
             }
           }
           // Keep status 'active' — session continues when user speaks
-          return { ...s, messages, updatedAt: Date.now() };
+          return { ...s, messages, updatedAt: nextChatUpdatedAt(s) };
         }),
       );
       // Note: Do NOT call onLiveSpeech/onThinking here.
@@ -1021,7 +1028,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
                         text: (textPart.text || '') + '...',
                       } as UIMessage<ChatMessageMetadata>['parts'][number];
                       messages[i] = { ...messages[i], parts };
-                      return { ...s, messages, updatedAt: Date.now() };
+                      return { ...s, messages, updatedAt: nextChatUpdatedAt(s) };
                     }
                   }
                   break;
@@ -1105,7 +1112,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
                   ...s,
                   messages: [...s.messages, userMessage],
                   status: 'active' as SessionStatus,
-                  updatedAt: now,
+                  updatedAt: nextChatUpdatedAt(s, now),
                 }
               : s,
           );
@@ -1373,9 +1380,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
         // Actions won't be re-appended because lastActionIndex already covers them.
         if (existing.status === 'completed') {
           setSessions((prev) =>
-            prev.map((s) =>
-              s.id === existing.id ? { ...s, status: 'active' as SessionStatus } : s,
-            ),
+            prev.map((s) => (s.id === existing.id ? withChatSessionStatus(s, 'active') : s)),
           );
           // Restore lecture tracking refs (cleared by endSession)
           const messageId = existing.messages[0]?.id;
@@ -1461,7 +1466,9 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
       // Update lastActionIndex in session
       setSessions((prev) =>
         prev.map((s) =>
-          s.id === sessionId ? { ...s, lastActionIndex: actionIndex, updatedAt: Date.now() } : s,
+          s.id === sessionId
+            ? { ...s, lastActionIndex: actionIndex, updatedAt: nextChatUpdatedAt(s) }
+            : s,
         ),
       );
 
