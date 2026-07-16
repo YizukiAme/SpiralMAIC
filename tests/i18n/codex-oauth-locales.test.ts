@@ -28,6 +28,7 @@ const CODEX_KEYS = [
   'settings.codexOAuth.unavailable.SERVERLESS_UNSUPPORTED',
   'settings.codexOAuth.unavailable.ACCESS_CODE_REQUIRED',
   'settings.codexOAuth.unavailable.DATA_DIR_UNWRITABLE',
+  'settings.codexOAuth.unavailable.RUNTIME_LOCKED',
   'settings.codexOAuth.connectedAs',
   'settings.codexOAuth.connected',
   'settings.codexOAuth.signInBrowser',

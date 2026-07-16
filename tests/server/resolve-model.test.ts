@@ -165,6 +165,40 @@ describe('resolveModel — per-stage resolution order', () => {
     expect(r.modelString).toBe('openai:gpt-5.4');
   });
 
+  it('rejects a routed provider/model that differs from the post-routing assertion', async () => {
+    process.env.MODEL_ROUTES = JSON.stringify({ 'scene-content': 'openai:gpt-5.4' });
+    const { resolveModel } = await import('@/lib/server/resolve-model');
+
+    await expect(
+      resolveModel({
+        stage: 'scene-content',
+        modelString: 'openai-codex:gpt-5.4',
+        expectedResolvedModel: { providerId: 'openai-codex', modelId: 'gpt-5.4' },
+      }),
+    ).rejects.toMatchObject({ code: 'RESOLVED_MODEL_MISMATCH' });
+
+    expect(mocks.getCodexOAuthAvailability).not.toHaveBeenCalled();
+    expect(mocks.createCodexResponsesTransport).not.toHaveBeenCalled();
+    expect(mocks.getModelCalls).toHaveLength(0);
+  });
+
+  it('allows a matching post-routing assertion without changing route selection', async () => {
+    process.env.MODEL_ROUTES = JSON.stringify({
+      'scene-content': 'openai-codex:gpt-5.4',
+    });
+    const { resolveModel } = await import('@/lib/server/resolve-model');
+
+    const resolved = await resolveModel({
+      stage: 'scene-content',
+      modelString: 'anthropic:claude-sonnet-4',
+      expectedResolvedModel: { providerId: 'openai-codex', modelId: 'gpt-5.4' },
+    });
+
+    expect(resolved.modelString).toBe('openai-codex:gpt-5.4');
+    expect(resolved.providerId).toBe('openai-codex');
+    expect(resolved.modelId).toBe('gpt-5.4');
+  });
+
   it('falls back to x-model for a stage that is not routed', async () => {
     process.env.DEFAULT_MODEL = 'openai:gpt-5.4-mini';
     process.env.MODEL_ROUTES = JSON.stringify({ 'scene-content': 'openai:gpt-5.4' });

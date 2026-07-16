@@ -12,6 +12,7 @@ import {
   withCodexCredentialVaultMutation,
   type CodexCredentialVault,
 } from './vault';
+import { ensureCodexRuntimeLock } from './runtime-lock';
 
 export interface CodexAuthRuntime {
   vault: CodexCredentialVault;
@@ -76,6 +77,10 @@ export function createCodexAuthRuntime(
 }
 
 export function getCodexAuthRuntime(): CodexAuthRuntime {
+  // Process-wide and HMR-safe. The assertion happens before returning even an
+  // existing HMR runtime, so a second live Node process can never reuse the
+  // same on-disk Codex auth area.
+  ensureCodexRuntimeLock();
   const existing = runtimeHost[RUNTIME_KEY];
   if (isCodexAuthRuntime(existing)) return existing;
 

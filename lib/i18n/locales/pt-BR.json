@@ -1708,7 +1708,8 @@
         "FEATURE_DISABLED": "Ative o Codex OAuth no servidor para usar este provedor.",
         "SERVERLESS_UNSUPPORTED": "O Codex OAuth requer um servidor Node auto-hospedado com armazenamento persistente.",
         "ACCESS_CODE_REQUIRED": "Configure ACCESS_CODE antes de ativar o Codex OAuth em produção.",
-        "DATA_DIR_UNWRITABLE": "O servidor não consegue gravar no diretório de dados. Verifique as permissões de /app/data."
+        "DATA_DIR_UNWRITABLE": "O servidor não consegue gravar no diretório de dados. Verifique as permissões de /app/data.",
+        "RUNTIME_LOCKED": "Outro processo Node do OpenMAIC já está usando o diretório de dados de autenticação do Codex."
       },
       "connectedAs": "Conectado como {email}",
       "connected": "Conectado ao ChatGPT",

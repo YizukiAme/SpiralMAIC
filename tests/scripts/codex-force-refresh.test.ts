@@ -49,11 +49,12 @@ describe('offline Codex force-refresh safety', () => {
   it('refuses without confirmation before probing or importing the production runtime', async () => {
     const probe = vi.fn();
     const refresh = vi.fn();
+    const acquireLock = vi.fn();
 
     await expect(
       runOfflineCodexRefresh(
         { baseUrl: 'http://localhost:3000', confirmedAppStopped: false },
-        { probe, refresh },
+        { probe, refresh, acquireLock },
       ),
     ).resolves.toEqual({
       outcome: 'FAIL',
@@ -61,6 +62,7 @@ describe('offline Codex force-refresh safety', () => {
       errorCategory: 'confirmation-required',
     });
     expect(probe).not.toHaveBeenCalled();
+    expect(acquireLock).not.toHaveBeenCalled();
     expect(refresh).not.toHaveBeenCalled();
   });
 
@@ -84,19 +86,73 @@ describe('offline Codex force-refresh safety', () => {
   });
 
   it('force-refreshes only after a confirmed stopped probe', async () => {
+    const order: string[] = [];
+    const release = vi.fn(() => order.push('release'));
     const refresh = vi.fn(async () => undefined);
     const report = await runOfflineCodexRefresh(
       { baseUrl: 'http://localhost:3000', confirmedAppStopped: true },
-      { probe: vi.fn(async () => 'stopped' as const), refresh },
+      {
+        probe: vi.fn(async () => 'stopped' as const),
+        acquireLock: vi.fn(() => {
+          order.push('lock');
+          return { release };
+        }),
+        refresh: vi.fn(async () => {
+          order.push('refresh');
+          await refresh();
+        }),
+      },
     );
 
     expect(refresh).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(['lock', 'refresh', 'release']);
     expect(report).toEqual({
       outcome: 'PASS',
       stage: 'offline-force-refresh',
       applicationStopped: true,
       refreshed: true,
     });
+  });
+
+  it('fails safely when another live process owns the runtime lock', async () => {
+    const refresh = vi.fn();
+    const report = await runOfflineCodexRefresh(
+      { baseUrl: 'http://localhost:3000', confirmedAppStopped: true },
+      {
+        probe: vi.fn(async () => 'stopped' as const),
+        acquireLock: vi.fn(() => {
+          throw Object.assign(new Error('private owner details'), {
+            code: 'CODEX_RUNTIME_LOCKED',
+          });
+        }),
+        refresh,
+      },
+    );
+
+    expect(report).toEqual({
+      outcome: 'FAIL',
+      stage: 'offline-force-refresh',
+      applicationStopped: false,
+      errorCategory: 'application-active',
+    });
+    expect(formatSafeReport(report)).not.toContain('private owner details');
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it('releases the helper lease when refresh fails', async () => {
+    const release = vi.fn();
+    await runOfflineCodexRefresh(
+      { baseUrl: 'http://localhost:3000', confirmedAppStopped: true },
+      {
+        probe: vi.fn(async () => 'stopped' as const),
+        acquireLock: vi.fn(() => ({ release })),
+        refresh: vi.fn(async () => {
+          throw new Error('refresh failed');
+        }),
+      },
+    );
+
+    expect(release).toHaveBeenCalledTimes(1);
   });
 
   it('never emits credentials or raw refresh failures', async () => {

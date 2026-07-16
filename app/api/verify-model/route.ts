@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { createLogger } from '@/lib/logger';
 import { apiError, apiSuccess } from '@/lib/server/api-response';
-import { resolveModel } from '@/lib/server/resolve-model';
+import { getExpectedResolvedModelFromHeaders, resolveModel } from '@/lib/server/resolve-model';
 import { callLLM } from '@/lib/ai/llm';
 const log = createLogger('Verify Model');
 
@@ -52,11 +52,13 @@ export async function POST(req: NextRequest) {
     // Parse model string and resolve server-side fallback
     let languageModel;
     try {
+      const expectedResolvedModel = getExpectedResolvedModelFromHeaders(req);
       const result = await resolveModel({
         modelString: model,
         apiKey: apiKey || '',
         baseUrl: baseUrl || undefined,
         providerType,
+        ...(expectedResolvedModel ? { expectedResolvedModel } : {}),
         ...(model.startsWith('openai-codex:') && serviceTier === 'priority'
           ? { serviceTier: 'priority' as const }
           : {}),

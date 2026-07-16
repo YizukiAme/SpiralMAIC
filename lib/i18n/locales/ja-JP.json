@@ -1708,7 +1708,8 @@
         "FEATURE_DISABLED": "サーバーで Codex OAuth を有効にしてください。",
         "SERVERLESS_UNSUPPORTED": "Codex OAuth には永続ストレージを備えたセルフホスト Node サーバーが必要です。",
         "ACCESS_CODE_REQUIRED": "本番環境で Codex OAuth を有効にする前に ACCESS_CODE を設定してください。",
-        "DATA_DIR_UNWRITABLE": "データディレクトリに書き込めません。/app/data の権限を確認してください。"
+        "DATA_DIR_UNWRITABLE": "データディレクトリに書き込めません。/app/data の権限を確認してください。",
+        "RUNTIME_LOCKED": "別の OpenMAIC Node プロセスが Codex 認証データディレクトリを使用しています。"
       },
       "connectedAs": "{email} として接続中",
       "connected": "ChatGPT に接続済み",

@@ -1708,7 +1708,8 @@
         "FEATURE_DISABLED": "Включите Codex OAuth на сервере, чтобы использовать этого провайдера.",
         "SERVERLESS_UNSUPPORTED": "Для Codex OAuth нужен самостоятельно размещённый Node-сервер с постоянным хранилищем.",
         "ACCESS_CODE_REQUIRED": "Перед включением Codex OAuth в production настройте ACCESS_CODE.",
-        "DATA_DIR_UNWRITABLE": "Сервер не может записывать в каталог данных. Проверьте права /app/data."
+        "DATA_DIR_UNWRITABLE": "Сервер не может записывать в каталог данных. Проверьте права /app/data.",
+        "RUNTIME_LOCKED": "Каталог данных Codex уже используется другим процессом OpenMAIC Node."
       },
       "connectedAs": "Подключено как {email}",
       "connected": "Подключено к ChatGPT",

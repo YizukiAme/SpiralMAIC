@@ -106,6 +106,7 @@ function parseAuthStatus(value: unknown): CodexAuthPublicStatus | null {
     'SERVERLESS_UNSUPPORTED',
     'ACCESS_CODE_REQUIRED',
     'DATA_DIR_UNWRITABLE',
+    'RUNTIME_LOCKED',
   ]);
   if (
     typeof record.available !== 'boolean' ||

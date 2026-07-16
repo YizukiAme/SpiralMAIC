@@ -9,6 +9,11 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/server/resolve-model', () => ({
   resolveModel: mocks.resolveModel,
+  getExpectedResolvedModelFromHeaders: (req: NextRequest) => {
+    const providerId = req.headers.get('x-openmaic-expected-provider');
+    const modelId = req.headers.get('x-openmaic-expected-model');
+    return providerId && modelId ? { providerId, modelId } : undefined;
+  },
 }));
 
 vi.mock('@/lib/ai/llm', () => ({
@@ -29,6 +34,20 @@ async function postVerifyModel(body: Record<string, unknown>) {
   const request = new Request('http://localhost/api/verify-model', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return POST(request as unknown as NextRequest);
+}
+
+async function postAcceptanceVerifyModel(body: Record<string, unknown>) {
+  const { POST } = await import('@/app/api/verify-model/route');
+  const request = new Request('http://localhost/api/verify-model', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-openmaic-expected-provider': 'openai-codex',
+      'x-openmaic-expected-model': 'gpt-5.5',
+    },
     body: JSON.stringify(body),
   });
   return POST(request as unknown as NextRequest);
@@ -99,6 +118,19 @@ describe('POST /api/verify-model', () => {
       apiKey: '',
       baseUrl: undefined,
       providerType: undefined,
+    });
+  });
+
+  it('forwards the acceptance resolved-model assertion before verification generation', async () => {
+    const res = await postAcceptanceVerifyModel({ model: 'openai-codex:gpt-5.5' });
+
+    expect(res.status).toBe(200);
+    expect(mocks.resolveModel).toHaveBeenCalledWith({
+      modelString: 'openai-codex:gpt-5.5',
+      apiKey: '',
+      baseUrl: undefined,
+      providerType: undefined,
+      expectedResolvedModel: { providerId: 'openai-codex', modelId: 'gpt-5.5' },
     });
   });
 

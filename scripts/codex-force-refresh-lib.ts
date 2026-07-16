@@ -3,6 +3,11 @@ import {
   type SafeErrorCategory,
   type SafeReport,
 } from './codex-acceptance-lib';
+import {
+  acquireCodexRuntimeLock,
+  isCodexRuntimeLockError,
+  type CodexRuntimeLockLease,
+} from '../lib/server/codex/runtime-lock';
 
 export interface OfflineRefreshOptions {
   baseUrl: string;
@@ -21,6 +26,7 @@ type RuntimeLoader = () => Promise<{
 
 interface OfflineRefreshDependencies {
   probe?: (baseUrl: string) => Promise<ApplicationState>;
+  acquireLock?: () => CodexRuntimeLockLease;
   refresh?: () => Promise<void>;
 }
 
@@ -132,6 +138,21 @@ export async function runOfflineCodexRefresh(
     };
   }
 
+  let lease: CodexRuntimeLockLease;
+  try {
+    lease = (dependencies.acquireLock ?? acquireCodexRuntimeLock)();
+  } catch (error) {
+    return {
+      outcome: 'FAIL',
+      stage: 'offline-force-refresh',
+      applicationStopped: false,
+      errorCategory:
+        isCodexRuntimeLockError(error) && error.code === 'CODEX_RUNTIME_LOCKED'
+          ? 'application-active'
+          : 'storage',
+    };
+  }
+
   try {
     await (dependencies.refresh ?? forceRefreshProductionCodexCredentials)();
     return {
@@ -147,5 +168,7 @@ export async function runOfflineCodexRefresh(
       applicationStopped: true,
       errorCategory: refreshErrorCategory(error),
     };
+  } finally {
+    lease.release();
   }
 }
