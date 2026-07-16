@@ -248,6 +248,10 @@ cp .env.example .env.local
 docker compose up --build
 ```
 
+实验性的 ChatGPT/Codex 订阅登录只支持带持久化存储的单用户、单进程自托管实例，不支持
+上面的 Vercel 部署。详见 [Codex OAuth 部署指南](docs/codex-oauth-deployment.md)与手动
+[真实账号验收手册](docs/codex-real-account-acceptance.md)。
+
 ### 可选：MinerU（增强文档解析）
 
 [MinerU](https://github.com/opendatalab/MinerU) 提供更强的表格、公式和 OCR 解析能力。你可以使用 [MinerU 官方 API](https://mineru.net/) 或[自行部署](https://opendatalab.github.io/MinerU/quick_start/docker_deployment/)。

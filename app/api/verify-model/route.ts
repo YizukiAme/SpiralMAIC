@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
   let model: string | undefined;
   try {
     const body = await req.json();
-    const { apiKey, baseUrl, providerType } = body;
+    const { apiKey, baseUrl, providerType, serviceTier } = body;
     model = body.model;
 
     if (!model) {
@@ -57,6 +57,9 @@ export async function POST(req: NextRequest) {
         apiKey: apiKey || '',
         baseUrl: baseUrl || undefined,
         providerType,
+        ...(model.startsWith('openai-codex:') && serviceTier === 'priority'
+          ? { serviceTier: 'priority' as const }
+          : {}),
       });
       languageModel = result.model;
     } catch (error) {
