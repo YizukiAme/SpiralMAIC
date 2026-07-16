@@ -9,6 +9,8 @@ import {
   CODEX_OAUTH_ERROR_CODES,
   CODEX_OAUTH_TOKEN_ENDPOINT,
   ManagedCodexTokenProvider,
+  acquireCodexCredentialLease,
+  invalidateCodexCredentialLeases,
   type CodexTokenProvider,
   type TokenExchangeFetch,
 } from '@/lib/server/codex/token-provider';
@@ -113,6 +115,46 @@ afterEach(() => {
 });
 
 describe('ManagedCodexTokenProvider', () => {
+  it('does not reuse a legacy HMR shared state without a catalog generation', async () => {
+    const legacySymbol = Symbol.for('openmaic.codex.oauth.shared-credential-state.v3');
+    const host = globalThis as unknown as Record<PropertyKey, unknown>;
+    const existingLegacyRegistry = host[legacySymbol] as
+      | {
+          byCoordinationKey: Map<string, object>;
+          byVault: WeakMap<object, object>;
+        }
+      | undefined;
+    const legacyRegistry =
+      existingLegacyRegistry ??
+      ({
+        byCoordinationKey: new Map<string, object>(),
+        byVault: new WeakMap<object, object>(),
+      } satisfies {
+        byCoordinationKey: Map<string, object>;
+        byVault: WeakMap<object, object>;
+      });
+    if (!existingLegacyRegistry) {
+      host[legacySymbol] = legacyRegistry;
+    }
+    const coordinationKey = `legacy-hmr-${crypto.randomUUID()}`;
+    legacyRegistry.byCoordinationKey.set(coordinationKey, {
+      generation: 0,
+      operationInFlight: null,
+      logoutInFlight: null,
+    });
+    const vault = Object.assign(new MemoryVault(credentials({ expiresAt: NOW + 60_001 })), {
+      coordinationKey,
+    });
+    const provider = createProvider(vault);
+
+    invalidateCodexCredentialLeases(provider);
+
+    await expect(acquireCodexCredentialLease(provider)).resolves.toMatchObject({
+      lifecycleGeneration: 1,
+      credentials: { accountId: 'current-account', accessToken: 'current-access' },
+    });
+  });
+
   it('implements the exact credential provider contract without refreshing a fresh token', async () => {
     const vault = new MemoryVault(credentials({ expiresAt: NOW + 60_001 }));
     const tokenExchangeFetch = vi.fn();

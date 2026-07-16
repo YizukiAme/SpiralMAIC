@@ -2,15 +2,17 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   CODEX_COMPATIBILITY_VERSION,
-  CODEX_FALLBACK_MODELS,
   CODEX_MODELS_ENDPOINT,
   CODEX_MODELS_REQUEST_TIMEOUT_MS,
   CodexModelDiscovery,
   createCodexModelsTransport,
+  getCodexFallbackModels,
   getCodexCredentialGeneration,
   parseCodexModels,
 } from '@/lib/server/codex/models';
 import {
+  CODEX_OAUTH_ERROR_CODES,
+  CodexOAuthError,
   ManagedCodexTokenProvider,
   type CodexTokenProvider,
 } from '@/lib/server/codex/token-provider';
@@ -312,7 +314,7 @@ describe('Codex model parsing', () => {
 
   it('uses the exact audited fallback list and never grants Fast statically', () => {
     expect(
-      CODEX_FALLBACK_MODELS.map((model) => ({
+      getCodexFallbackModels().map((model) => ({
         id: model.id,
         contextWindow: model.contextWindow,
       })),
@@ -324,10 +326,20 @@ describe('Codex model parsing', () => {
       { id: 'gpt-5.2', contextWindow: 272_000 },
     ]);
     expect(
-      CODEX_FALLBACK_MODELS.every(
+      getCodexFallbackModels().every(
         (model) => !model.capabilities?.serviceTiers?.includes('priority'),
       ),
     ).toBe(true);
+  });
+
+  it('returns an isolated fallback catalog that callers cannot poison', () => {
+    const first = getCodexFallbackModels();
+    first[0]!.capabilities!.serviceTiers = ['priority'];
+    first[0]!.name = 'mutated';
+
+    const second = getCodexFallbackModels();
+    expect(second[0]!.name).toBe('GPT-5.6 Sol');
+    expect(second[0]!.capabilities?.serviceTiers).toBeUndefined();
   });
 
   it('compares prerelease minimum versions with SemVer precedence', () => {
@@ -458,15 +470,13 @@ describe('Codex models transport boundary', () => {
   });
 
   it('force-refreshes credentials and replays exactly once after a 401', async () => {
+    let currentCredentials = { accessToken: 'old-access', accountId: 'account-id' };
     const tokenProvider = {
-      getValidCredentials: vi.fn(async () => ({
-        accessToken: 'old-access',
-        accountId: 'account-id',
-      })),
-      refreshIfCurrent: vi.fn(async () => ({
-        accessToken: 'fresh-access',
-        accountId: 'account-id',
-      })),
+      getValidCredentials: vi.fn(async () => currentCredentials),
+      refreshIfCurrent: vi.fn(async () => {
+        currentCredentials = { accessToken: 'fresh-access', accountId: 'account-id' };
+        return currentCredentials;
+      }),
     } satisfies CodexTokenProvider & {
       refreshIfCurrent(expected: {
         accessToken: string;
@@ -481,7 +491,7 @@ describe('Codex models transport boundary', () => {
 
     await expect(transport(CODEX_MODELS_ENDPOINT)).resolves.toBeInstanceOf(Response);
 
-    expect(tokenProvider.getValidCredentials).toHaveBeenCalledTimes(1);
+    expect(tokenProvider.getValidCredentials).toHaveBeenCalled();
     expect(tokenProvider.getValidCredentials).toHaveBeenCalledWith();
     expect(tokenProvider.refreshIfCurrent).toHaveBeenCalledOnce();
     expect(tokenProvider.refreshIfCurrent).toHaveBeenCalledWith({
@@ -498,15 +508,13 @@ describe('Codex models transport boundary', () => {
   });
 
   it('does not retry a second 401 or expose response and refresh failures', async () => {
+    let currentCredentials = { accessToken: 'old-access', accountId: 'account-id' };
     const tokenProvider = {
-      getValidCredentials: vi.fn(async () => ({
-        accessToken: 'old-access',
-        accountId: 'account-id',
-      })),
-      refreshIfCurrent: vi.fn(async () => ({
-        accessToken: 'fresh-access',
-        accountId: 'account-id',
-      })),
+      getValidCredentials: vi.fn(async () => currentCredentials),
+      refreshIfCurrent: vi.fn(async () => {
+        currentCredentials = { accessToken: 'fresh-access', accountId: 'account-id' };
+        return currentCredentials;
+      }),
     } satisfies CodexTokenProvider & {
       refreshIfCurrent(expected: {
         accessToken: string;
@@ -524,7 +532,7 @@ describe('Codex models transport boundary', () => {
     expect(error).toMatchObject({ code: 'AUTH_REQUIRED', upstreamStatus: 401 });
     expect(String(error)).not.toContain('sensitive-body');
     expect(JSON.stringify(error)).not.toContain('sensitive-body');
-    expect(tokenProvider.getValidCredentials).toHaveBeenCalledTimes(1);
+    expect(tokenProvider.getValidCredentials).toHaveBeenCalled();
     expect(tokenProvider.refreshIfCurrent).toHaveBeenCalledTimes(1);
     expect(upstreamFetch).toHaveBeenCalledTimes(2);
 
@@ -549,6 +557,109 @@ describe('Codex models transport boundary', () => {
 });
 
 describe('Codex model discovery cache', () => {
+  it('expires a resolved capability when the same-account catalog revokes it', async () => {
+    let now = NOW;
+    const upstreamFetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        modelResponse([
+          {
+            slug: 'gpt-bound',
+            visibility: 'list',
+            service_tiers: [{ id: 'priority' }],
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(modelResponse([{ slug: 'gpt-bound', visibility: 'list' }]));
+    const discovery = new CodexModelDiscovery({
+      tokenProvider: createTokenProvider(),
+      credentialGeneration: async () => 'account-a:1',
+      upstreamFetch,
+      clock: { now: () => now },
+    });
+
+    const resolved = await discovery.getModelCapability('gpt-bound');
+    expect(resolved?.modelInfo.capabilities?.serviceTiers).toEqual(['priority']);
+
+    now += 300_001;
+    await discovery.getModels();
+
+    expect(await resolved?.capabilityLease.isCatalogCurrent()).toBe(false);
+  });
+
+  it.each([400, 401, 403, 429])(
+    'does not publish stale, LKG, or bundled models for non-recoverable HTTP %s',
+    async (status) => {
+      const store = new MemoryCatalogStore();
+      store.current = {
+        accountId: 'account-secret',
+        entry: {
+          models: [{ id: 'gpt-lkg', name: 'GPT LKG' }],
+          validatedAt: NOW,
+        },
+      };
+      const discovery = new CodexModelDiscovery({
+        tokenProvider: createTokenProvider(),
+        credentialGeneration: async () => 'generation-1',
+        upstreamFetch: vi.fn(async () => new Response('sensitive body', { status })),
+        catalogStore: store,
+        clock: { now: () => NOW },
+      });
+
+      await expect(discovery.getModels()).resolves.toEqual([]);
+    },
+  );
+
+  it('does not publish a catalog when credential loading reports auth required', async () => {
+    const store = new MemoryCatalogStore();
+    store.current = {
+      accountId: 'account-secret',
+      entry: { models: [{ id: 'gpt-lkg', name: 'GPT LKG' }], validatedAt: NOW },
+    };
+    const discovery = new CodexModelDiscovery({
+      tokenProvider: {
+        getValidCredentials: vi.fn(async () => {
+          throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.CREDENTIALS_MISSING, false);
+        }),
+      },
+      credentialGeneration: async () => 'preserved-generation',
+      credentialAccountId: async () => 'account-secret',
+      upstreamFetch: vi.fn(),
+      catalogStore: store,
+      clock: { now: () => NOW },
+    });
+
+    await expect(discovery.getModels()).resolves.toEqual([]);
+  });
+
+  it('rejects discovery when credentials switch between the account and generation snapshots', async () => {
+    let credentials = { accessToken: 'account-a-token', accountId: 'account-a' };
+    const tokenProvider = {
+      getValidCredentials: vi.fn(async () => credentials),
+      refreshIfCurrent: vi.fn(async () => credentials),
+    } satisfies CodexTokenProvider & {
+      refreshIfCurrent(): Promise<{ accessToken: string; accountId: string }>;
+    };
+    const store = new MemoryCatalogStore();
+    const upstreamFetch = vi.fn(async () =>
+      modelResponse([{ slug: 'gpt-account-b-only', visibility: 'list' }]),
+    );
+    const discovery = new CodexModelDiscovery({
+      tokenProvider,
+      credentialGeneration: async () => {
+        credentials = { accessToken: 'account-b-token', accountId: 'account-b' };
+        return 'generation-b';
+      },
+      upstreamFetch,
+      catalogStore: store,
+      clock: { now: () => NOW },
+    });
+
+    await expect(discovery.getModels()).resolves.toEqual([]);
+    expect(upstreamFetch).not.toHaveBeenCalled();
+    expect(store.saves).toEqual([]);
+  });
+
   it('keeps fresh memory across a same-account refresh rotation', async () => {
     let generation = 'generation-1';
     const upstreamFetch = vi.fn(async () =>
@@ -698,7 +809,7 @@ describe('Codex model discovery cache', () => {
 
     const accountBModels = await discovery.getModels();
     expect(accountBModels.map((model) => model.id)).toEqual(
-      CODEX_FALLBACK_MODELS.map((model) => model.id),
+      getCodexFallbackModels().map((model) => model.id),
     );
     expect(JSON.stringify(accountBModels)).not.toContain('account-a');
   });
@@ -813,7 +924,7 @@ describe('Codex model discovery cache', () => {
       upstreamFetch: vi.fn(async () => new Response('sentinel', { status: 502 })),
     });
 
-    expect(await discovery.getModels()).toEqual(CODEX_FALLBACK_MODELS);
+    expect(await discovery.getModels()).toEqual(getCodexFallbackModels());
   });
 
   it('returns the same-generation stale list when a timed-out refresh is aborted', async () => {
@@ -859,7 +970,7 @@ describe('Codex model discovery cache', () => {
       const request = discovery.getModels();
       await vi.advanceTimersByTimeAsync(CODEX_MODELS_REQUEST_TIMEOUT_MS);
 
-      await expect(request).resolves.toEqual(CODEX_FALLBACK_MODELS);
+      await expect(request).resolves.toEqual(getCodexFallbackModels());
     } finally {
       vi.useRealTimers();
     }
@@ -897,6 +1008,30 @@ describe('Codex model discovery cache', () => {
 
     await expect(discovery.getModels()).resolves.toEqual([]);
     expect(await vault.load()).toBeNull();
+  });
+
+  it('uses same-account stale models when a 401 refresh fails transiently', async () => {
+    let now = 1_000;
+    const tokenProvider = createTokenProvider();
+    tokenProvider.refreshIfCurrent.mockRejectedValue(
+      new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.NETWORK_ERROR, true),
+    );
+    const upstreamFetch = vi
+      .fn()
+      .mockResolvedValueOnce(modelResponse([{ slug: 'gpt-stale', visibility: 'list' }]))
+      .mockResolvedValueOnce(new Response('expired', { status: 401 }));
+    const discovery = new CodexModelDiscovery({
+      tokenProvider,
+      credentialGeneration: async () => 'account-a:1',
+      upstreamFetch,
+      clock: { now: () => now },
+    });
+
+    await discovery.getModels();
+    now += 300_001;
+
+    expect((await discovery.getModels()).map((model) => model.id)).toEqual(['gpt-stale']);
+    expect(tokenProvider.refreshIfCurrent).toHaveBeenCalledTimes(1);
   });
 
   it('rediscovers models under a same-account generation after a 401 refresh rotates credentials', async () => {
@@ -980,7 +1115,7 @@ describe('Codex model discovery cache', () => {
       upstreamFetch,
     });
 
-    await expect(discovery.getModels()).resolves.toEqual(CODEX_FALLBACK_MODELS);
+    await expect(discovery.getModels()).resolves.toEqual([]);
     expect(tokenExchangeFetch).toHaveBeenCalledTimes(1);
     expect(upstreamFetch).toHaveBeenCalledTimes(3);
     expect(vault.current?.accessToken).toBe(refreshedAccess);
@@ -1039,9 +1174,9 @@ describe('Codex model discovery cache', () => {
     const callerA = discovery.getModels();
     await firstReplayStarted.promise;
     const callerB = discovery.getModels();
-    await expect(callerB).resolves.toEqual(CODEX_FALLBACK_MODELS);
+    await expect(callerB).resolves.toEqual([]);
     firstReplay.resolve(new Response('replay-unauthorized-body', { status: 401 }));
-    await expect(callerA).resolves.toEqual(CODEX_FALLBACK_MODELS);
+    await expect(callerA).resolves.toEqual([]);
 
     expect(tokenExchangeFetch).toHaveBeenCalledTimes(1);
     expect(upstreamFetch).toHaveBeenCalledTimes(4);
@@ -1234,6 +1369,42 @@ describe('Codex model discovery cache', () => {
     await expect(request).resolves.toEqual([]);
   });
 
+  it('keeps the store commit guard synchronous to avoid vault/cache lock inversion', async () => {
+    let storeMutationHeld = false;
+    let generationReadInsideStore = false;
+    const store = {
+      load: vi.fn(async () => null),
+      save: vi.fn(
+        async (
+          _accountId: string,
+          _models: ModelInfo[],
+          _validatedAt: number,
+          options?: { shouldCommit?(): boolean | Promise<boolean> },
+        ) => {
+          storeMutationHeld = true;
+          expect(await options?.shouldCommit?.()).toBe(true);
+          storeMutationHeld = false;
+          return true;
+        },
+      ),
+      clear: vi.fn(async () => undefined),
+    } satisfies CodexModelCatalogStore;
+    const discovery = new CodexModelDiscovery({
+      tokenProvider: createTokenProvider(),
+      credentialGeneration: async () => {
+        if (storeMutationHeld) generationReadInsideStore = true;
+        return 'account-a:1';
+      },
+      upstreamFetch: vi.fn(async () =>
+        modelResponse([{ slug: 'gpt-lock-safe', visibility: 'list' }]),
+      ),
+      catalogStore: store,
+    });
+
+    await expect(discovery.getModels()).resolves.toMatchObject([{ id: 'gpt-lock-safe' }]);
+    expect(generationReadInsideStore).toBe(false);
+  });
+
   it('does not dereference or return a 304 catalog cleared during persistence', async () => {
     let now = NOW;
     let saveCount = 0;
@@ -1350,7 +1521,7 @@ describe('Codex model discovery cache', () => {
 
     await clearing;
     expect((await request).map((model) => model.id)).toEqual(
-      CODEX_FALLBACK_MODELS.map((model) => model.id),
+      getCodexFallbackModels().map((model) => model.id),
     );
     expect(store.load).toHaveBeenCalledTimes(1);
   });
@@ -1382,7 +1553,9 @@ describe('Codex model discovery cache', () => {
     let refreshFails = false;
     const tokenProvider = {
       getValidCredentials: vi.fn(async () => {
-        if (refreshFails) throw new Error('network failure sentinel');
+        if (refreshFails) {
+          throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.NETWORK_ERROR, true);
+        }
         return { accessToken: 'access', accountId: 'account-a' };
       }),
     } satisfies CodexTokenProvider;
@@ -1405,7 +1578,7 @@ describe('Codex model discovery cache', () => {
       credentialGeneration: async () => 'account-a:1',
       upstreamFetch: vi.fn(),
     });
-    expect(await coldDiscovery.getModels()).toEqual(CODEX_FALLBACK_MODELS);
+    expect(await coldDiscovery.getModels()).toEqual(getCodexFallbackModels());
   });
 
   it('prefers same-account stale memory when refresh fails after credential rotation', async () => {
@@ -1414,7 +1587,9 @@ describe('Codex model discovery cache', () => {
     let now = NOW;
     const tokenProvider = {
       getValidCredentials: vi.fn(async () => {
-        if (refreshFails) throw new Error('network failure sentinel');
+        if (refreshFails) {
+          throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.NETWORK_ERROR, true);
+        }
         return { accessToken: 'access', accountId: 'account-a' };
       }),
     } satisfies CodexTokenProvider;
@@ -1458,7 +1633,7 @@ describe('Codex model discovery cache', () => {
     const discovery = new CodexModelDiscovery({
       tokenProvider: {
         getValidCredentials: vi.fn(async () => {
-          throw new Error('refresh network failure sentinel');
+          throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.NETWORK_ERROR, true);
         }),
       },
       credentialGeneration: async () => 'account-a:1',

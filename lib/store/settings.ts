@@ -32,6 +32,34 @@ import {
 } from '@/lib/store/settings-validation';
 
 const log = createLogger('Settings');
+let latestServerProvidersRequest = 0;
+
+function resetOAuthProviderState(providersConfig: ProvidersConfig): ProvidersConfig {
+  const next = { ...providersConfig };
+  for (const providerId of Object.keys(next) as ProviderId[]) {
+    const registryProvider = PROVIDERS[providerId];
+    if (!next[providerId] || registryProvider?.credentialMode !== 'oauth') continue;
+
+    const baselineModels =
+      providerId === 'openai-codex'
+        ? (rebuildCodexModelCatalog(registryProvider.models) ?? [])
+        : registryProvider.models.map((model) => ({ ...model }));
+    next[providerId] = {
+      ...next[providerId],
+      apiKey: '',
+      baseUrl: '',
+      models: baselineModels,
+      name: registryProvider.name,
+      type: registryProvider.type,
+      icon: registryProvider.icon,
+      requiresApiKey: registryProvider.requiresApiKey,
+      credentialMode: registryProvider.credentialMode,
+      isServerConfigured: false,
+      serverModels: undefined,
+    };
+  }
+  return next;
+}
 
 function pruneThinkingConfigs(
   thinkingConfigs: Record<string, ThinkingConfig> | undefined,
@@ -1467,8 +1495,27 @@ export const useSettingsStore = create<SettingsState>()(
 
         // Fetch server-configured providers and merge into local state
         fetchServerProviders: async () => {
+          const requestGeneration = ++latestServerProvidersRequest;
+          const scrubOAuthState = () => {
+            if (requestGeneration !== latestServerProvidersRequest) return;
+            set((state) => {
+              const providersConfig = resetOAuthProviderState(state.providersConfig);
+              const codexBaseline = providersConfig['openai-codex']?.models[0]?.id ?? '';
+              return {
+                providersConfig,
+                codexFastMode: false,
+                ...(state.providerId === 'openai-codex' && { modelId: codexBaseline }),
+              };
+            });
+          };
+
+          // Account identity is intentionally absent from this browser DTO.
+          // Drop account-scoped OAuth state before every refresh, then publish
+          // only the latest successful response.
+          scrubOAuthState();
           try {
             const res = await fetch('/api/server-providers');
+            if (requestGeneration !== latestServerProvidersRequest) return;
             if (!res.ok) return;
             // Managed providers expose only their allowed model list (LLM/image)
             // and presence (the "managed" flag) — never a base URL.
@@ -1487,10 +1534,11 @@ export const useSettingsStore = create<SettingsState>()(
               webSearch: Record<string, Record<string, never>>;
               generation?: { parallelSceneConcurrency?: number };
             };
+            if (requestGeneration !== latestServerProvidersRequest) return;
 
             set((state) => {
               // Merge LLM providers
-              const newProvidersConfig = { ...state.providersConfig };
+              const newProvidersConfig = resetOAuthProviderState(state.providersConfig);
               // First reset all server flags
               for (const pid of Object.keys(newProvidersConfig)) {
                 const key = pid as ProviderId;
@@ -2006,6 +2054,7 @@ export const useSettingsStore = create<SettingsState>()(
               };
             });
           } catch (e) {
+            scrubOAuthState();
             // Silently fail — server providers are optional
             log.warn('Failed to fetch server providers:', e);
           }

@@ -239,20 +239,45 @@ interface MockServerResponse {
   webSearch?: Record<string, { baseUrl?: string }>;
 }
 
+function fullServerResponse(overrides: MockServerResponse = {}) {
+  return {
+    providers: {},
+    tts: {},
+    asr: {},
+    pdf: {},
+    image: {},
+    video: {},
+    webSearch: {},
+    ...overrides,
+  };
+}
+
 function mockServerResponse(overrides: MockServerResponse = {}) {
   mockFetch.mockResolvedValueOnce({
     ok: true,
-    json: async () => ({
-      providers: {},
-      tts: {},
-      asr: {},
-      pdf: {},
-      image: {},
-      video: {},
-      webSearch: {},
-      ...overrides,
-    }),
+    json: async () => fullServerResponse(overrides),
   });
+}
+
+function richCodexResponse(modelId = 'gpt-live'): MockServerResponse {
+  return {
+    providers: {
+      'openai-codex': {
+        modelCatalog: [
+          {
+            id: modelId,
+            name: modelId,
+            capabilities: {
+              streaming: true,
+              tools: true,
+              serviceTiers: ['priority'],
+            },
+            source: 'probed' as const,
+          },
+        ],
+      },
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -678,7 +703,7 @@ describe('fetchServerProviders — provider availability sync', () => {
     ).toBe(true);
   });
 
-  it('keeps the Codex fast preference across provider rebuilds', async () => {
+  it('clears the Codex fast preference across an OAuth provider rebuild', async () => {
     const store = await getStore();
     store.getState().setCodexFastMode(true);
 
@@ -691,7 +716,7 @@ describe('fetchServerProviders — provider availability sync', () => {
     mockServerResponse({});
     await store.getState().fetchServerProviders();
 
-    expect(store.getState().codexFastMode).toBe(true);
+    expect(store.getState().codexFastMode).toBe(false);
   });
 
   it('resets Codex to static fallback models when native OAuth disappears', async () => {
@@ -712,6 +737,57 @@ describe('fetchServerProviders — provider availability sync', () => {
       'gpt-5.5',
       'gpt-5.2',
     ]);
+  });
+
+  it.each([
+    ['a non-OK response', () => mockFetch.mockResolvedValueOnce({ ok: false, status: 500 })],
+    ['a rejected request', () => mockFetch.mockRejectedValueOnce(new Error('network'))],
+  ])('scrubs live Codex and Fast state after %s', async (_label, arrangeFailure) => {
+    const store = await getStore();
+    mockServerResponse(richCodexResponse());
+    await store.getState().fetchServerProviders();
+    store.getState().setCodexFastMode(true);
+
+    arrangeFailure();
+    await store.getState().fetchServerProviders();
+
+    const codex = store.getState().providersConfig['openai-codex'];
+    expect(codex.isServerConfigured).toBe(false);
+    expect(codex.serverModels).toBeUndefined();
+    expect(codex.models.map((model) => model.id)).toEqual([
+      'gpt-5.6-sol',
+      'gpt-5.6-terra',
+      'gpt-5.6-luna',
+      'gpt-5.5',
+      'gpt-5.2',
+    ]);
+    expect(codex.models.every((model) => !model.capabilities?.serviceTiers)).toBe(true);
+    expect(store.getState().codexFastMode).toBe(false);
+  });
+
+  it('ignores an older Codex response after a newer sync clears OAuth state', async () => {
+    const store = await getStore();
+    let releaseOlder!: (value: { ok: true; json(): Promise<MockServerResponse> }) => void;
+    const olderResponse = new Promise<{ ok: true; json(): Promise<MockServerResponse> }>(
+      (resolve) => {
+        releaseOlder = resolve;
+      },
+    );
+    mockFetch.mockReturnValueOnce(olderResponse);
+    const olderSync = store.getState().fetchServerProviders();
+
+    mockServerResponse({});
+    await store.getState().fetchServerProviders();
+    releaseOlder({
+      ok: true,
+      json: async () => fullServerResponse(richCodexResponse('gpt-stale')),
+    });
+    await olderSync;
+
+    const codex = store.getState().providersConfig['openai-codex'];
+    expect(codex.isServerConfigured).toBe(false);
+    expect(codex.serverModels).toBeUndefined();
+    expect(codex.models.some((model) => model.id === 'gpt-stale')).toBe(false);
   });
 
   it('keeps all models when server provides no model restriction', async () => {

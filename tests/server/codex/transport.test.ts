@@ -330,6 +330,32 @@ describe('Codex Responses transport boundary', () => {
 });
 
 describe('Codex Responses transport failures', () => {
+  it('does not send an account-A capability after credentials switch to account B', async () => {
+    const accountA = { accessToken: 'account-a-token', accountId: 'account-a' };
+    const tokenProvider = {
+      getValidCredentials: vi.fn(async () => ({
+        accessToken: 'account-b-token',
+        accountId: 'account-b',
+      })),
+      refreshIfCurrent: vi.fn(async () => accountA),
+    };
+    const upstreamFetch = vi.fn<typeof fetch>(async () => successfulResponse());
+    const capabilityLease = {
+      credentialLease: { tokenProvider, credentials: accountA, lifecycleGeneration: 1 },
+      isCatalogCurrent: () => true,
+    };
+    const transport = createCodexResponsesTransport({
+      tokenProvider,
+      upstreamFetch,
+      capabilityLease,
+    } as Parameters<typeof createCodexResponsesTransport>[0]);
+
+    await expect(
+      transport(CODEX_RESPONSES_ENDPOINT, { method: 'POST', body: '{}' }),
+    ).rejects.toMatchObject({ code: 'AUTH_REQUIRED' });
+    expect(upstreamFetch).not.toHaveBeenCalled();
+  });
+
   it.each([
     [CODEX_OAUTH_ERROR_CODES.NETWORK_ERROR, true],
     [CODEX_OAUTH_ERROR_CODES.UPSTREAM_ERROR, true],

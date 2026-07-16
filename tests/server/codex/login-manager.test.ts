@@ -1332,6 +1332,7 @@ describe('CodexLoginManager device flow', () => {
       clock: { now: () => now },
       onCredentialsReplaced: async () => {
         events.push('hook');
+        expect(vault.current?.accountId).toBe('old-account');
         await Promise.resolve();
         hookFinished = true;
       },
@@ -1363,8 +1364,62 @@ describe('CodexLoginManager device flow', () => {
     now += 1_000;
     await expect(manager.poll()).resolves.toMatchObject({ status: 'complete' });
 
-    expect(events).toEqual(['save', 'hook']);
+    expect(events).toEqual(['hook', 'save']);
     expect(hookFinished).toBe(true);
+  });
+
+  it('does not publish replacement credentials when the cache clear barrier fails', async () => {
+    let now = NOW;
+    const vault = new MemoryVault();
+    const previous: CodexOAuthCredentials = {
+      version: 1,
+      accessToken: 'old-access',
+      refreshToken: 'old-refresh',
+      expiresAt: NOW + 60_000,
+      accountId: 'old-account',
+      updatedAt: NOW,
+    };
+    vault.current = previous;
+    const verifier = 'failed-barrier-verifier';
+    const manager = new CodexLoginManager({
+      vault,
+      clock: { now: () => now },
+      onCredentialsReplaced: async () => {
+        throw new Error('catalog clear failed');
+      },
+      oauthFetch: async (input) => {
+        if (input === CODEX_OAUTH_DEVICE_USERCODE_ENDPOINT) {
+          return jsonResponse({
+            device_auth_id: 'failed-barrier-device',
+            user_code: 'FAILED-BARRIER',
+            interval: 1,
+          });
+        }
+        if (input === CODEX_OAUTH_DEVICE_TOKEN_ENDPOINT) {
+          return jsonResponse({
+            authorization_code: 'failed-barrier-code',
+            code_verifier: verifier,
+            code_challenge: pkceChallenge(verifier),
+          });
+        }
+        return jsonResponse({
+          access_token: unsignedJwt({ chatgpt_account_id: 'new-account' }),
+          refresh_token: 'new-refresh',
+          expires_in: 600,
+        });
+      },
+    } as ConstructorParameters<typeof CodexLoginManager>[0]);
+    managers.push(manager);
+
+    await manager.begin('device');
+    now += 1_000;
+
+    await expect(manager.poll()).resolves.toMatchObject({
+      status: 'failed',
+      errorCode: 'STORAGE_ERROR',
+    });
+    expect(vault.current).toEqual(previous);
+    expect(vault.saved).toEqual([]);
   });
 
   it('coalesces concurrent due polls into one upstream request', async () => {

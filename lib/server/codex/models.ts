@@ -12,7 +12,16 @@ import {
 import type { ModelInfo, ModelServiceTier, ThinkingEffort } from '@/lib/types/provider';
 
 import type { CodexModelCatalogStore } from './model-cache-store';
-import { refreshCodexCredentialsIfCurrent, type CodexTokenProvider } from './token-provider';
+import {
+  CODEX_OAUTH_ERROR_CODES,
+  CodexOAuthError,
+  acquireCodexCredentialLease,
+  isCodexCredentialLeaseCurrent,
+  refreshCodexCredentialLease,
+  type CodexTokenProvider,
+  type InternalCodexCapabilityLease,
+  type InternalCodexCredentialLease,
+} from './token-provider';
 import { withCodexCredentialVaultMutation, type CodexCredentialVault } from './vault';
 
 /**
@@ -27,7 +36,9 @@ export const CODEX_MODELS_ENDPOINT = `https://chatgpt.com/backend-api/codex/mode
 export const CODEX_MODELS_CACHE_TTL_MS = 5 * 60 * 1000;
 export const CODEX_MODELS_REQUEST_TIMEOUT_MS = 5_000;
 
-export const CODEX_FALLBACK_MODELS: ModelInfo[] = getBundledCodexModelCatalog();
+export function getCodexFallbackModels(): ModelInfo[] {
+  return getBundledCodexModelCatalog();
+}
 
 export const CODEX_MODELS_ERROR_CODES = {
   INVALID_ENDPOINT: 'INVALID_ENDPOINT',
@@ -67,15 +78,21 @@ interface CreateCodexModelsTransportOptions {
 
 interface CodexModelsRequestAuthOptions {
   allowAuthReplay: boolean;
+  credentialLease?: InternalCodexCredentialLease;
   canAuthReplay?(): Promise<boolean>;
   onAuthReplay?(): void;
+}
+
+interface CodexModelsRequestResult {
+  response: Response;
+  credentialLease: InternalCodexCredentialLease;
 }
 
 type CodexModelsRequest = (
   input: RequestInfo | URL,
   init: RequestInit | undefined,
   authOptions: CodexModelsRequestAuthOptions,
-) => Promise<Response>;
+) => Promise<CodexModelsRequestResult>;
 
 interface CodexModelsClock {
   now(): number;
@@ -112,6 +129,12 @@ interface CodexModelDiscoveryRequestContext {
 interface CodexModelFlight {
   promise: Promise<ModelInfo[]>;
   authReplayState: { used: boolean };
+}
+
+/** @internal Safe model metadata bound to one account/catalog capability. */
+export interface InternalCodexModelCapability {
+  modelInfo: ModelInfo;
+  capabilityLease: InternalCodexCapabilityLease;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -352,6 +375,47 @@ function credentialsError(): CodexModelsError {
   return new CodexModelsError(CODEX_MODELS_ERROR_CODES.AUTH_REQUIRED);
 }
 
+function modelsErrorForCredentialFailure(error: unknown): CodexModelsError {
+  if (error instanceof CodexModelsError) return error;
+  if (error instanceof CodexOAuthError && error.retryable) {
+    if (error.code === CODEX_OAUTH_ERROR_CODES.NETWORK_ERROR) {
+      return new CodexModelsError(CODEX_MODELS_ERROR_CODES.NETWORK_ERROR);
+    }
+    if (
+      error.code === CODEX_OAUTH_ERROR_CODES.UPSTREAM_ERROR &&
+      error.upstreamStatus !== undefined &&
+      error.upstreamStatus >= 500
+    ) {
+      return new CodexModelsError(CODEX_MODELS_ERROR_CODES.UPSTREAM_ERROR, error.upstreamStatus);
+    }
+  }
+  return credentialsError();
+}
+
+function allowsCredentialCatalogFallback(error: unknown): boolean {
+  return (
+    error instanceof CodexOAuthError &&
+    error.retryable &&
+    (error.code === CODEX_OAUTH_ERROR_CODES.NETWORK_ERROR ||
+      error.code === CODEX_OAUTH_ERROR_CODES.UPSTREAM_ERROR)
+  );
+}
+
+function allowsLiveCatalogFallback(error: unknown): boolean {
+  if (!(error instanceof CodexModelsError)) return false;
+  if (
+    error.code === CODEX_MODELS_ERROR_CODES.NETWORK_ERROR ||
+    error.code === CODEX_MODELS_ERROR_CODES.INVALID_RESPONSE
+  ) {
+    return true;
+  }
+  return (
+    error.code === CODEX_MODELS_ERROR_CODES.UPSTREAM_ERROR &&
+    error.upstreamStatus !== undefined &&
+    error.upstreamStatus >= 500
+  );
+}
+
 function createCodexModelsRequest(options: CreateCodexModelsTransportOptions): CodexModelsRequest {
   const upstreamFetch = options.upstreamFetch ?? globalThis.fetch.bind(globalThis);
 
@@ -364,32 +428,31 @@ function createCodexModelsRequest(options: CreateCodexModelsTransportOptions): C
     }
 
     return withModelsRequestTimeout(init?.signal, async (signal) => {
-      let originalCredentials: { accessToken: string; accountId: string } | null = null;
-      const request = async (
-        forceRefresh: boolean,
-        expected?: { accessToken: string; accountId: string },
-      ): Promise<Response> => {
-        let credentials: { accessToken: string; accountId: string };
+      let credentialLease: InternalCodexCredentialLease;
+      try {
+        credentialLease =
+          authOptions.credentialLease ?? (await acquireCodexCredentialLease(options.tokenProvider));
+      } catch (error) {
+        throw modelsErrorForCredentialFailure(error);
+      }
+      if (credentialLease.tokenProvider !== options.tokenProvider) throw credentialsError();
+
+      const request = async (forceRefresh: boolean): Promise<Response> => {
         try {
           if (forceRefresh) {
-            const scopedExpected = expected ?? originalCredentials;
-            if (!scopedExpected) throw credentialsError();
-            credentials = await refreshCodexCredentialsIfCurrent(
-              options.tokenProvider,
-              scopedExpected,
-            );
-          } else {
-            credentials = await options.tokenProvider.getValidCredentials();
+            credentialLease = await refreshCodexCredentialLease(credentialLease);
+          } else if (!(await isCodexCredentialLeaseCurrent(credentialLease))) {
+            throw credentialsError();
           }
-        } catch {
-          throw credentialsError();
+        } catch (error) {
+          throw modelsErrorForCredentialFailure(error);
         }
-        if (!forceRefresh) originalCredentials = credentials;
+        if (!(await isCodexCredentialLeaseCurrent(credentialLease))) throw credentialsError();
 
         try {
           return await upstreamFetch(CODEX_MODELS_ENDPOINT, {
             method: 'GET',
-            headers: createHeaders(init?.headers, credentials),
+            headers: createHeaders(init?.headers, credentialLease.credentials),
             redirect: 'manual',
             signal,
           });
@@ -406,10 +469,10 @@ function createCodexModelsRequest(options: CreateCodexModelsTransportOptions): C
           throw new CodexModelsError(CODEX_MODELS_ERROR_CODES.AUTH_REQUIRED, response.status);
         }
         authOptions.onAuthReplay?.();
-        response = await request(true, originalCredentials ?? undefined);
+        response = await request(true);
       }
 
-      if (response.status === 304 || response.ok) return response;
+      if (response.status === 304 || response.ok) return { response, credentialLease };
       await cancelResponseBody(response);
       if (response.status === 401) {
         throw new CodexModelsError(CODEX_MODELS_ERROR_CODES.AUTH_REQUIRED, response.status);
@@ -424,7 +487,7 @@ export function createCodexModelsTransport(
   options: CreateCodexModelsTransportOptions,
 ): typeof globalThis.fetch {
   const request = createCodexModelsRequest(options);
-  return (input, init) => request(input, init, { allowAuthReplay: true });
+  return async (input, init) => (await request(input, init, { allowAuthReplay: true })).response;
 }
 
 function cloneModels(models: ModelInfo[]): ModelInfo[] {
@@ -483,19 +546,74 @@ export class CodexModelDiscovery {
     }
   }
 
+  /** Resolve one model and retain the exact account/catalog lifecycle that authorized it. */
+  async getModelCapability(modelId: string): Promise<InternalCodexModelCapability | null> {
+    await this.clearInFlight?.catch(() => undefined);
+
+    // A same-account 401 rotation can replace the exact access token while the
+    // catalog lifecycle remains valid. Retry once so the returned credential
+    // lease always contains the post-rotation token snapshot.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const invalidationGeneration = this.invalidationGeneration;
+      const credentialLease = await acquireCodexCredentialLease(this.tokenProvider);
+
+      const requestContext: CodexModelDiscoveryRequestContext = {};
+      try {
+        const models = await this.getModelsForCurrentCredentials(
+          requestContext,
+          true,
+          credentialLease.credentials.accountId,
+          credentialLease,
+        );
+        if (
+          this.invalidationGeneration !== invalidationGeneration ||
+          !(await isCodexCredentialLeaseCurrent(credentialLease))
+        ) {
+          continue;
+        }
+        const modelInfo = rebuildCodexModelCatalog(models)?.find((model) => model.id === modelId);
+        if (!modelInfo) return null;
+
+        const capabilityAccountScope = this.getAccountScope(credentialLease.credentials.accountId);
+        const capabilityFingerprint = JSON.stringify(modelInfo);
+        const isCatalogCurrent = () => {
+          if (this.invalidationGeneration !== invalidationGeneration) return false;
+          if (!this.cache) return true;
+          if (this.cache.accountScope !== capabilityAccountScope) return false;
+          const currentModel = this.cache.models.find((model) => model.id === modelId);
+          return Boolean(currentModel && JSON.stringify(currentModel) === capabilityFingerprint);
+        };
+        if (!isCatalogCurrent()) return null;
+        return {
+          modelInfo,
+          capabilityLease: Object.freeze({ credentialLease, isCatalogCurrent }),
+        };
+      } finally {
+        this.releaseAuthReplayChain(requestContext);
+      }
+    }
+    return null;
+  }
+
   private async getModelsForCurrentCredentials(
     requestContext: CodexModelDiscoveryRequestContext,
     allowSameAccountRotationRetry: boolean,
     expectedAccountId?: string,
+    initialCredentialLease?: InternalCodexCredentialLease,
   ): Promise<ModelInfo[]> {
     // Settle refresh rotation before deriving the cache generation. Otherwise
     // this very request could refresh the token inside the transport and make
     // its own valid response look stale.
-    let settledCredentials: { accessToken: string; accountId: string };
+    let credentialLease: InternalCodexCredentialLease;
     try {
-      settledCredentials = await this.tokenProvider.getValidCredentials();
-    } catch {
+      credentialLease =
+        initialCredentialLease ?? (await acquireCodexCredentialLease(this.tokenProvider));
+    } catch (error) {
       if (expectedAccountId) return [];
+      if (!allowsCredentialCatalogFallback(error)) {
+        this.invalidate();
+        return [];
+      }
       const preservedGeneration = await this.credentialGeneration().catch(() => null);
       if (!preservedGeneration) {
         this.invalidate();
@@ -506,14 +624,15 @@ export class CodexModelDiscovery {
 
       const accountId = await this.credentialAccountId?.().catch(() => null);
       if (!(await this.isCurrentGeneration(preservedGeneration, invalidationGeneration))) return [];
-      if (!accountId) return cloneModels(CODEX_FALLBACK_MODELS);
+      if (!accountId) return getCodexFallbackModels();
       if (this.cache?.accountScope === this.getAccountScope(accountId)) {
         return cloneModels(this.cache.models);
       }
       const lkg = await this.catalogStore?.load(accountId, this.clock.now()).catch(() => null);
       if (!(await this.isCurrentGeneration(preservedGeneration, invalidationGeneration))) return [];
-      return cloneModels(lkg?.models ?? CODEX_FALLBACK_MODELS);
+      return lkg ? cloneModels(lkg.models) : getCodexFallbackModels();
     }
+    const settledCredentials = credentialLease.credentials;
     if (expectedAccountId && settledCredentials.accountId !== expectedAccountId) return [];
 
     const invalidationGeneration = this.invalidationGeneration;
@@ -522,6 +641,7 @@ export class CodexModelDiscovery {
       this.invalidate();
       return [];
     }
+    if (!(await isCodexCredentialLeaseCurrent(credentialLease))) return [];
     if (
       !this.acquireAuthReplayChain(
         requestContext,
@@ -568,6 +688,7 @@ export class CodexModelDiscovery {
       now,
       invalidationGeneration,
       {
+        credentialLease,
         allowAuthReplay: (requestContext.authReplayChain?.authReplaysRemaining ?? 0) > 0,
         canAuthReplay: () =>
           this.canAuthReplay(
@@ -734,7 +855,7 @@ export class CodexModelDiscovery {
   ): Promise<ModelInfo[]> {
     const safeStale = this.cache?.accountScope === accountScope ? this.cache : null;
     try {
-      const response = await this.requestModels(
+      const requestResult = await this.requestModels(
         CODEX_MODELS_ENDPOINT,
         {
           method: 'GET',
@@ -742,6 +863,13 @@ export class CodexModelDiscovery {
         },
         authOptions,
       );
+      const { response, credentialLease } = requestResult;
+      if (
+        credentialLease.credentials.accountId !== accountId ||
+        !(await isCodexCredentialLeaseCurrent(credentialLease))
+      ) {
+        return [];
+      }
       if (response.status === 304) {
         if (!safeStale) {
           throw new CodexModelsError(CODEX_MODELS_ERROR_CODES.INVALID_RESPONSE);
@@ -779,8 +907,9 @@ export class CodexModelDiscovery {
       await this.persistCatalog(accountId, models, now, generation, invalidationGeneration);
       if (!(await this.isCurrentGeneration(generation, invalidationGeneration))) return [];
       return models;
-    } catch {
+    } catch (error) {
       if (!(await this.isCurrentGeneration(generation, invalidationGeneration))) return [];
+      if (!allowsLiveCatalogFallback(error)) return [];
       if (safeStale) return safeStale.models;
       const lkg = await this.catalogStore?.load(accountId, now).catch(() => null);
       if (!(await this.isCurrentGeneration(generation, invalidationGeneration))) return [];
@@ -793,7 +922,7 @@ export class CodexModelDiscovery {
         };
         return this.cache.models;
       }
-      return CODEX_FALLBACK_MODELS;
+      return getCodexFallbackModels();
     }
   }
 
@@ -805,8 +934,13 @@ export class CodexModelDiscovery {
     invalidationGeneration: number,
   ): Promise<void> {
     try {
+      // Never acquire the credential-vault mutex from inside the store's
+      // mutation queue: replacement holds vault -> clear waits store. Validate
+      // the credential generation before entering the store, then use the
+      // synchronously invalidated catalog lifecycle as the atomic commit guard.
+      if (!(await this.isCurrentGeneration(generation, invalidationGeneration))) return;
       await this.catalogStore?.save(accountId, models, validatedAt, {
-        shouldCommit: () => this.isCurrentGeneration(generation, invalidationGeneration),
+        shouldCommit: () => this.invalidationGeneration === invalidationGeneration,
       });
     } catch {
       // A durable LKG is optional. Live safe models remain usable when local

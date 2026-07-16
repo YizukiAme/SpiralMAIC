@@ -329,6 +329,14 @@ export class CodexLoginManager {
         if (!this.isAttemptCommitEligible(attempt)) {
           return { committed: false, replaced: false };
         }
+        if (previous) {
+          // The catalog clear is a commit barrier: replacement credentials must
+          // not become visible until every old-account capability is invalidated.
+          await this.onCredentialsReplaced?.();
+          if (!this.isAttemptCommitEligible(attempt)) {
+            return { committed: false, replaced: false };
+          }
+        }
         await this.vault.save(credentials);
         if (this.isAttemptCommitEligible(attempt)) {
           attempt.status = 'complete';
@@ -343,15 +351,6 @@ export class CodexLoginManager {
         else await this.vault.clear();
         return { committed: false, replaced: false };
       });
-      if (result.committed && result.replaced) {
-        try {
-          await this.onCredentialsReplaced?.();
-        } catch {
-          // The new credentials are already committed. Cache invalidation is
-          // best effort and account scoping prevents an older account's LKG
-          // from being selected if local storage is temporarily unavailable.
-        }
-      }
       return result.committed;
     })();
     this.credentialWrites.add(write);

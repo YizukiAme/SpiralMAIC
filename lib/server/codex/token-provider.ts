@@ -148,6 +148,19 @@ interface TokenResponse {
 
 type ValidCredentials = { accessToken: string; accountId: string };
 
+/** @internal Server-only credential snapshot; never expose through API DTOs. */
+export interface InternalCodexCredentialLease {
+  readonly tokenProvider: CodexTokenProvider;
+  readonly credentials: ValidCredentials;
+  readonly lifecycleGeneration: number | null;
+}
+
+/** @internal Binds one resolved catalog capability to its credential lifecycle. */
+export interface InternalCodexCapabilityLease {
+  readonly credentialLease: InternalCodexCredentialLease;
+  readonly isCatalogCurrent: () => boolean | Promise<boolean>;
+}
+
 interface CredentialOperationState {
   forceRequested: boolean;
   refreshed: boolean;
@@ -173,9 +186,17 @@ interface ActiveCredentialOperation {
 
 interface SharedCredentialState {
   generation: number;
+  catalogGeneration: number;
   operationInFlight: ActiveCredentialOperation | null;
   logoutInFlight: Promise<void> | null;
 }
+
+interface CredentialLeaseAuthority {
+  vault: CodexCredentialVault;
+  sharedState: SharedCredentialState;
+}
+
+const credentialLeaseAuthorities = new WeakMap<CodexTokenProvider, CredentialLeaseAuthority>();
 
 interface SharedCredentialStateRegistry {
   byCoordinationKey: Map<string, SharedCredentialState>;
@@ -211,7 +232,7 @@ function getSharedCredentialState(vault: CodexCredentialVault): SharedCredential
   const coordinationKey = vault.coordinationKey;
   if (typeof coordinationKey === 'string' && coordinationKey.length > 0) {
     const existing = sharedStateRegistry.byCoordinationKey.get(coordinationKey);
-    if (existing) return existing;
+    if (existing) return normalizeSharedCredentialState(existing);
 
     const state = createSharedCredentialState();
     sharedStateRegistry.byCoordinationKey.set(coordinationKey, state);
@@ -219,15 +240,30 @@ function getSharedCredentialState(vault: CodexCredentialVault): SharedCredential
   }
 
   const existing = sharedStateRegistry.byVault.get(vault);
-  if (existing) return existing;
+  if (existing) return normalizeSharedCredentialState(existing);
 
   const state = createSharedCredentialState();
   sharedStateRegistry.byVault.set(vault, state);
   return state;
 }
 
+function normalizeSharedCredentialState(state: SharedCredentialState): SharedCredentialState {
+  // Dev HMR can retain a v3 global registry created before catalog leases
+  // existed. Normalize reused entries in place so existing refresh/logout
+  // coordination survives without turning `undefined += 1` into NaN.
+  if (!Number.isSafeInteger(state.catalogGeneration) || state.catalogGeneration < 0) {
+    state.catalogGeneration = 0;
+  }
+  return state;
+}
+
 function createSharedCredentialState(): SharedCredentialState {
-  return { generation: 0, operationInFlight: null, logoutInFlight: null };
+  return {
+    generation: 0,
+    catalogGeneration: 0,
+    operationInFlight: null,
+    logoutInFlight: null,
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -318,6 +354,127 @@ function credentialsMatch(left: ValidCredentials | null, right: ValidCredentials
   return left?.accountId === right.accountId && left.accessToken === right.accessToken;
 }
 
+async function managedLeaseCredentialsMatch(
+  authority: CredentialLeaseAuthority,
+  credentials: ValidCredentials,
+): Promise<boolean> {
+  try {
+    const current = await withCodexCredentialVaultMutation(authority.vault, () =>
+      authority.vault.load(),
+    );
+    return Boolean(
+      current &&
+      current.accountId === credentials.accountId &&
+      current.accessToken === credentials.accessToken,
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** @internal Acquire an account/lifecycle snapshot without changing CodexTokenProvider. */
+export async function acquireCodexCredentialLease(
+  tokenProvider: CodexTokenProvider,
+): Promise<InternalCodexCredentialLease> {
+  const authority = credentialLeaseAuthorities.get(tokenProvider);
+  if (!authority) {
+    const credentials = await tokenProvider.getValidCredentials();
+    return Object.freeze({
+      tokenProvider,
+      credentials: { ...credentials },
+      lifecycleGeneration: null,
+    });
+  }
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const lifecycleGeneration = authority.sharedState.catalogGeneration;
+    const credentials = await tokenProvider.getValidCredentials();
+    if (
+      lifecycleGeneration === authority.sharedState.catalogGeneration &&
+      (await managedLeaseCredentialsMatch(authority, credentials)) &&
+      lifecycleGeneration === authority.sharedState.catalogGeneration
+    ) {
+      return Object.freeze({
+        tokenProvider,
+        credentials: { ...credentials },
+        lifecycleGeneration,
+      });
+    }
+  }
+  throw credentialsChangedError();
+}
+
+/** @internal Validate immediately before each account-bound upstream send. */
+export async function isCodexCredentialLeaseCurrent(
+  lease: InternalCodexCredentialLease,
+): Promise<boolean> {
+  const authority = credentialLeaseAuthorities.get(lease.tokenProvider);
+  if (authority) {
+    return (
+      lease.lifecycleGeneration !== null &&
+      lease.lifecycleGeneration === authority.sharedState.catalogGeneration &&
+      (await managedLeaseCredentialsMatch(authority, lease.credentials)) &&
+      lease.lifecycleGeneration === authority.sharedState.catalogGeneration
+    );
+  }
+
+  try {
+    const current = await lease.tokenProvider.getValidCredentials();
+    return credentialsMatch(current, lease.credentials);
+  } catch {
+    return false;
+  }
+}
+
+/** @internal Rotate one lease only while its account/catalog lifecycle remains current. */
+export async function refreshCodexCredentialLease(
+  lease: InternalCodexCredentialLease,
+): Promise<InternalCodexCredentialLease> {
+  if (!(await isCodexCredentialLeaseCurrent(lease))) throw credentialsChangedError();
+  const credentials = await refreshCodexCredentialsIfCurrent(
+    lease.tokenProvider,
+    lease.credentials,
+  );
+  if (credentials.accountId !== lease.credentials.accountId) throw credentialsChangedError();
+
+  const refreshed = Object.freeze({
+    tokenProvider: lease.tokenProvider,
+    credentials: { ...credentials },
+    lifecycleGeneration: lease.lifecycleGeneration,
+  });
+  if (!(await isCodexCredentialLeaseCurrent(refreshed))) throw credentialsChangedError();
+  return refreshed;
+}
+
+/** @internal Invalidate capabilities before a login replacement becomes visible. */
+export function invalidateCodexCredentialLeases(tokenProvider: CodexTokenProvider): void {
+  const authority = credentialLeaseAuthorities.get(tokenProvider);
+  if (authority) authority.sharedState.catalogGeneration += 1;
+}
+
+/** @internal Validate both credential and catalog generations. */
+export async function isCodexCapabilityLeaseCurrent(
+  lease: InternalCodexCapabilityLease,
+): Promise<boolean> {
+  try {
+    if (!(await lease.isCatalogCurrent())) return false;
+    if (!(await isCodexCredentialLeaseCurrent(lease.credentialLease))) return false;
+    return await lease.isCatalogCurrent();
+  } catch {
+    return false;
+  }
+}
+
+/** @internal Preserve the catalog guard across an allowed same-account rotation. */
+export async function refreshCodexCapabilityLease(
+  lease: InternalCodexCapabilityLease,
+): Promise<InternalCodexCapabilityLease> {
+  if (!(await lease.isCatalogCurrent())) throw credentialsChangedError();
+  const credentialLease = await refreshCodexCredentialLease(lease.credentialLease);
+  if (!(await lease.isCatalogCurrent())) throw credentialsChangedError();
+  return Object.freeze({ credentialLease, isCatalogCurrent: lease.isCatalogCurrent });
+}
+
 /** Fail closed unless the provider supports an atomic account/token-scoped refresh. */
 export function refreshCodexCredentialsIfCurrent(
   tokenProvider: CodexTokenProvider,
@@ -353,6 +510,7 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
       Math.max(0, options.revokeTimeoutMs ?? CODEX_OAUTH_REVOKE_TIMEOUT_MS),
     );
     this.onCredentialsCleared = options.onCredentialsCleared;
+    credentialLeaseAuthorities.set(this, { vault: this.vault, sharedState: this.sharedState });
   }
 
   getValidCredentials(options?: { forceRefresh?: boolean }): Promise<ValidCredentials> {
@@ -442,6 +600,7 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
     if (this.sharedState.logoutInFlight) return this.sharedState.logoutInFlight;
 
     this.sharedState.generation += 1;
+    this.sharedState.catalogGeneration += 1;
     const activeOperation = this.sharedState.operationInFlight;
     const staleOperation = activeOperation?.promise ?? null;
     activeOperation?.abortController.abort();
@@ -623,7 +782,10 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
           if (error instanceof CodexOAuthError) throw error;
           throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.STORAGE_ERROR, false);
         }
-        if (clearResult.cleared) await this.notifyCredentialsCleared();
+        if (clearResult.cleared) {
+          this.sharedState.catalogGeneration += 1;
+          await this.notifyCredentialsCleared();
+        }
         if (refreshGeneration !== this.sharedState.generation) throw signedOutError();
         if (clearResult.replacement) {
           return {
