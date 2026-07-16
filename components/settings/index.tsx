@@ -49,7 +49,7 @@ import { PDFSettings } from './pdf-settings';
 import { PDF_PROVIDERS } from '@/lib/pdf/constants';
 import type { PDFProviderId } from '@/lib/pdf/types';
 import { ImageSettings } from './image-settings';
-import { IMAGE_PROVIDERS } from '@/lib/media/image-providers';
+import { IMAGE_PROVIDERS, getImageProviderCredentialMode } from '@/lib/media/image-providers';
 import type { ImageProviderId } from '@/lib/media/types';
 import { VideoSettings } from './video-settings';
 import { VIDEO_PROVIDERS } from '@/lib/media/video-providers';
@@ -394,6 +394,18 @@ export function SettingsDialog({ open, onOpenChange, initialSection }: SettingsD
     : undefined;
   const isCodexProviderSurface =
     activeSection === 'providers' && selectedProviderId === 'openai-codex';
+  const selectedImageProvider = IMAGE_PROVIDERS[selectedImageProviderId];
+  const isCodexImageSurface = Boolean(
+    activeSection === 'image' &&
+    selectedImageProvider &&
+    getImageProviderCredentialMode(selectedImageProvider) === 'oauth',
+  );
+  const isManagedSettingsSurface = isCodexProviderSurface || isCodexImageSurface;
+
+  const handleManageCodexLogin = () => {
+    setActiveSection('providers');
+    setSelectedProviderId('openai-codex');
+  };
 
   // Handle model editing
   const handleEditModel = (pid: ProviderId, modelIndex: number) => {
@@ -1148,7 +1160,10 @@ export function SettingsDialog({ open, onOpenChange, initialSection }: SettingsD
                 <WebSearchSettings selectedProviderId={selectedWebSearchProviderId} />
               )}
               {activeSection === 'image' && (
-                <ImageSettings selectedProviderId={selectedImageProviderId} />
+                <ImageSettings
+                  selectedProviderId={selectedImageProviderId}
+                  onManageCodexLogin={handleManageCodexLogin}
+                />
               )}
               {activeSection === 'video' && (
                 <VideoSettings selectedProviderId={selectedVideoProviderId} />
@@ -1159,13 +1174,13 @@ export function SettingsDialog({ open, onOpenChange, initialSection }: SettingsD
 
             {/* Footer */}
             <div className="flex items-center justify-end gap-3 px-5 py-3 border-t bg-muted/30">
-              {!isCodexProviderSurface && saveStatus === 'saved' && (
+              {!isManagedSettingsSurface && saveStatus === 'saved' && (
                 <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                   <CheckCircle2 className="h-4 w-4" />
                   <span>{t('settings.saveSuccess')}</span>
                 </div>
               )}
-              {!isCodexProviderSurface && saveStatus === 'error' && (
+              {!isManagedSettingsSurface && saveStatus === 'error' && (
                 <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                   <XCircle className="h-4 w-4" />
                   <span>{t('settings.saveFailed')}</span>
@@ -1174,7 +1189,7 @@ export function SettingsDialog({ open, onOpenChange, initialSection }: SettingsD
               <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
                 {t('settings.close')}
               </Button>
-              {!isCodexProviderSurface && (
+              {!isManagedSettingsSurface && (
                 <Button size="sm" onClick={handleSave}>
                   {t('settings.save')}
                 </Button>
