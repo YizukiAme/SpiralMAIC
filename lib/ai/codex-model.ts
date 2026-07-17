@@ -64,6 +64,12 @@ type SafeCodexStatusCode = 401 | 403 | 429;
 type CodexDecodedStreamLimits = {
   [Key in keyof typeof CODEX_DECODED_STREAM_LIMITS]: number;
 };
+interface CodexToolInputBudgetState {
+  bytes: number;
+  streamed: boolean;
+  ended: boolean;
+  completed: boolean;
+}
 
 function isAuthenticationRequiredCode(value: unknown): boolean {
   return (
@@ -222,9 +228,10 @@ export function guardCodexStream(
   const limits = { ...CODEX_DECODED_STREAM_LIMITS, ...overrides };
   const reader = result.stream.getReader();
   const encoder = new TextEncoder();
-  const toolInputs = new Map<string, { bytes: number; streamed: boolean }>();
-  // A delta boundary can split one surrogate pair. Hold only the trailing high
-  // surrogate so byte accounting matches encoding the concatenated input.
+  const toolInputs = new Map<string, CodexToolInputBudgetState>();
+  // Count a trailing high surrogate provisionally before forwarding it. The
+  // next delta recomputes that one-code-unit prefix so a matching low surrogate
+  // adjusts replacement-byte accounting to the complete pair.
   const pendingToolInputHighSurrogates = new Map<string, string>();
   const startedToolInputs = new Set<string>();
   let partCount = 0;
@@ -252,14 +259,8 @@ export function guardCodexStream(
     }
   };
 
-  const flushPendingHighSurrogate = (
-    id: string,
-    state: { bytes: number; streamed: boolean },
-  ): boolean => {
-    const pending = pendingToolInputHighSurrogates.get(id);
-    if (!pending) return true;
+  const flushPendingHighSurrogate = (id: string, state: CodexToolInputBudgetState): boolean => {
     pendingToolInputHighSurrogates.delete(id);
-    state.bytes += encoder.encode(pending).byteLength;
     return state.bytes <= limits.maxToolInputBytes;
   };
 
@@ -282,20 +283,30 @@ export function guardCodexStream(
         if (contentItemCount > limits.maxContentItems) return false;
         startedToolInputs.add(part.id);
         if (!toolInputs.has(part.id)) {
-          toolInputs.set(part.id, { bytes: 0, streamed: false });
+          toolInputs.set(part.id, {
+            bytes: 0,
+            streamed: false,
+            ended: false,
+            completed: false,
+          });
         }
         return true;
 
       case 'tool-input-delta': {
         const state = toolInputs.get(part.id);
-        if (!state || !startedToolInputs.has(part.id)) return false;
+        if (!state || !startedToolInputs.has(part.id) || state.ended || state.completed) {
+          return false;
+        }
         const pending = pendingToolInputHighSurrogates.get(part.id) ?? '';
+        if (pending) state.bytes -= encoder.encode(pending).byteLength;
         let input = pending + part.delta;
         pendingToolInputHighSurrogates.delete(part.id);
         const finalCodeUnit = input.charCodeAt(input.length - 1);
         if (finalCodeUnit >= 0xd800 && finalCodeUnit <= 0xdbff) {
-          pendingToolInputHighSurrogates.set(part.id, input.slice(-1));
+          const trailingHighSurrogate = input.slice(-1);
+          pendingToolInputHighSurrogates.set(part.id, trailingHighSurrogate);
           input = input.slice(0, -1);
+          state.bytes += encoder.encode(trailingHighSurrogate).byteLength;
         }
         state.bytes += encoder.encode(input).byteLength;
         state.streamed = true;
@@ -304,7 +315,10 @@ export function guardCodexStream(
 
       case 'tool-input-end': {
         const state = toolInputs.get(part.id);
-        return state ? flushPendingHighSurrogate(part.id, state) : true;
+        if (!state || state.ended || state.completed) return false;
+        if (!flushPendingHighSurrogate(part.id, state)) return false;
+        state.ended = true;
+        return true;
       }
 
       case 'tool-call': {
@@ -314,7 +328,14 @@ export function guardCodexStream(
           return encoder.encode(part.input).byteLength <= limits.maxToolInputBytes;
         }
         const state = toolInputs.get(part.toolCallId);
-        if (!state || !flushPendingHighSurrogate(part.toolCallId, state)) return false;
+        if (
+          !state ||
+          !state.ended ||
+          state.completed ||
+          !flushPendingHighSurrogate(part.toolCallId, state)
+        ) {
+          return false;
+        }
         // Do not add the final replay of streamed input, but bound it independently
         // so an empty or mismatched delta sequence cannot hide an oversized value.
         const finalInputBytes = encoder.encode(part.input).byteLength;
@@ -322,7 +343,9 @@ export function guardCodexStream(
         if (!state.streamed || state.bytes === 0) {
           state.bytes = finalInputBytes;
         }
-        return state.bytes <= limits.maxToolInputBytes;
+        if (state.bytes > limits.maxToolInputBytes) return false;
+        state.completed = true;
+        return true;
       }
 
       default:
@@ -335,17 +358,7 @@ export function guardCodexStream(
       try {
         const { done, value } = await reader.read();
         if (done) {
-          for (const [id, pending] of pendingToolInputHighSurrogates) {
-            const state = toolInputs.get(id);
-            if (!state) continue;
-            pendingToolInputHighSurrogates.delete(id);
-            state.bytes += encoder.encode(pending).byteLength;
-            if (state.bytes > limits.maxToolInputBytes) {
-              await cancel();
-              controller.error(createCodexStreamError());
-              return;
-            }
-          }
+          pendingToolInputHighSurrogates.clear();
           release();
           controller.close();
           return;

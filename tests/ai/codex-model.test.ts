@@ -367,23 +367,11 @@ describe('guardCodexStream decoded budgets', () => {
     expect(over.cancel).toHaveBeenCalledTimes(1);
   });
 
-  it.each([
-    { label: 'tool input end', terminal: { type: 'tool-input-end', id: 'tool-1' } },
-    {
-      label: 'final tool call',
-      terminal: {
-        type: 'tool-call',
-        toolCallId: 'tool-1',
-        toolName: 'lookup',
-        input: '\ud83d',
-      },
-    },
-  ])('flushes a pending high surrogate at $label', async ({ terminal }) => {
+  it('counts a trailing high surrogate before forwarding its delta', async () => {
     const source = streamResult(
       [
         { type: 'tool-input-start', id: 'tool-1', toolName: 'lookup' },
         { type: 'tool-input-delta', id: 'tool-1', delta: '\ud83d' },
-        terminal,
       ],
       { stayOpen: true },
     );
@@ -393,7 +381,7 @@ describe('guardCodexStream decoded budgets', () => {
         ...TEST_DECODED_STREAM_LIMITS,
         maxToolInputBytes: 2,
       }).stream,
-      2,
+      1,
     );
     expectSafeStreamError(error);
     expect(source.cancel).toHaveBeenCalledTimes(1);
@@ -458,6 +446,72 @@ describe('guardCodexStream decoded budgets', () => {
       3,
     );
     expectSafeStreamError(error, input);
+    expect(source.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a repeated final for one completed streamed tool item', async () => {
+    const final = {
+      type: 'tool-call',
+      toolCallId: 'tool-1',
+      toolName: 'lookup',
+      input: '{}',
+    };
+    const source = streamResult(
+      [
+        { type: 'tool-input-start', id: 'tool-1', toolName: 'lookup' },
+        { type: 'tool-input-end', id: 'tool-1' },
+        final,
+        final,
+      ],
+      { stayOpen: true },
+    );
+
+    const error = await readAfter(
+      guardCodexStream(source.result as never, {
+        ...TEST_DECODED_STREAM_LIMITS,
+        maxContentItems: 1,
+      }).stream,
+      3,
+    );
+    expectSafeStreamError(error);
+    expect(source.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    {
+      label: 'final before tool-input end',
+      parts: [
+        { type: 'tool-input-start', id: 'tool-1', toolName: 'lookup' },
+        { type: 'tool-call', toolCallId: 'tool-1', toolName: 'lookup', input: '{}' },
+      ],
+      successfulReads: 1,
+    },
+    {
+      label: 'delta after tool-input end',
+      parts: [
+        { type: 'tool-input-start', id: 'tool-1', toolName: 'lookup' },
+        { type: 'tool-input-end', id: 'tool-1' },
+        { type: 'tool-input-delta', id: 'tool-1', delta: '{}' },
+      ],
+      successfulReads: 2,
+    },
+    {
+      label: 'repeated tool-input end',
+      parts: [
+        { type: 'tool-input-start', id: 'tool-1', toolName: 'lookup' },
+        { type: 'tool-input-end', id: 'tool-1' },
+        { type: 'tool-input-end', id: 'tool-1' },
+      ],
+      successfulReads: 2,
+    },
+  ])('rejects the premature streamed tool phase: $label', async ({ parts, successfulReads }) => {
+    const source = streamResult(parts, { stayOpen: true });
+
+    const error = await readAfter(
+      guardCodexStream(source.result as never, TEST_DECODED_STREAM_LIMITS).stream,
+      successfulReads,
+    );
+    expectSafeStreamError(error);
     expect(source.cancel).toHaveBeenCalledTimes(1);
   });
 
