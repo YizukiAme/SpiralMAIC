@@ -1,4 +1,4 @@
-import type { ProviderId, ModelInfo, ProviderType } from '@/lib/types/provider';
+import type { CredentialMode, ProviderId, ModelInfo, ProviderType } from '@/lib/types/provider';
 
 export type SettingsSection =
   | 'general'
@@ -29,6 +29,7 @@ export interface ProviderSettings {
   defaultBaseUrl?: string;
   icon?: string;
   requiresApiKey: boolean;
+  credentialMode?: CredentialMode;
   isBuiltIn: boolean; // true for built-in providers, false for custom
 
   // Optional explicit /models URL override for model probing (from a preset, or

@@ -1067,7 +1067,8 @@
       "bocha": "Bocha",
       "brave": "Brave Search",
       "baidu": "Baidu",
-      "searxng": "SearXNG"
+      "searxng": "SearXNG",
+      "openai-codex": "Codex"
     },
     "providerTypes": {
       "openai": "OpenAIプロトコル",
@@ -1663,7 +1664,40 @@
     },
     "ttsBrowserNativeTimelineNotice": "ブラウザ内蔵 TTS はエディターのタイムライン音声機能（試聴・再生成・一括音声生成）に対応していません。マネージド TTS プロバイダーに切り替えると、行ごとの音声を生成・管理できます。",
     "alidocmindAccessKeyId": "AccessKey ID",
-    "alidocmindAccessKeySecret": "AccessKey Secret"
+    "alidocmindAccessKeySecret": "AccessKey Secret",
+    "codexOAuth": {
+      "experimental": "実験的なサードパーティ Codex 連携です。ChatGPT プランの利用枠を使用します。",
+      "unavailableTitle": "Codex サインインは利用できません",
+      "unavailable": {
+        "SERVERLESS_UNSUPPORTED": "Codex OAuth には永続ストレージを備えたセルフホスト Node サーバーが必要です。",
+        "ACCESS_CODE_REQUIRED": "本番環境で Codex OAuth を利用するには ACCESS_CODE を設定してください。",
+        "DATA_DIR_UNWRITABLE": "データディレクトリに書き込めません。/app/data の権限を確認してください。",
+        "RUNTIME_LOCKED": "別の OpenMAIC Node プロセスが Codex 認証データディレクトリを使用しています。"
+      },
+      "connectedAs": "{email} として接続中",
+      "connected": "ChatGPT に接続済み",
+      "signInBrowser": "ChatGPT でサインイン",
+      "signInDevice": "デバイスコードを使用",
+      "waiting": "認証を待っています…",
+      "deviceInstructions": "確認ページを開き、このワンタイムコードを入力してください。",
+      "openVerification": "確認ページを開く",
+      "copyCode": "コードをコピー",
+      "copied": "コピーしました",
+      "cancel": "サインインをキャンセル",
+      "signOut": "サインアウト",
+      "models": "利用可能なモデル",
+      "fastMode": "Fast モード",
+      "fastModeDescription": "対応モデルにのみ適用されます。約 1.5 倍高速ですが、ChatGPT プランの利用枠をより多く消費します。",
+      "testConnection": "接続をテスト",
+      "testSuccess": "Codex への接続に成功しました。",
+      "testUnauthorized": "ChatGPT でもう一度サインインしてください。",
+      "testForbidden": "この ChatGPT ワークスペースには Codex の権限がありません。",
+      "testRateLimited": "ChatGPT プランの利用枠またはレート上限に達しました。",
+      "testFailed": "Codex への接続に失敗しました。",
+      "loginFailed": "サインインに失敗しました。いずれかのサインイン方法を選んで再試行してください。",
+      "loginExpired": "サインインの有効期限が切れました。もう一度開始してください。"
+    },
+    "connected": "接続済み"
   },
   "profile": {
     "title": "プロフィール",

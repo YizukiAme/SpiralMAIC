@@ -1067,7 +1067,8 @@
       "bocha": "Bocha",
       "brave": "Brave Search",
       "baidu": "Baidu",
-      "searxng": "SearXNG"
+      "searxng": "SearXNG",
+      "openai-codex": "Codex"
     },
     "providerTypes": {
       "openai": "Protocolo OpenAI",
@@ -1663,7 +1664,40 @@
     },
     "ttsBrowserNativeTimelineNotice": "O TTS nativo do navegador não suporta os recursos de áudio da linha do tempo do editor (pré-visualizar, regenerar e narração em lote). Mude para um provedor de TTS gerenciado para gerar e gerenciar o áudio de cada linha.",
     "alidocmindAccessKeyId": "AccessKey ID",
-    "alidocmindAccessKeySecret": "AccessKey Secret"
+    "alidocmindAccessKeySecret": "AccessKey Secret",
+    "codexOAuth": {
+      "experimental": "Integração experimental de terceiros com o Codex; usa a cota do seu plano ChatGPT.",
+      "unavailableTitle": "O login do Codex não está disponível",
+      "unavailable": {
+        "SERVERLESS_UNSUPPORTED": "O Codex OAuth requer um servidor Node auto-hospedado com armazenamento persistente.",
+        "ACCESS_CODE_REQUIRED": "Configure ACCESS_CODE para usar o Codex OAuth em produção.",
+        "DATA_DIR_UNWRITABLE": "O servidor não consegue gravar no diretório de dados. Verifique as permissões de /app/data.",
+        "RUNTIME_LOCKED": "Outro processo Node do OpenMAIC já está usando o diretório de dados de autenticação do Codex."
+      },
+      "connectedAs": "Conectado como {email}",
+      "connected": "Conectado ao ChatGPT",
+      "signInBrowser": "Entrar com o ChatGPT",
+      "signInDevice": "Usar código do dispositivo",
+      "waiting": "Aguardando autorização…",
+      "deviceInstructions": "Abra a página de verificação e informe este código de uso único.",
+      "openVerification": "Abrir página de verificação",
+      "copyCode": "Copiar código",
+      "copied": "Copiado",
+      "cancel": "Cancelar login",
+      "signOut": "Sair",
+      "models": "Modelos disponíveis",
+      "fastMode": "Modo rápido",
+      "fastModeDescription": "Aplica-se apenas a modelos compatíveis: cerca de 1,5x mais rápido, mas consome mais da cota do seu plano do ChatGPT.",
+      "testConnection": "Testar conexão",
+      "testSuccess": "Conexão com o Codex concluída.",
+      "testUnauthorized": "Entre novamente com o ChatGPT.",
+      "testForbidden": "Este workspace do ChatGPT não tem acesso ao Codex.",
+      "testRateLimited": "A cota ou o limite de requisições do seu plano ChatGPT foi atingido.",
+      "testFailed": "Falha na conexão com o Codex.",
+      "loginFailed": "Falha no login. Escolha um dos métodos de login para tentar novamente.",
+      "loginExpired": "Esta tentativa de login expirou. Inicie outra."
+    },
+    "connected": "Conectado"
   },
   "profile": {
     "title": "Perfil",

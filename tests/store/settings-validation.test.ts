@@ -64,6 +64,24 @@ describe('isProviderUsable', () => {
     expect(isProviderUsable({ apiKey: 'sk-xxx', serverDisabled: true })).toBe(false);
     expect(isProviderUsable({ isServerConfigured: true, serverDisabled: true })).toBe(false);
   });
+
+  it('rejects fake API key and base URL paths for an OAuth provider', () => {
+    expect(
+      isProviderUsable({
+        credentialMode: 'oauth',
+        requiresApiKey: false,
+        apiKey: 'fake-key',
+        baseUrl: 'https://fake.example/v1',
+        isServerConfigured: false,
+      }),
+    ).toBe(false);
+    expect(
+      isProviderUsable({
+        credentialMode: 'oauth',
+        isServerConfigured: true,
+      }),
+    ).toBe(true);
+  });
 });
 
 describe('validateProvider', () => {
@@ -286,5 +304,27 @@ describe('isLLMProviderConfigured', () => {
         models: [{ id: 'm1' }],
       } as never),
     ).toBe(true);
+  });
+
+  it('configures OAuth only from fresh server sync plus at least one model', () => {
+    const fakeClientCredentials = {
+      credentialMode: 'oauth' as const,
+      requiresApiKey: false,
+      apiKey: 'fake-key',
+      baseUrl: 'https://fake.example/v1',
+      models: [{ id: 'gpt-5.4' }],
+    };
+
+    expect(isLLMProviderConfigured(fakeClientCredentials)).toBe(false);
+    expect(isLLMProviderConfigured({ ...fakeClientCredentials, isServerConfigured: true })).toBe(
+      true,
+    );
+    expect(
+      isLLMProviderConfigured({
+        ...fakeClientCredentials,
+        isServerConfigured: true,
+        models: [],
+      }),
+    ).toBe(false);
   });
 });

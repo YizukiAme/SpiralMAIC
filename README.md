@@ -248,6 +248,11 @@ cp .env.example .env.local
 docker compose up --build
 ```
 
+Experimental ChatGPT/Codex subscription sign-in is supported only on a single-user, single-process
+self-hosted instance with persistent storage; it is not supported by the Vercel deployment above.
+See the [Codex OAuth deployment guide](docs/codex-oauth-deployment.md) and the manual
+[real-account acceptance runbook](docs/codex-real-account-acceptance.md).
+
 ### Optional: MinerU (Advanced Document Parsing)
 
 [MinerU](https://github.com/opendatalab/MinerU) provides enhanced parsing for complex tables, formulas, and OCR. You can use the [MinerU official API](https://mineru.net/) or [self-host your own instance](https://opendatalab.github.io/MinerU/quick_start/docker_deployment/).

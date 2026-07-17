@@ -217,4 +217,22 @@ describe('POST /api/chat/pi model and thinking resolution', () => {
     expect(absentSession).toMatchObject({ kind: 'chat' });
     expect(absentSession.id).not.toBe(malformedSession.id);
   });
+
+  it('passes the requested service tier into model resolution', async () => {
+    const { POST } = await import('@/app/api/chat/pi/route');
+    const response = await POST(
+      makeRequest({
+        ...makeBody(),
+        serviceTier: 'priority',
+      }),
+    );
+    await response.text();
+
+    expect(response.status).toBe(200);
+    expect(mocks.resolveModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        serviceTier: 'priority',
+      }),
+    );
+  });
 });

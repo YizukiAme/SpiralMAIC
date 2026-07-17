@@ -16,6 +16,8 @@
     "check:i18n-keys": "node scripts/check-i18n-keys.mjs",
     "check": "prettier . --check",
     "format": "prettier . --write",
+    "accept:codex": "node --no-warnings --import tsx scripts/codex-acceptance.ts",
+    "refresh:codex": "node --no-warnings --import tsx scripts/codex-force-refresh.ts",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",

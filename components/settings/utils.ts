@@ -6,6 +6,21 @@ import { getCatalogThinkingCapability } from '@/lib/ai/model-metadata';
 const VISION_MODEL_PATTERN = /vision|vl|omni|4o|gpt-5|gemini|claude/i;
 
 /**
+ * Keeps the persisted provider order stable while pinning Codex to the second
+ * settings-navigation slot. Provider configuration is persisted as an object,
+ * so relying on insertion order would otherwise put a newly introduced OAuth
+ * provider at the bottom for existing users.
+ */
+export function orderProvidersForSettings<T extends { id: string }>(providers: T[]): T[] {
+  const codex = providers.find((provider) => provider.id === 'openai-codex');
+  if (!codex) return providers;
+
+  const ordered = providers.filter((provider) => provider.id !== 'openai-codex');
+  ordered.splice(Math.min(1, ordered.length), 0, codex);
+  return ordered;
+}
+
+/**
  * Builds a default ModelInfo from a probed model id. Vision capability is
  * inferred from the id via {@link VISION_MODEL_PATTERN}. Shared by the provider
  * panel and the token-plan apply flow so the heuristic stays in one place.
