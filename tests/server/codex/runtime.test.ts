@@ -47,6 +47,16 @@ function pkceChallenge(verifier: string): string {
   return createHash('sha256').update(verifier).digest('base64url');
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 async function runDeviceLogin(
   runtime: CodexAuthRuntime,
   advanceClock: () => void,
@@ -92,9 +102,9 @@ function createOAuthFetch(options: { rejectFirstRefresh?: boolean } = {}) {
 }
 
 describe('Codex auth runtime', () => {
-  it('does not reuse the pre-catalog v3 runtime after a development reload', async () => {
+  it('does not reuse the pre-lifecycle-signal v5 runtime after a development reload', async () => {
     vi.resetModules();
-    const legacyKey = Symbol.for('openmaic.codex.oauth.auth-runtime.v3');
+    const legacyKey = Symbol.for('openmaic.codex.oauth.auth-runtime.v5');
     const host = globalThis as unknown as Record<PropertyKey, unknown>;
     const legacyRuntime = {
       vault: {},
@@ -130,6 +140,62 @@ describe('Codex auth runtime', () => {
     expect(reloadedModule.getCodexAuthRuntime()).toBe(first);
 
     await expect(first.loginManager.poll()).resolves.toBeNull();
+  });
+
+  it('aborts the old lease before an interactive replacement save becomes visible', async () => {
+    const [runtimeModule, tokenProviderModule] = await Promise.all([
+      import('@/lib/server/codex/runtime'),
+      import('@/lib/server/codex/token-provider'),
+    ]);
+    let now = NOW;
+    const previous: CodexOAuthCredentials = {
+      version: 1,
+      accessToken: 'old-access',
+      refreshToken: 'old-refresh',
+      expiresAt: NOW + 600_000,
+      accountId: 'old-account',
+      updatedAt: NOW,
+    };
+    let current: CodexOAuthCredentials | null = previous;
+    const saveStarted = deferred<void>();
+    const releaseSave = deferred<void>();
+    const vault = {
+      async load() {
+        return current;
+      },
+      async save(next: CodexOAuthCredentials) {
+        saveStarted.resolve();
+        await releaseSave.promise;
+        current = next;
+      },
+      async clear() {
+        current = null;
+      },
+    };
+    const runtime = runtimeModule.createCodexAuthRuntime({
+      vault,
+      catalogStore: {
+        load: vi.fn(async () => null),
+        save: vi.fn(async () => true),
+        clear: vi.fn(async () => undefined),
+      },
+      oauthFetch: createOAuthFetch(),
+      clock: { now: () => now },
+    });
+    const lease = await tokenProviderModule.acquireCodexCredentialLease(runtime.tokenProvider);
+
+    const login = runDeviceLogin(runtime, () => {
+      now += 1_000;
+    });
+    await saveStarted.promise;
+    const abortedBeforeSaveVisible = lease.lifecycleSignal?.aborted;
+    const credentialsBeforeSaveVisible = current;
+    releaseSave.resolve();
+
+    await expect(login).resolves.toMatchObject({ status: 'complete' });
+    expect(abortedBeforeSaveVisible).toBe(true);
+    expect(credentialsBeforeSaveVisible).toBe(previous);
+    expect(current?.accountId).toBe('relogged-account');
   });
 
   it('clears the model cache after credentials on logout through the shared lifecycle hook', async () => {

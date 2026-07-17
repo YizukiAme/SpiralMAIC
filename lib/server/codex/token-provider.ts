@@ -153,6 +153,7 @@ export interface InternalCodexCredentialLease {
   readonly tokenProvider: CodexTokenProvider;
   readonly credentials: ValidCredentials;
   readonly lifecycleGeneration: number | null;
+  readonly lifecycleSignal: AbortSignal | null;
 }
 
 /** @internal Binds one resolved catalog capability to its credential lifecycle. */
@@ -187,6 +188,7 @@ interface ActiveCredentialOperation {
 interface SharedCredentialState {
   generation: number;
   catalogGeneration: number;
+  lifecycleController: AbortController;
   operationInFlight: ActiveCredentialOperation | null;
   logoutInFlight: Promise<void> | null;
 }
@@ -209,7 +211,9 @@ function isSharedCredentialStateRegistry(value: unknown): value is SharedCredent
   return candidate.byCoordinationKey instanceof Map && candidate.byVault instanceof WeakMap;
 }
 
-const SHARED_STATE_REGISTRY_KEY = Symbol.for('openmaic.codex.oauth.shared-credential-state.v3');
+// v4 is the lifecycle-signal boundary: a v3 registry has no controller that
+// can synchronously tell already-issued leases that their lifecycle ended.
+const SHARED_STATE_REGISTRY_KEY = Symbol.for('openmaic.codex.oauth.shared-credential-state.v4');
 const coordinatorHost = globalThis as unknown as Record<PropertyKey, unknown>;
 const existingSharedStateRegistry = coordinatorHost[SHARED_STATE_REGISTRY_KEY];
 const sharedStateRegistry = isSharedCredentialStateRegistry(existingSharedStateRegistry)
@@ -248,11 +252,14 @@ function getSharedCredentialState(vault: CodexCredentialVault): SharedCredential
 }
 
 function normalizeSharedCredentialState(state: SharedCredentialState): SharedCredentialState {
-  // Dev HMR can retain a v3 global registry created before catalog leases
-  // existed. Normalize reused entries in place so existing refresh/logout
-  // coordination survives without turning `undefined += 1` into NaN.
+  // Dev HMR can retain a malformed or partially initialized v4 entry.
+  // Normalize it in place so existing refresh/logout coordination survives
+  // while every retained lifecycle still gains an abortable controller.
   if (!Number.isSafeInteger(state.catalogGeneration) || state.catalogGeneration < 0) {
     state.catalogGeneration = 0;
+  }
+  if (!(state.lifecycleController instanceof AbortController)) {
+    state.lifecycleController = new AbortController();
   }
   return state;
 }
@@ -261,9 +268,17 @@ function createSharedCredentialState(): SharedCredentialState {
   return {
     generation: 0,
     catalogGeneration: 0,
+    lifecycleController: new AbortController(),
     operationInFlight: null,
     logoutInFlight: null,
   };
+}
+
+function advanceCodexCredentialLifecycle(state: SharedCredentialState): void {
+  const staleController = state.lifecycleController;
+  state.catalogGeneration += 1;
+  state.lifecycleController = new AbortController();
+  staleController.abort();
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -383,21 +398,28 @@ export async function acquireCodexCredentialLease(
       tokenProvider,
       credentials: { ...credentials },
       lifecycleGeneration: null,
+      lifecycleSignal: null,
     });
   }
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const lifecycleGeneration = authority.sharedState.catalogGeneration;
+    const lifecycleSignal = authority.sharedState.lifecycleController.signal;
     const credentials = await tokenProvider.getValidCredentials();
     if (
+      !lifecycleSignal.aborted &&
       lifecycleGeneration === authority.sharedState.catalogGeneration &&
+      lifecycleSignal === authority.sharedState.lifecycleController.signal &&
       (await managedLeaseCredentialsMatch(authority, credentials)) &&
-      lifecycleGeneration === authority.sharedState.catalogGeneration
+      !lifecycleSignal.aborted &&
+      lifecycleGeneration === authority.sharedState.catalogGeneration &&
+      lifecycleSignal === authority.sharedState.lifecycleController.signal
     ) {
       return Object.freeze({
         tokenProvider,
         credentials: { ...credentials },
         lifecycleGeneration,
+        lifecycleSignal,
       });
     }
   }
@@ -410,10 +432,16 @@ export async function isCodexCredentialLeaseCurrent(
 ): Promise<boolean> {
   const authority = credentialLeaseAuthorities.get(lease.tokenProvider);
   if (authority) {
+    const lifecycleSignal = lease.lifecycleSignal;
     return (
       lease.lifecycleGeneration !== null &&
+      lifecycleSignal !== null &&
+      lifecycleSignal === authority.sharedState.lifecycleController.signal &&
+      !lifecycleSignal.aborted &&
       lease.lifecycleGeneration === authority.sharedState.catalogGeneration &&
       (await managedLeaseCredentialsMatch(authority, lease.credentials)) &&
+      lifecycleSignal === authority.sharedState.lifecycleController.signal &&
+      !lifecycleSignal.aborted &&
       lease.lifecycleGeneration === authority.sharedState.catalogGeneration
     );
   }
@@ -441,6 +469,7 @@ export async function refreshCodexCredentialLease(
     tokenProvider: lease.tokenProvider,
     credentials: { ...credentials },
     lifecycleGeneration: lease.lifecycleGeneration,
+    lifecycleSignal: lease.lifecycleSignal,
   });
   if (!(await isCodexCredentialLeaseCurrent(refreshed))) throw credentialsChangedError();
   return refreshed;
@@ -449,7 +478,7 @@ export async function refreshCodexCredentialLease(
 /** @internal Invalidate capabilities before a login replacement becomes visible. */
 export function invalidateCodexCredentialLeases(tokenProvider: CodexTokenProvider): void {
   const authority = credentialLeaseAuthorities.get(tokenProvider);
-  if (authority) authority.sharedState.catalogGeneration += 1;
+  if (authority) advanceCodexCredentialLifecycle(authority.sharedState);
 }
 
 /** @internal Validate both credential and catalog generations. */
@@ -600,7 +629,7 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
     if (this.sharedState.logoutInFlight) return this.sharedState.logoutInFlight;
 
     this.sharedState.generation += 1;
-    this.sharedState.catalogGeneration += 1;
+    advanceCodexCredentialLifecycle(this.sharedState);
     const activeOperation = this.sharedState.operationInFlight;
     const staleOperation = activeOperation?.promise ?? null;
     activeOperation?.abortController.abort();
@@ -785,7 +814,7 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
           throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.STORAGE_ERROR, false);
         }
         if (clearResult.cleared) {
-          this.sharedState.catalogGeneration += 1;
+          advanceCodexCredentialLifecycle(this.sharedState);
           await this.notifyCredentialsCleared();
         }
         if (refreshGeneration !== this.sharedState.generation) throw signedOutError();

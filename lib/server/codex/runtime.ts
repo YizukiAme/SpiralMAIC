@@ -29,8 +29,9 @@ interface CreateCodexAuthRuntimeOptions {
   clock?: CodexClock;
 }
 
-// v5 adds account/catalog capability leases; never reuse a pre-lease HMR runtime.
-const RUNTIME_KEY = Symbol.for('openmaic.codex.oauth.auth-runtime.v5');
+// v6 is the lifecycle-signal boundary; never reuse a v5 HMR runtime whose
+// provider cannot synchronously abort leases before replacement publication.
+const RUNTIME_KEY = Symbol.for('openmaic.codex.oauth.auth-runtime.v6');
 const runtimeHost = globalThis as unknown as Record<PropertyKey, unknown>;
 
 function isCodexAuthRuntime(value: unknown): value is CodexAuthRuntime {
