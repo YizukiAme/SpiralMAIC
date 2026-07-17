@@ -198,7 +198,27 @@ interface CredentialLeaseAuthority {
   sharedState: SharedCredentialState;
 }
 
-const credentialLeaseAuthorities = new WeakMap<CodexTokenProvider, CredentialLeaseAuthority>();
+const coordinatorHost = globalThis as unknown as Record<PropertyKey, unknown>;
+
+// Runtime v6 survives development module reloads, so its retained provider's
+// authority must survive with it for reloaded lease helpers to stay managed.
+const CREDENTIAL_LEASE_AUTHORITIES_KEY = Symbol.for(
+  'openmaic.codex.oauth.credential-lease-authorities.v1',
+);
+const existingCredentialLeaseAuthorities = coordinatorHost[CREDENTIAL_LEASE_AUTHORITIES_KEY];
+const credentialLeaseAuthorities =
+  existingCredentialLeaseAuthorities instanceof WeakMap
+    ? (existingCredentialLeaseAuthorities as WeakMap<CodexTokenProvider, CredentialLeaseAuthority>)
+    : new WeakMap<CodexTokenProvider, CredentialLeaseAuthority>();
+
+if (!(existingCredentialLeaseAuthorities instanceof WeakMap)) {
+  Object.defineProperty(coordinatorHost, CREDENTIAL_LEASE_AUTHORITIES_KEY, {
+    value: credentialLeaseAuthorities,
+    enumerable: false,
+    configurable: false,
+    writable: false,
+  });
+}
 
 interface SharedCredentialStateRegistry {
   byCoordinationKey: Map<string, SharedCredentialState>;
@@ -214,7 +234,6 @@ function isSharedCredentialStateRegistry(value: unknown): value is SharedCredent
 // v4 is the lifecycle-signal boundary: a v3 registry has no controller that
 // can synchronously tell already-issued leases that their lifecycle ended.
 const SHARED_STATE_REGISTRY_KEY = Symbol.for('openmaic.codex.oauth.shared-credential-state.v4');
-const coordinatorHost = globalThis as unknown as Record<PropertyKey, unknown>;
 const existingSharedStateRegistry = coordinatorHost[SHARED_STATE_REGISTRY_KEY];
 const sharedStateRegistry = isSharedCredentialStateRegistry(existingSharedStateRegistry)
   ? existingSharedStateRegistry

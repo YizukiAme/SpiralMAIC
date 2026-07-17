@@ -142,6 +142,42 @@ describe('Codex auth runtime', () => {
     await expect(first.loginManager.poll()).resolves.toBeNull();
   });
 
+  it('retains managed lease authority for the v6 runtime across a helper module reload', async () => {
+    const runtimeModule = await import('@/lib/server/codex/runtime');
+    const first = runtimeModule.getCodexAuthRuntime();
+    const now = Date.now();
+    await first.vault.save({
+      version: 1,
+      accessToken: 'hmr-access',
+      refreshToken: 'hmr-refresh',
+      expiresAt: now + 600_000,
+      accountId: 'hmr-account',
+      updatedAt: now,
+    });
+
+    try {
+      vi.resetModules();
+      const [reloadedRuntimeModule, reloadedTokenProviderModule] = await Promise.all([
+        import('@/lib/server/codex/runtime'),
+        import('@/lib/server/codex/token-provider'),
+      ]);
+      const retained = reloadedRuntimeModule.getCodexAuthRuntime();
+      expect(retained).toBe(first);
+
+      const lease = await reloadedTokenProviderModule.acquireCodexCredentialLease(
+        retained.tokenProvider,
+      );
+      expect(lease.lifecycleGeneration).not.toBeNull();
+      expect(lease.lifecycleSignal).not.toBeNull();
+      expect(lease.lifecycleSignal?.aborted).toBe(false);
+
+      reloadedTokenProviderModule.invalidateCodexCredentialLeases(retained.tokenProvider);
+      expect(lease.lifecycleSignal?.aborted).toBe(true);
+    } finally {
+      await first.vault.clear();
+    }
+  });
+
   it('aborts the old lease before an interactive replacement save becomes visible', async () => {
     const [runtimeModule, tokenProviderModule] = await Promise.all([
       import('@/lib/server/codex/runtime'),
