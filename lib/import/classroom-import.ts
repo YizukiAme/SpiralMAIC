@@ -6,6 +6,8 @@ import type { ClassroomManifest, ManifestScene } from '@/lib/export/classroom-zi
 import { rewriteAudioRefsToIds } from '@/lib/export/classroom-zip-utils';
 import type { GeneratedAgentRecord, MediaFileRecord, StageRecord } from '@/lib/utils/database';
 import { db, mediaFileKey } from '@/lib/utils/database';
+import type { PersistedAgentConfig } from '@/lib/types/stage';
+import { isValidSpiralAgentRoster } from '@/lib/revisit/spiral-agents';
 
 export type ImportPhase =
   | 'idle'
@@ -78,7 +80,23 @@ export async function importClassroomBlob(
 
     const now = Date.now();
     const newAgentIds = (manifest.agents ?? []).map(() => nanoid());
+    const newSpiralAgentIds = (manifest.spiralAgents ?? []).map(() => `spiral-${nanoid(8)}`);
     created.agentIds.push(...newAgentIds);
+    const spiralAgentConfigs: PersistedAgentConfig[] = (manifest.spiralAgents ?? []).map(
+      (agent, index) => ({
+        id: newSpiralAgentIds[index],
+        name: agent.name,
+        role: agent.role,
+        persona: agent.persona,
+        avatar: agent.avatar,
+        color: agent.color,
+        priority: agent.priority,
+        ...(agent.voiceConfig
+          ? { voiceConfig: agent.voiceConfig as PersistedAgentConfig['voiceConfig'] }
+          : {}),
+        ...(agent.voiceDesign ? { voiceDesign: agent.voiceDesign } : {}),
+      }),
+    );
     const studentAgentIndex = manifest.agents?.findIndex((agent) => agent.role === 'student') ?? -1;
     const nonTeacherAgentIndex =
       manifest.agents?.findIndex((agent) => agent.role !== 'teacher') ?? -1;
@@ -153,6 +171,9 @@ export async function importClassroomBlob(
       createdAt: manifest.stage.createdAt || now,
       updatedAt: now,
       agentIds: newAgentIds.length > 0 ? newAgentIds : undefined,
+      spiralAgentConfigs: isValidSpiralAgentRoster(spiralAgentConfigs)
+        ? spiralAgentConfigs
+        : undefined,
     };
     await db.stages.put(stage);
 

@@ -94,6 +94,20 @@ export function useExportClassroom() {
         color: a.color,
         priority: a.priority,
       }));
+      const manifestSpiralAgents: ManifestAgent[] = (
+        freshStage?.spiralAgentConfigs ??
+        stage.spiralAgentConfigs ??
+        []
+      ).map((agent) => ({
+        name: agent.name,
+        role: agent.role,
+        persona: agent.persona,
+        avatar: agent.avatar,
+        color: agent.color,
+        priority: agent.priority,
+        ...(agent.voiceConfig ? { voiceConfig: agent.voiceConfig } : {}),
+        ...(agent.voiceDesign ? { voiceDesign: agent.voiceDesign } : {}),
+      }));
 
       // Also include generatedAgentConfigs from stage if agents not in DB
       if (manifestAgents.length === 0 && stage.generatedAgentConfigs?.length) {
@@ -192,6 +206,7 @@ export function useExportClassroom() {
         appVersion: process.env.npm_package_version || '0.0.0',
         stage: manifestStage,
         agents: manifestAgents,
+        ...(manifestSpiralAgents.length > 0 ? { spiralAgents: manifestSpiralAgents } : {}),
         scenes: manifestScenes,
         mediaIndex,
       };

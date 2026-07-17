@@ -75,6 +75,46 @@ describe('importClassroomBlob', () => {
     expect(phases).toEqual(['parsing', 'validating', 'writingMedia', 'writingCourse', 'done']);
   });
 
+  it('imports Spiral agents into the stage without writing normal generated-agent records', async () => {
+    const stageId = await importClassroomBlob(
+      await classroomBlob({
+        spiralAgents: [
+          {
+            name: 'Ari',
+            role: 'assistant',
+            persona: 'A supportive assistant.',
+            avatar: '/avatars/assist.png',
+            color: '#111111',
+            priority: 7,
+          },
+          {
+            name: 'Bo',
+            role: 'student',
+            persona: 'Questions definitions.',
+            avatar: '/avatars/curious.png',
+            color: '#222222',
+            priority: 5,
+          },
+          {
+            name: 'Cy',
+            role: 'student',
+            persona: 'Tests examples.',
+            avatar: '/avatars/thinker.png',
+            color: '#333333',
+            priority: 4,
+          },
+        ],
+      }),
+    );
+
+    const imported = await db.stages.get(stageId);
+    expect(imported?.spiralAgentConfigs).toHaveLength(3);
+    expect(imported?.spiralAgentConfigs?.every((agent) => agent.id.startsWith('spiral-'))).toBe(
+      true,
+    );
+    await expect(db.generatedAgents.where('stageId').equals(stageId).count()).resolves.toBe(0);
+  });
+
   it('rejects a zip without manifest.json with a typed error', async () => {
     const zip = new JSZip();
     const blob = await zip.generateAsync({ type: 'blob' });

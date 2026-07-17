@@ -2,6 +2,7 @@
 import type { SceneType, SceneContent } from '@/lib/types/stage';
 import type { Action } from '@/lib/types/action';
 import type { Slide } from '@openmaic/dsl';
+import type { VoiceDesign } from '@/lib/audio/voice-design';
 
 export const CLASSROOM_ZIP_FORMAT_VERSION = 1;
 export const CLASSROOM_ZIP_EXTENSION = '.maic.zip';
@@ -12,6 +13,7 @@ export interface ClassroomManifest {
   appVersion: string;
   stage: ManifestStage;
   agents: ManifestAgent[];
+  spiralAgents?: ManifestAgent[];
   scenes: ManifestScene[];
   mediaIndex: Record<string, MediaIndexEntry>;
 }
@@ -36,6 +38,7 @@ export interface ManifestAgent {
   priority: number;
   /** Reserved for forward-compat. Not currently persisted in GeneratedAgentRecord DB schema. */
   voiceConfig?: { providerId: string; voiceId: string };
+  voiceDesign?: VoiceDesign;
 }
 
 export interface ManifestScene {
