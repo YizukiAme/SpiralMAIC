@@ -93,6 +93,12 @@ const pageState: RevisitSessionPageState = {
   passed: false,
 };
 
+const defaultRevisitAgentIds = {
+  studentAgentId: REVISIT_STUDENT_AGENT_ID,
+  studentAgentIds: REVISIT_DEFAULT_STUDENT_AGENT_IDS,
+  assistantAgentId: REVISIT_ASSISTANT_AGENT_ID,
+};
+
 const stage: Stage = {
   id: 'stage-1',
   name: 'Fallacies',
@@ -193,6 +199,7 @@ describe('revisit session helpers', () => {
       elapsedMinutes: 1,
       model: 'openai:gpt-4.1-mini',
       apiKey: 'key',
+      agentIds: defaultRevisitAgentIds,
     });
     expect(request.config.agentIds).toEqual([
       ...REVISIT_DEFAULT_STUDENT_AGENT_IDS,
@@ -217,6 +224,7 @@ describe('revisit session helpers', () => {
       elapsedMinutes: 1,
       model: 'openai:gpt-4.1-mini',
       apiKey: 'key',
+      agentIds: defaultRevisitAgentIds,
     });
 
     expect(request.config.revisitFallbackDirective).toBe('rescue');
@@ -328,7 +336,7 @@ describe('revisit session helpers', () => {
     ]);
   });
 
-  test('resolves revisit seats by role before falling back to defaults', () => {
+  test('resolves revisit seats from roster order without default fallbacks', () => {
     const resolved = resolveRevisitAgentIds([
       { id: 'custom-student-low', role: 'student', priority: 1 },
       { id: 'custom-student-mid', role: 'student', priority: 5 },
@@ -336,16 +344,18 @@ describe('revisit session helpers', () => {
       { id: 'custom-assistant', role: 'assistant', priority: 3 },
     ]);
     expect(resolved).toMatchObject({
-      studentAgentId: 'custom-student-high',
-      studentAgentIds: ['custom-student-high', 'custom-student-mid', 'custom-student-low'],
+      studentAgentId: 'custom-student-low',
+      studentAgentIds: ['custom-student-low', 'custom-student-mid', 'custom-student-high'],
       assistantAgentId: 'custom-assistant',
     });
 
-    expect(resolveRevisitAgentIds([])).toEqual({
-      studentAgentId: REVISIT_STUDENT_AGENT_ID,
-      studentAgentIds: REVISIT_DEFAULT_STUDENT_AGENT_IDS,
-      assistantAgentId: REVISIT_ASSISTANT_AGENT_ID,
-    });
+    expect(resolveRevisitAgentIds([])).toBeNull();
+    expect(
+      resolveRevisitAgentIds([
+        { id: 'default-4', role: 'student' },
+        { id: 'default-2', role: 'assistant' },
+      ]),
+    ).toBeNull();
   });
 
   test('classifies agent roles using resolved revisit seats', () => {

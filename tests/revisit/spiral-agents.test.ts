@@ -4,10 +4,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   getSpiralAgentPreparationAction,
+  hydrateSpiralAgentRegistry,
   isValidSpiralAgentRoster,
+  resolveAttemptSpiralAgentRoster,
   saveStageSpiralAgents,
 } from '@/lib/revisit/spiral-agents';
 import { db } from '@/lib/utils/database';
+import { useAgentRegistry } from '@/lib/orchestration/registry/store';
 import { loadStageData } from '@/lib/utils/stage-storage';
 import type { PersistedAgentConfig, Stage } from '@/lib/types/stage';
 
@@ -88,6 +91,27 @@ describe('Spiral agent roster persistence', () => {
     expect(getSpiralAgentPreparationAction([assistant, ...students], undefined)).toBe('continue');
   });
 
+  it('uses a complete legacy generated roster only for completed attempts', () => {
+    const legacyStage: Stage = {
+      ...stage,
+      generatedAgentConfigs: [
+        {
+          ...assistant,
+          id: 'legacy-teacher',
+          role: 'teacher',
+        },
+        assistant,
+        ...students,
+      ],
+    };
+
+    expect(resolveAttemptSpiralAgentRoster(legacyStage, 'completed')).toEqual([
+      assistant,
+      ...students,
+    ]);
+    expect(resolveAttemptSpiralAgentRoster(legacyStage, 'preparing')).toBeNull();
+  });
+
   it('round-trips the roster on the stage without changing normal generated agents', async () => {
     await db.stages.put(stage);
     await db.generatedAgents.put({
@@ -109,5 +133,30 @@ describe('Spiral agent roster persistence', () => {
     expect(
       (await db.generatedAgents.where('stageId').equals(stage.id).toArray()).map((a) => a.id),
     ).toEqual(['gen-course-teacher']);
+  });
+
+  it('hydrates only the runtime registry and leaves normal generated records intact', async () => {
+    await db.generatedAgents.put({
+      id: 'gen-course-teacher',
+      stageId: stage.id,
+      name: 'Course teacher',
+      role: 'teacher',
+      persona: 'Teaches the normal lesson.',
+      avatar: '/avatars/teacher.png',
+      color: '#444444',
+      priority: 10,
+      createdAt: 1,
+    });
+
+    hydrateSpiralAgentRegistry(stage.id, [assistant, ...students]);
+
+    expect(
+      useAgentRegistry
+        .getState()
+        .listAgents()
+        .filter((agent) => agent.isGenerated)
+        .map((agent) => agent.id),
+    ).toEqual([assistant.id, ...students.map((student) => student.id)]);
+    expect(await db.generatedAgents.get('gen-course-teacher')).toBeDefined();
   });
 });

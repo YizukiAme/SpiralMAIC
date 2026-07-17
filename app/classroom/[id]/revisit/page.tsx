@@ -65,8 +65,12 @@ import type { AgentConfig } from '@/lib/orchestration/registry/types';
 import type { Participant } from '@/lib/types/roundtable';
 import { USER_AVATAR } from '@/lib/types/roundtable';
 import { RevisitDemoBadge } from '@/components/revisit/demo-badge';
-import { parseRevisitScope } from '@/lib/revisit/scope';
+import { parseRevisitScope, serializeRevisitScope } from '@/lib/revisit/scope';
 import { getRevisitNow } from '@/lib/revisit/clock';
+import {
+  hydrateSpiralAgentRegistry,
+  resolveAttemptSpiralAgentRoster,
+} from '@/lib/revisit/spiral-agents';
 import {
   REVISIT_COMPLETION_PAGE_ID,
   REVISIT_REPORT_PAGE_ID,
@@ -83,6 +87,11 @@ type SkeletonLoadState = 'idle' | 'generating' | 'ready' | 'error';
 type RevisitTailView = 'completion' | 'report' | null;
 
 const log = createLogger('RevisitChallenge');
+const EMPTY_REVISIT_AGENT_IDS: RevisitAgentIds = {
+  studentAgentId: '',
+  studentAgentIds: [],
+  assistantAgentId: '',
+};
 
 export default function RevisitChallengePage() {
   const params = useParams();
@@ -204,7 +213,22 @@ export default function RevisitChallengePage() {
         if (!snapshot.sourceStage || snapshot.sourceScenes.length === 0 || !snapshot.blueprint) {
           throw new Error('this historical challenge only contains a report');
         }
-        const data = { stage: snapshot.sourceStage, scenes: snapshot.sourceScenes };
+        const spiralAgents = resolveAttemptSpiralAgentRoster(snapshot.sourceStage, snapshot.status);
+        if (!spiralAgents) {
+          if (snapshot.status !== 'completed') {
+            router.replace(
+              `/generation-preview?attempt=${encodeURIComponent(snapshot.attemptId)}&scope=${encodeURIComponent(
+                serializeRevisitScope(revisitScope),
+              )}&run=1`,
+            );
+            return;
+          }
+          throw new Error('this historical challenge does not contain its agent roster');
+        }
+        const data = {
+          stage: { ...snapshot.sourceStage, spiralAgentConfigs: spiralAgents },
+          scenes: snapshot.sourceScenes,
+        };
         await hydrateStageAgentsForRevisit(data.stage);
         if (cancelled) return;
         setClassroom(data);
@@ -273,8 +297,18 @@ export default function RevisitChallengePage() {
     ],
     [allPagesPassed, judging, report, reportAvailable, t],
   );
-  const allAgents = useMemo(() => Object.values(agentsRecord), [agentsRecord]);
-  const revisitAgentIds = useMemo(() => resolveRevisitAgentIds(allAgents), [allAgents]);
+  const spiralAgentConfigs = classroom?.stage.spiralAgentConfigs ?? [];
+  const revisitAgentIds = useMemo(
+    () => resolveRevisitAgentIds(spiralAgentConfigs) ?? EMPTY_REVISIT_AGENT_IDS,
+    [spiralAgentConfigs],
+  );
+  const allAgents = useMemo(
+    () =>
+      [revisitAgentIds.assistantAgentId, ...revisitAgentIds.studentAgentIds]
+        .map((agentId) => agentsRecord[agentId])
+        .filter((agent): agent is AgentConfig => Boolean(agent)),
+    [agentsRecord, revisitAgentIds],
+  );
   useEffect(() => {
     if (!reverseChallengeEnabled || !classroom || !blueprint || !attemptId) return;
     let cancelled = false;
@@ -1056,36 +1090,8 @@ function toStatelessAgentConfig(
 }
 
 async function hydrateStageAgentsForRevisit(stage: StageModel): Promise<void> {
-  if (stage.generatedAgentConfigs?.length) {
-    const { saveGeneratedAgents } = await import('@/lib/orchestration/registry/store');
-    await saveGeneratedAgents(stage.id, stage.generatedAgentConfigs);
-  }
-
-  const { loadGeneratedAgentsForStage, useAgentRegistry } =
-    await import('@/lib/orchestration/registry/store');
-  const { useSettingsStore } = await import('@/lib/store/settings');
-  const { restoreAgentSelection } = await import('@/lib/orchestration/registry/agent-selection');
-
-  const generatedAgentIds = await loadGeneratedAgentsForStage(stage.id);
-  const settings = useSettingsStore.getState();
-  const registry = useAgentRegistry.getState();
-  const { selection: next, isUserSet } = restoreAgentSelection({
-    persisted: { mode: settings.agentMode, selectedAgentIds: settings.selectedAgentIds },
-    persistedIsUserSet: settings.agentSelectionIsUserSet,
-    generatedAgentIds,
-    stageAgentIds: stage.agentIds,
-    isPresetAgent: (id) => {
-      const agent = registry.getAgent(id);
-      return !!agent && !agent.isGenerated;
-    },
-  });
-  if (next.mode !== settings.agentMode) settings.setAgentMode(next.mode);
-  if (next.selectedAgentIds !== settings.selectedAgentIds) {
-    settings.setSelectedAgentIds(next.selectedAgentIds);
-  }
-  if (isUserSet !== settings.agentSelectionIsUserSet) {
-    settings.setAgentSelectionIsUserSet(isUserSet);
-  }
+  if (!stage.spiralAgentConfigs) throw new Error('Spiral agent roster is missing');
+  hydrateSpiralAgentRegistry(stage.id, stage.spiralAgentConfigs);
 }
 
 function buildPageReports(

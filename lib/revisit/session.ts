@@ -250,15 +250,11 @@ export function createRevisitChatRequest(args: {
   baseUrl?: string;
   providerType?: string;
   serviceTier?: ModelServiceTier;
-  agentIds?: RevisitAgentIds;
+  agentIds: RevisitAgentIds;
   agentConfigs?: NonNullable<StatelessChatRequest['config']['agentConfigs']>;
 }): StatelessChatRequest {
   const page = args.blueprint.skeleton.pages[args.pageState.pageIndex];
-  const agentIds = args.agentIds ?? {
-    studentAgentId: REVISIT_STUDENT_AGENT_ID,
-    studentAgentIds: REVISIT_DEFAULT_STUDENT_AGENT_IDS,
-    assistantAgentId: REVISIT_ASSISTANT_AGENT_ID,
-  };
+  const agentIds = args.agentIds;
   const studentAgentIds = agentIds.studentAgentIds.length
     ? agentIds.studentAgentIds
     : [agentIds.studentAgentId];
@@ -301,34 +297,31 @@ export function createRevisitChatRequest(args: {
   };
 }
 
-export function resolveRevisitAgentIds(candidates: RevisitAgentCandidate[]): RevisitAgentIds {
-  const byRolePriority = (role: string) =>
-    candidates
-      .filter((candidate) => candidate.role === role)
-      .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
-  const allowedDefaultStudents = new Set(REVISIT_DEFAULT_STUDENT_AGENT_IDS);
-  const studentIds = byRolePriority('student')
-    .filter(
-      (candidate) =>
-        !candidate.id.startsWith('default-') || allowedDefaultStudents.has(candidate.id),
-    )
-    .slice(0, 3)
-    .map((candidate) => candidate.id);
-
+export function resolveRevisitAgentIds(
+  candidates: RevisitAgentCandidate[],
+): RevisitAgentIds | null {
+  if (candidates.some((candidate) => candidate.id.startsWith('default-'))) return null;
+  const assistants = candidates.filter((candidate) => candidate.role === 'assistant');
+  const students = candidates.filter((candidate) => candidate.role === 'student');
+  if (
+    assistants.length !== 1 ||
+    students.length < 2 ||
+    students.length > 3 ||
+    assistants.length + students.length !== candidates.length
+  ) {
+    return null;
+  }
+  const studentIds = students.map((candidate) => candidate.id);
   return {
-    studentAgentId: studentIds[0] ?? REVISIT_STUDENT_AGENT_ID,
-    studentAgentIds: studentIds.length ? studentIds : [...REVISIT_DEFAULT_STUDENT_AGENT_IDS],
-    assistantAgentId: byRolePriority('assistant')[0]?.id ?? REVISIT_ASSISTANT_AGENT_ID,
+    studentAgentId: studentIds[0],
+    studentAgentIds: studentIds,
+    assistantAgentId: assistants[0].id,
   };
 }
 
 export function roleForRevisitAgent(
   agentId: string,
-  agentIds: RevisitAgentIds = {
-    studentAgentId: REVISIT_STUDENT_AGENT_ID,
-    studentAgentIds: REVISIT_DEFAULT_STUDENT_AGENT_IDS,
-    assistantAgentId: REVISIT_ASSISTANT_AGENT_ID,
-  },
+  agentIds: RevisitAgentIds,
 ): RevisitMessage['role'] {
   return agentId === agentIds.assistantAgentId ? 'assistant' : 'student';
 }
