@@ -17,10 +17,7 @@ import {
   getLastUnlockedRevisitPageIndex,
   getRevisitParticipantStatusBadge,
   isRevisitStudentQuestion,
-  REVISIT_ASSISTANT_AGENT_ID,
-  REVISIT_DEFAULT_STUDENT_AGENT_IDS,
   REVISIT_PAGE_PROBE_CAP,
-  REVISIT_STUDENT_AGENT_ID,
   resolveRevisitAgentIds,
   roleForRevisitAgent,
   type RevisitSessionPageState,
@@ -94,9 +91,9 @@ const pageState: RevisitSessionPageState = {
 };
 
 const defaultRevisitAgentIds = {
-  studentAgentId: REVISIT_STUDENT_AGENT_ID,
-  studentAgentIds: REVISIT_DEFAULT_STUDENT_AGENT_IDS,
-  assistantAgentId: REVISIT_ASSISTANT_AGENT_ID,
+  studentAgentId: 'spiral-student-1',
+  studentAgentIds: ['spiral-student-1', 'spiral-student-2'],
+  assistantAgentId: 'spiral-assistant',
 };
 
 const stage: Stage = {
@@ -202,8 +199,8 @@ describe('revisit session helpers', () => {
       agentIds: defaultRevisitAgentIds,
     });
     expect(request.config.agentIds).toEqual([
-      ...REVISIT_DEFAULT_STUDENT_AGENT_IDS,
-      REVISIT_ASSISTANT_AGENT_ID,
+      ...defaultRevisitAgentIds.studentAgentIds,
+      defaultRevisitAgentIds.assistantAgentId,
     ]);
     expect(request.session).toEqual({ kind: 'revisit-attempt', id: 'attempt-1' });
     expect(request.config.revisitProbeContext).toContain('Candidate probes');
