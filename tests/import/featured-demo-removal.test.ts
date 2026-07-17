@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -15,4 +15,11 @@ describe('featured demo course removal', () => {
   it.each(removedPaths)('does not ship %s', (path) => {
     expect(existsSync(resolve(process.cwd(), path))).toBe(false);
   });
+
+  it.each(['lib/import/classroom-import.ts', 'lib/utils/database.ts'])(
+    'does not keep featured-demo metadata in %s',
+    (path) => {
+      expect(readFileSync(resolve(process.cwd(), path), 'utf8')).not.toMatch(/featuredDemo/);
+    },
+  );
 });
