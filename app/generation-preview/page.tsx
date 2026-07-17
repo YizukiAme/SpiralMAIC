@@ -39,7 +39,7 @@ import {
 } from '@/lib/document/bundle';
 import { buildVideoManifestFromOutlines } from '@/lib/media/video-manifest';
 import { nanoid } from 'nanoid';
-import type { Stage } from '@/lib/types/stage';
+import type { PersistedAgentConfig, Stage } from '@/lib/types/stage';
 import type {
   SceneOutline,
   PdfImage,
@@ -64,6 +64,7 @@ import {
   importLegacyRevisitAttemptSnapshot,
   saveRevisitAttemptBlueprint,
   saveRevisitAttemptSource,
+  setRevisitAttemptSpiralAgentGenerationState,
   setRevisitAttemptPreparationError,
   upsertRevisitAttemptScene,
 } from '@/lib/revisit/attempt-store';
@@ -71,6 +72,12 @@ import { getRevisitNow } from '@/lib/revisit/clock';
 import { parseRevisitScope, serializeRevisitScope } from '@/lib/revisit/scope';
 import { loadStageData } from '@/lib/utils/stage-storage';
 import { RevisitDemoBadge } from '@/components/revisit/demo-badge';
+import {
+  getSpiralAgentPreparationAction,
+  isValidSpiralAgentRoster,
+  saveStageSpiralAgents,
+} from '@/lib/revisit/spiral-agents';
+import { buildAgentProfileRequestBody } from '@/lib/generation/agent-profile-request';
 
 const log = createLogger('GenerationPreview');
 const OUTLINE_REVIEW_AUTO_CONTINUE_MS = 2500;
@@ -153,17 +160,7 @@ function GenerationPreviewContent() {
   );
   const [showAgentReveal, setShowAgentReveal] = useState(false);
   const [isConfirmingOutlines, setIsConfirmingOutlines] = useState(false);
-  const [generatedAgents, setGeneratedAgents] = useState<
-    Array<{
-      id: string;
-      name: string;
-      role: string;
-      persona: string;
-      avatar: string;
-      color: string;
-      priority: number;
-    }>
-  >([]);
+  const [generatedAgents, setGeneratedAgents] = useState<PersistedAgentConfig[]>([]);
   const agentRevealResolveRef = useRef<(() => void) | null>(null);
   const reviewOutlineEnabled = useSettingsStore((s) => s.reviewOutlineEnabled);
   const setReviewOutlineEnabled = useSettingsStore((s) => s.setReviewOutlineEnabled);
@@ -276,6 +273,9 @@ function GenerationPreviewContent() {
               forceRegenerate: !attempt.blueprint,
               scope: serializeRevisitScope(scope),
               blueprint: attempt.blueprint,
+              showSpiralAgentGenerationStep:
+                !isValidSpiralAgentRoster(attempt.sourceStage?.spiralAgentConfigs) ||
+                attempt.spiralAgentGenerationState !== undefined,
             },
           });
         }
@@ -342,6 +342,19 @@ function GenerationPreviewContent() {
   const withThinkingConfig = <T extends Record<string, unknown>>(body: T) => {
     const { thinkingConfig } = getCurrentModelConfig();
     return thinkingConfig ? { ...body, thinkingConfig } : body;
+  };
+
+  const getAvailableVoicesForAgentGeneration = () => {
+    const settings = useSettingsStore.getState();
+    const providers = getEnabledProvidersWithVoices(settings.ttsProvidersConfig, voxcpmProfiles);
+    return providers.flatMap((provider) =>
+      provider.voices.map((voice) => ({
+        providerId: provider.providerId,
+        voiceId: voice.id,
+        voiceName: voice.name,
+        voiceLanguage: voice.language,
+      })),
+    );
   };
 
   // Auto-start generation when session is loaded
@@ -420,6 +433,32 @@ function GenerationPreviewContent() {
             );
           }
         }
+        if (
+          attempt?.sourceStage &&
+          !isValidSpiralAgentRoster(attempt.sourceStage.spiralAgentConfigs)
+        ) {
+          const currentSource = await loadStageData(attempt.stageId);
+          if (currentSource && isValidSpiralAgentRoster(currentSource.stage.spiralAgentConfigs)) {
+            attempt = await saveRevisitAttemptSource(
+              attempt.attemptId,
+              {
+                ...attempt.sourceStage,
+                spiralAgentConfigs: currentSource.stage.spiralAgentConfigs,
+              },
+              attempt.sourceScenes,
+              now,
+              scope,
+            );
+            if (!attempt.spiralAgentGenerationState) {
+              attempt = await setRevisitAttemptSpiralAgentGenerationState(
+                attempt.attemptId,
+                'pending-reveal',
+                now,
+                scope,
+              );
+            }
+          }
+        }
         if (!attempt?.sourceStage || attempt.sourceScenes.length === 0) {
           throw new Error(t('revisit.challenge.loadFailed'));
         }
@@ -456,6 +495,87 @@ function GenerationPreviewContent() {
         };
         setSession(sessionWithBlueprint);
         currentSession = sessionWithBlueprint;
+        activeSteps = getActiveSteps(currentSession);
+
+        let spiralAgentAction = getSpiralAgentPreparationAction(
+          attempt.sourceStage.spiralAgentConfigs,
+          attempt.spiralAgentGenerationState,
+        );
+        if (spiralAgentAction === 'generate') {
+          const agentStepIndex = activeSteps.findIndex((step) => step.id === 'agent-generation');
+          setCurrentStepIndex(Math.max(0, agentStepIndex));
+          setStatusMessage(t('generation.agentGenerationDesc'));
+
+          const response = await fetch('/api/generate/agent-profiles', {
+            method: 'POST',
+            headers: getApiHeaders(),
+            body: JSON.stringify(
+              withThinkingConfig(
+                buildAgentProfileRequestBody({
+                  mode: 'spiral',
+                  stageInfo: {
+                    name: attempt.sourceStage.name,
+                    description: attempt.sourceStage.description,
+                  },
+                  sceneOutlines: blueprint.skeleton.pages.map((page) => ({
+                    title: page.title,
+                    description: [page.summary, ...page.cues].filter(Boolean).join(' — '),
+                  })),
+                  languageDirective:
+                    attempt.sourceStage.languageDirective ||
+                    `Respond in the challenge language: ${blueprint.language}.`,
+                  availableVoices: getAvailableVoicesForAgentGeneration(),
+                }),
+              ),
+            ),
+            signal,
+          });
+          if (!response.ok) throw new Error('Spiral agent generation failed');
+          const data = await response.json();
+          const spiralAgents = data.agents as PersistedAgentConfig[] | undefined;
+          if (!data.success || !isValidSpiralAgentRoster(spiralAgents)) {
+            throw new Error(data.error || 'Spiral agent generation returned an invalid roster');
+          }
+
+          await saveStageSpiralAgents(attempt.stageId, spiralAgents, now);
+          attempt = await saveRevisitAttemptSource(
+            attempt.attemptId,
+            {
+              ...attempt.sourceStage,
+              updatedAt: now,
+              spiralAgentConfigs: spiralAgents,
+            },
+            attempt.sourceScenes,
+            now,
+            scope,
+          );
+          attempt = await setRevisitAttemptSpiralAgentGenerationState(
+            attempt.attemptId,
+            'pending-reveal',
+            now,
+            scope,
+          );
+          spiralAgentAction = 'reveal';
+        }
+
+        if (spiralAgentAction === 'reveal') {
+          const spiralAgents = attempt.sourceStage?.spiralAgentConfigs;
+          if (!isValidSpiralAgentRoster(spiralAgents)) {
+            throw new Error('Spiral agent roster is missing');
+          }
+          setGeneratedAgents(spiralAgents);
+          setShowAgentReveal(true);
+          await new Promise<void>((resolve) => {
+            agentRevealResolveRef.current = resolve;
+          });
+          throwIfAborted(signal);
+          attempt = await setRevisitAttemptSpiralAgentGenerationState(
+            attempt.attemptId,
+            'revealed',
+            await getRevisitNow(scope),
+            scope,
+          );
+        }
 
         setCurrentStepIndex(
           Math.max(
@@ -464,6 +584,7 @@ function GenerationPreviewContent() {
           ),
         );
         setStatusMessage(t('generation.revisitGeneratingPageDesc'));
+        if (!attempt.sourceStage) throw new Error(t('revisit.challenge.loadFailed'));
 
         const firstScene =
           attempt.blueprint?.id === blueprint.id && attempt.scenes[0]
@@ -938,87 +1059,23 @@ function GenerationPreviewContent() {
         if (agentStepIdx >= 0) setCurrentStepIndex(agentStepIdx);
 
         try {
-          const allAvatars = [
-            {
-              path: '/avatars/teacher.png',
-              desc: 'Male teacher with glasses, holding a book, green background',
-            },
-            {
-              path: '/avatars/teacher-2.png',
-              desc: 'Female teacher with long dark hair, blue traditional outfit, gentle expression',
-            },
-            {
-              path: '/avatars/assist.png',
-              desc: 'Young female assistant with glasses, pink background, friendly smile',
-            },
-            {
-              path: '/avatars/assist-2.png',
-              desc: 'Young female in orange top and purple overalls, cheerful and approachable',
-            },
-            {
-              path: '/avatars/clown.png',
-              desc: 'Energetic girl with glasses pointing up, green shirt, lively and fun',
-            },
-            {
-              path: '/avatars/clown-2.png',
-              desc: 'Playful girl with curly hair doing rock gesture, blue shirt, humorous vibe',
-            },
-            {
-              path: '/avatars/curious.png',
-              desc: 'Surprised boy with glasses, hand on cheek, curious expression',
-            },
-            {
-              path: '/avatars/curious-2.png',
-              desc: 'Boy with backpack holding a book and question mark bubble, inquisitive',
-            },
-            {
-              path: '/avatars/note-taker.png',
-              desc: 'Studious boy with glasses, blue shirt, calm and organized',
-            },
-            {
-              path: '/avatars/note-taker-2.png',
-              desc: 'Active boy with yellow backpack waving, blue outfit, enthusiastic learner',
-            },
-            {
-              path: '/avatars/thinker.png',
-              desc: 'Thoughtful girl with hand on chin, purple background, contemplative',
-            },
-            {
-              path: '/avatars/thinker-2.png',
-              desc: 'Girl reading a book intently, long dark hair, intellectual and focused',
-            },
-          ];
-
-          const getAvailableVoicesForGeneration = () => {
-            const providers = getEnabledProvidersWithVoices(
-              settings.ttsProvidersConfig,
-              voxcpmProfiles,
-            );
-            return providers.flatMap((p) =>
-              p.voices.map((v) => ({
-                providerId: p.providerId,
-                voiceId: v.id,
-                voiceName: v.name,
-                voiceLanguage: v.language,
-              })),
-            );
-          };
-
           const agentResp = await fetch('/api/generate/agent-profiles', {
             method: 'POST',
             headers: getApiHeaders(),
             body: JSON.stringify(
-              withThinkingConfig({
-                stageInfo: { name: stage.name, description: stage.description },
-                sceneOutlines: outlines.map((o) => ({
-                  title: o.title,
-                  description: o.description,
-                })),
-                languageDirective,
-                availableAvatars: allAvatars.map((a) => a.path),
-                avatarDescriptions: allAvatars.map((a) => ({ path: a.path, desc: a.desc })),
-                availableVoices: getAvailableVoicesForGeneration(),
-              }),
+              withThinkingConfig(
+                buildAgentProfileRequestBody({
+                  mode: 'course',
+                  stageInfo: { name: stage.name, description: stage.description },
+                  sceneOutlines: outlines.map((outline) => ({
+                    title: outline.title,
+                    description: outline.description,
+                  })),
+                  languageDirective:
+                    languageDirective || 'Teach in the language that matches the user requirement.',
+                  availableVoices: getAvailableVoicesForAgentGeneration(),
+                }),
+              ),
             ),
             signal,
           });

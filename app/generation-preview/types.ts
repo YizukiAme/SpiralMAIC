@@ -57,6 +57,7 @@ export interface GenerationSessionState {
     forceRegenerate: boolean;
     scope?: string;
     blueprint?: RevisitExamBlueprint;
+    showSpiralAgentGenerationStep: boolean;
   };
 }
 
@@ -159,6 +160,13 @@ export const REVISIT_STEPS: GenerationStep[] = [
     type: 'analysis',
   },
   {
+    id: 'agent-generation',
+    title: 'generation.agentGeneration',
+    description: 'generation.agentGenerationDesc',
+    icon: Bot,
+    type: 'writing',
+  },
+  {
     id: 'revisit-page',
     title: 'generation.revisitGeneratingPage',
     description: 'generation.revisitGeneratingPageDesc',
@@ -168,7 +176,12 @@ export const REVISIT_STEPS: GenerationStep[] = [
 ];
 
 export const getActiveSteps = (session: GenerationSessionState | null) => {
-  if (session?.mode === 'revisit') return REVISIT_STEPS;
+  if (session?.mode === 'revisit') {
+    return REVISIT_STEPS.filter(
+      (step) =>
+        step.id !== 'agent-generation' || session.revisit?.showSpiralAgentGenerationStep === true,
+    );
+  }
 
   return ALL_STEPS.filter((step) => {
     if (step.id === 'pdf-analysis') {
