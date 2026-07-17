@@ -57,6 +57,8 @@ import {
   migrateLegacyThread,
   rememberActiveSession,
   recallActiveSession,
+  ensureStageSessionIdentity,
+  prepareStageSessionRequest,
 } from '@/lib/agent/client/agent-thread-store';
 import { MAX_SESSIONS_PER_STAGE } from '@/lib/agent/client/agent-edit-session-types';
 
@@ -76,6 +78,24 @@ describe('agent edit session store', () => {
     expect(s.stageId).toBe('stage-a');
     expect(s.messages).toEqual([]);
     expect(await loadSession(s.id)).toBeUndefined();
+  });
+
+  it('does not reuse the previous stage identity before stage-switch effects settle', () => {
+    const previous = { stageId: 'stage-a', id: 'session-a' };
+    const previousHistory = [{ role: 'user', text: 'stage A secret' }];
+
+    expect(ensureStageSessionIdentity(previous, 'stage-a')).toBe(previous);
+    expect(prepareStageSessionRequest(previous, 'stage-a', previousHistory)).toEqual({
+      identity: previous,
+      history: previousHistory,
+    });
+    expect(prepareStageSessionRequest(previous, 'stage-b', previousHistory)).toMatchObject({
+      identity: {
+        stageId: 'stage-b',
+        id: expect.not.stringMatching(/^session-a$/),
+      },
+      history: [],
+    });
   });
 
   it('saveSession persists and loadSession round-trips', async () => {

@@ -179,4 +179,42 @@ describe('POST /api/chat/pi model and thinking resolution', () => {
       }),
     );
   });
+  it('passes the external Codex session into model resolution', async () => {
+    const { POST } = await import('@/app/api/chat/pi/route');
+    const response = await POST(
+      makeRequest({
+        ...makeBody(),
+        session: { kind: 'chat', id: 'persisted-pi-chat-1' },
+      }),
+    );
+    await response.text();
+
+    expect(response.status).toBe(200);
+    expect(mocks.resolveModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        logicalSession: { kind: 'chat', id: 'persisted-pi-chat-1' },
+      }),
+    );
+  });
+
+  it('uses independent ephemeral Codex sessions for malformed and absent session input', async () => {
+    const { POST } = await import('@/app/api/chat/pi/route');
+    const malformedResponse = await POST(
+      makeRequest({
+        ...makeBody(),
+        session: { kind: 'agent-edit', id: 'must-not-cross-boundary' },
+      }),
+    );
+    const absentResponse = await POST(makeRequest(makeBody()));
+    await Promise.all([malformedResponse.text(), absentResponse.text()]);
+
+    expect(malformedResponse.status).toBe(200);
+    expect(absentResponse.status).toBe(200);
+    const malformedSession = mocks.resolveModel.mock.calls[0]?.[0]?.logicalSession;
+    const absentSession = mocks.resolveModel.mock.calls[1]?.[0]?.logicalSession;
+    expect(malformedSession).toMatchObject({ kind: 'chat' });
+    expect(malformedSession.id).not.toBe('must-not-cross-boundary');
+    expect(absentSession).toMatchObject({ kind: 'chat' });
+    expect(absentSession.id).not.toBe(malformedSession.id);
+  });
 });

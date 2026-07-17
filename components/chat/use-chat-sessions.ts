@@ -173,6 +173,7 @@ interface UseChatSessionsOptions {
 }
 
 export type ChatRequestTemplate = {
+  session?: { kind: 'chat'; id: string };
   messages: UIMessage<ChatMessageMetadata>[];
   storeState: Record<string, unknown>;
   config: {
@@ -1148,9 +1149,11 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
 
       if (isPiChatEnabled()) {
         const firstRequestContext = getFirstPiRequestContext(sessionId);
-        const piRequestTemplate = firstRequestContext
-          ? { ...requestTemplate, piSessionBoundary: firstRequestContext }
-          : requestTemplate;
+        const piRequestTemplate = {
+          ...requestTemplate,
+          session: { kind: 'chat' as const, id: sessionId },
+          ...(firstRequestContext ? { piSessionBoundary: firstRequestContext } : {}),
+        };
         await runPiSingleRequest(
           sessionId,
           withPiInclassWhiteboardTools(piRequestTemplate),
@@ -1180,6 +1183,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
 
       const outcome = await runAgentLoop(
         {
+          session: { kind: 'chat', id: sessionId },
           config: requestTemplate.config,
           userProfile: requestTemplate.userProfile,
           apiKey: requestTemplate.apiKey,
@@ -1299,7 +1303,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
       setActiveSessionId(sessionId);
       setExpandedSessionIds((prev) => new Set([...prev, sessionId]));
 
-      log.info(`[ChatArea] Created session: ${sessionId} (${type})`);
+      log.info('[ChatArea] Created session', { type });
       return sessionId;
     },
     [registerFirstPiRequest],
@@ -1311,7 +1315,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
    */
   const endSession = useCallback(
     async (sessionId: string, options: EndSessionOptions = {}): Promise<void> => {
-      log.info(`[ChatArea] Ending session: ${sessionId}`);
+      log.info('[ChatArea] Ending session');
       clearSoftCloseRegistration(sessionId);
       softCloseLifecycleRef.current.set(sessionId, 'completed');
       livePausedRef.current = false;
@@ -1532,7 +1536,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
         // Caller (doSoftPause) manages roundtable state to keep the interrupted bubble visible.
       }
 
-      log.info(`[ChatArea] Soft-paused session: ${sessionId}`);
+      log.info('[ChatArea] Soft-paused session');
     },
     [retireActiveLiveRequest],
   );
@@ -1566,7 +1570,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
       const currentState = useStageStore.getState();
 
       try {
-        log.info(`[ChatArea] Resuming session: ${sessionId}`);
+        log.info('[ChatArea] Resuming session');
 
         const userProfileState = useUserProfileStore.getState();
         const mc = getCurrentModelConfig();
@@ -2091,7 +2095,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
       setActiveSessionId(sessionId);
       setExpandedSessionIds((prev) => new Set([...prev, sessionId]));
 
-      log.info(`[ChatArea] Created lecture session: ${sessionId} for scene ${sceneId}`);
+      log.info('[ChatArea] Created lecture session');
       return sessionId;
     },
     [sessions, t],
@@ -2187,7 +2191,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
     if (!buf || buf.disposed) return false;
     livePausedRef.current = true;
     buf.pause();
-    log.info('[ChatArea] Buffer-paused discussion:', active.id);
+    log.info('[ChatArea] Buffer-paused discussion');
     return true;
   }, []);
 
@@ -2198,7 +2202,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
     livePausedRef.current = false;
     const buf = buffersRef.current.get(active.id);
     if (buf) buf.resume();
-    log.info('[ChatArea] Buffer-resumed discussion:', active.id);
+    log.info('[ChatArea] Buffer-resumed discussion');
   }, []);
 
   return {
