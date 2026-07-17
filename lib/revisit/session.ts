@@ -19,13 +19,6 @@ import type {
 
 const log = createLogger('RevisitSession');
 
-export const REVISIT_STUDENT_AGENT_ID = 'default-4';
-export const REVISIT_DEFAULT_STUDENT_AGENT_IDS = [
-  REVISIT_STUDENT_AGENT_ID,
-  'default-3',
-  'default-5',
-];
-export const REVISIT_ASSISTANT_AGENT_ID = 'default-2';
 export const REVISIT_PAGE_PROBE_CAP = 2;
 export const REVISIT_SOFT_LIMIT_MINUTES = 15;
 
