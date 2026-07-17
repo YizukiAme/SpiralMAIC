@@ -199,6 +199,32 @@ describe('manifest round-trip', () => {
           priority: 2,
         },
       ],
+      spiralAgents: [
+        {
+          name: 'Assistant',
+          role: 'assistant',
+          persona: 'Supports the learner-teacher',
+          avatar: '🤝',
+          color: '#7C3AED',
+          priority: 7,
+        },
+        {
+          name: 'Student One',
+          role: 'student',
+          persona: 'Questions definitions',
+          avatar: '🎓',
+          color: '#2563EB',
+          priority: 5,
+        },
+        {
+          name: 'Student Two',
+          role: 'student',
+          persona: 'Tests examples',
+          avatar: '🎓',
+          color: '#059669',
+          priority: 4,
+        },
+      ],
       scenes: [
         {
           type: 'slide',
@@ -225,6 +251,7 @@ describe('manifest round-trip', () => {
     expect(deserialized.formatVersion).toBe(CLASSROOM_ZIP_FORMAT_VERSION);
     expect(deserialized.stage.name).toBe('Test Course');
     expect(deserialized.agents).toHaveLength(2);
+    expect(deserialized.spiralAgents).toHaveLength(3);
     expect(deserialized.scenes).toHaveLength(1);
     expect(deserialized.scenes[0].actions?.[0]).toMatchObject({
       type: 'speech',
