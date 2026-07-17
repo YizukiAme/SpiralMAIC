@@ -30,7 +30,7 @@ import { HoverCard, HoverCardTrigger, HoverCardContent } from '@/components/ui/h
 import { useAgentRegistry } from '@/lib/orchestration/registry/store';
 import { DEFAULT_TEACHER_AVATAR, DEFAULT_USER_AVATAR } from '@/components/roundtable/constants';
 import type { DiscussionAction } from '@/lib/types/action';
-import type { EngineMode, PlaybackView } from '@/lib/playback';
+import { resolvePlaybackView, type EngineMode, type PlaybackView } from '@/lib/playback';
 import type { Participant } from '@/lib/types/roundtable';
 
 export interface DiscussionRequest {
@@ -605,18 +605,29 @@ export function Roundtable({
           ? 'teacher'
           : 'idle';
 
-  // Enriched playbackView that includes userMessage overlay for bubbleRole/sourceText
-  const enrichedPlaybackView: PlaybackView = playbackView
-    ? { ...playbackView, bubbleRole, sourceText, activeRole: activeRole ?? playbackView.activeRole }
-    : {
-        phase: 'idle' as const,
-        sourceText,
-        bubbleRole,
-        activeRole,
-        buttonState: 'none' as const,
-        isInLiveFlow: false,
-        isTopicActive: false,
-      };
+  // Spiral/Reverse supplies live Roundtable inputs without the Stage playback view.
+  // Derive the same canonical phase so presentation bubbles are not filtered as idle.
+  const resolvedPlaybackView = resolvePlaybackView(playbackView, {
+    engineMode,
+    lectureSpeech: lectureSpeech ?? null,
+    liveSpeech: currentSpeech ?? null,
+    speakingAgentId: speakingAgentId ?? null,
+    thinkingState: thinkingState ?? null,
+    isCueUser: !!isCueUser,
+    isTopicPending: !!isTopicPending,
+    chatIsStreaming: !!isStreaming,
+    discussionTrigger: null,
+    playbackCompleted: !!playbackCompleted,
+    idleText: idleText ?? null,
+    speakingStudent: !!speakingStudent,
+    sessionType: sessionType ?? null,
+  });
+  const enrichedPlaybackView: PlaybackView = {
+    ...resolvedPlaybackView,
+    bubbleRole,
+    sourceText,
+    activeRole: activeRole ?? resolvedPlaybackView.activeRole,
+  };
 
   // Show stop button whenever there's an active QA/discussion session or live mode.
   // sessionType is only cleared in doSessionCleanup, so this stays stable through
