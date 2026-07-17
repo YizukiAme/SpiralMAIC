@@ -160,21 +160,57 @@ describe('Spiral agent roster persistence', () => {
   it('copies complete runtime metadata and rejects an incomplete built-in set', () => {
     const defaults = useAgentRegistry.getState().listAgents();
     const roster = buildLegacyRevisitAgentRoster(defaults);
-    const original = defaults.find((agent) => agent.id === 'default-2');
+    const historicalIds = ['default-2', 'default-4', 'default-3', 'default-5'];
 
-    expect(roster?.[0]).toMatchObject({
-      name: original?.name,
-      role: original?.role,
-      persona: original?.persona,
-      avatar: original?.avatar,
-      color: original?.color,
-      priority: original?.priority,
-    });
-    expect(roster?.[0]?.voiceConfig).toEqual(original?.voiceConfig);
-    expect(roster?.[0]?.voiceDesign).toEqual(original?.voiceDesign);
+    expect(
+      roster?.map(({ name, role, persona, avatar, color, priority, voiceConfig, voiceDesign }) => ({
+        name,
+        role,
+        persona,
+        avatar,
+        color,
+        priority,
+        voiceConfig,
+        voiceDesign,
+      })),
+    ).toEqual(
+      historicalIds.map((id) => {
+        const original = defaults.find((agent) => agent.id === id);
+        return {
+          name: original?.name,
+          role: original?.role,
+          persona: original?.persona,
+          avatar: original?.avatar,
+          color: original?.color,
+          priority: original?.priority,
+          voiceConfig: original?.voiceConfig,
+          voiceDesign: original?.voiceDesign,
+        };
+      }),
+    );
     expect(
       buildLegacyRevisitAgentRoster(defaults.filter((agent) => agent.id !== 'default-5')),
     ).toBeNull();
+  });
+
+  it('rejects required built-ins whose roles have been swapped', () => {
+    const defaults = useAgentRegistry.getState().listAgents();
+    const roleSwapped = defaults.map((agent) => {
+      if (agent.id === 'default-2') return { ...agent, role: 'student' };
+      if (agent.id === 'default-4') return { ...agent, role: 'assistant' };
+      return agent;
+    });
+
+    expect(buildLegacyRevisitAgentRoster(roleSwapped)).toBeNull();
+  });
+
+  it('rejects a required built-in ID that is not a default agent', () => {
+    const defaults = useAgentRegistry
+      .getState()
+      .listAgents()
+      .map((agent) => (agent.id === 'default-2' ? { ...agent, isDefault: false } : agent));
+
+    expect(buildLegacyRevisitAgentRoster(defaults)).toBeNull();
   });
 
   it('round-trips the roster on the stage without changing normal generated agents', async () => {
@@ -240,6 +276,12 @@ describe('Spiral agent roster persistence', () => {
         .filter((agent) => agent.isGenerated)
         .map((agent) => agent.id),
     ).toEqual(roster!.map((agent) => agent.id));
+    for (const agent of roster!) {
+      const historicalId = agent.id.replace('legacy-revisit-', '');
+      expect(useAgentRegistry.getState().getAgent(agent.id)?.allowedActions).toEqual(
+        useAgentRegistry.getState().getAgent(historicalId)?.allowedActions,
+      );
+    }
     expect(await db.generatedAgents.toArray()).toEqual([]);
   });
 });
