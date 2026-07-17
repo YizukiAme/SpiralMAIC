@@ -1,5 +1,8 @@
 export const CODEX_OAUTH_JSON_MAX_BYTES = 1024 * 1024;
 
+// Scheduler fairness only: chunk count is never a validity or rejection limit.
+const STREAM_FAIRNESS_CHUNK_INTERVAL = 1024;
+
 export type BoundedJsonResult =
   | { ok: true; payload: unknown }
   | { ok: false; reason: 'empty' | 'too-large' | 'invalid-json' };
@@ -17,6 +20,23 @@ function cancelWithoutWaiting(cancel: () => Promise<unknown>): void {
   } catch {
     // Cancellation is best-effort and must never delay or replace a safe result.
   }
+}
+
+function growBuffer(
+  current: Uint8Array,
+  usedBytes: number,
+  requiredBytes: number,
+  maxBytes: number,
+): Uint8Array {
+  const doubledCapacity = current.byteLength === 0 ? 1024 : current.byteLength * 2;
+  const nextCapacity = Math.min(maxBytes, Math.max(requiredBytes, doubledCapacity));
+  const next = new Uint8Array(nextCapacity);
+  next.set(current.subarray(0, usedBytes));
+  return next;
+}
+
+function yieldToMacrotask(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 export async function readBoundedJson(
@@ -43,8 +63,9 @@ export async function readBoundedJson(
     throw new BoundedJsonReadError();
   }
 
-  const chunks: Uint8Array[] = [];
+  let bytes: Uint8Array = new Uint8Array(0);
   let totalBytes = 0;
+  let chunksSinceYield = 0;
   let listeningForAbort = false;
   const cancelReader = () => {
     cancelWithoutWaiting(() => reader.cancel());
@@ -68,12 +89,26 @@ export async function readBoundedJson(
       }
       if (next.done) break;
 
-      totalBytes += next.value.byteLength;
-      if (totalBytes > maxBytes) {
-        cancelReader();
-        return { ok: false, reason: 'too-large' };
+      const chunkBytes = next.value.byteLength;
+      if (chunkBytes > 0) {
+        const requiredBytes = totalBytes + chunkBytes;
+        if (requiredBytes > maxBytes) {
+          cancelReader();
+          return { ok: false, reason: 'too-large' };
+        }
+        if (bytes.byteLength < requiredBytes) {
+          bytes = growBuffer(bytes, totalBytes, requiredBytes, maxBytes);
+        }
+        bytes.set(next.value, totalBytes);
+        totalBytes = requiredBytes;
       }
-      chunks.push(next.value);
+
+      chunksSinceYield += 1;
+      if (chunksSinceYield >= STREAM_FAIRNESS_CHUNK_INTERVAL) {
+        chunksSinceYield = 0;
+        await yieldToMacrotask();
+        if (signal.aborted) return { ok: false, reason: 'empty' };
+      }
     }
   } finally {
     if (listeningForAbort) signal.removeEventListener('abort', cancelReader);
@@ -86,15 +121,8 @@ export async function readBoundedJson(
 
   if (totalBytes === 0) return { ok: false, reason: 'empty' };
 
-  const bytes = new Uint8Array(totalBytes);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-
   try {
-    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, totalBytes));
     return { ok: true, payload: JSON.parse(text) as unknown };
   } catch {
     return { ok: false, reason: 'invalid-json' };
