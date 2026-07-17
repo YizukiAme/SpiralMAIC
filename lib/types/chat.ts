@@ -6,11 +6,18 @@
  */
 
 import type { UIMessage } from 'ai';
+import type { CleanupSource } from '@/lib/playback/auto-resume';
 import type { ThinkingConfig } from './provider';
 
 // Session Types
 export type SessionType = 'qa' | 'discussion' | 'lecture';
-export type SessionStatus = 'idle' | 'active' | 'interrupted' | 'completed' | 'error';
+export type SessionStatus =
+  | 'idle'
+  | 'active'
+  | 'soft-closing'
+  | 'interrupted'
+  | 'completed'
+  | 'error';
 
 /**
  * Metadata attached to chat messages
@@ -52,6 +59,16 @@ export interface ChatSession {
   updatedAt: number;
   sceneId?: string;
   lastActionIndex?: number;
+  endReason?: string;
+  /** Absolute deadline for the client-side soft-closing grace window. */
+  softCloseDeadline?: number;
+  directorState?: DirectorState;
+}
+
+export interface PiSessionBoundaryContext {
+  isFirstRequestInLiveSession: true;
+  previousEndSource?: CleanupSource;
+  sameSceneAsPrevious?: boolean;
 }
 
 /**
@@ -342,9 +359,17 @@ export interface StatelessChatRequest {
       isGenerated?: boolean;
       boundStageId?: string;
     }>;
+    /** Pi PoC: max child agent turns in one server-side loop. */
+    piMaxAgentTurns?: number;
+    /** Pi PoC: max emitted actions per child agent turn. */
+    piMaxActionsPerAgent?: number;
+    /** Pi PoC: opt in to whiteboard tools; defaults off to keep the first A/B pass comparable. */
+    piEnableWhiteboardTools?: boolean;
   };
   /** Accumulated director state from previous per-agent requests */
   directorState?: DirectorState;
+  /** Pi-only context for the first request in a newly created live UI session. */
+  piSessionBoundary?: PiSessionBoundaryContext;
   /** User profile for personalization */
   userProfile?: {
     nickname?: string;
@@ -414,6 +439,9 @@ export type StatelessEvent =
         totalActions: number;
         totalAgents: number;
         agentHadContent?: boolean;
+        cueUserReceived?: boolean;
+        sessionClosed?: boolean;
+        endReason?: string;
         directorState?: DirectorState;
       };
     }
