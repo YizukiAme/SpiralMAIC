@@ -1907,7 +1907,18 @@
       "generateAnyway": "仍然生成"
     },
     "report": {
+      "overall": "綜合得分",
+      "strong": "掌握穩固",
+      "needsWork": "需要複習",
       "summary": "挑戰總結",
+      "strengths": "做得好的地方",
+      "improvements": "下一步提升",
+      "evidence": "可信依據",
+      "legacyEvidenceUnavailable": "這份舊報告未記錄基於證據的優勢與改進點。",
+      "transcriptEvidence": "來自挑戰對話",
+      "pageEvidence": "第 {{page}} 頁 · {{status}} · {{count}} 次探針",
+      "radarLabel": "挑戰四維表現雷達圖",
+      "radarDescription": "各維度得分：{{scores}}",
       "errors": "事實錯誤",
       "noErrors": "沒有記錄到事實錯誤。",
       "corrected": "已糾正",

@@ -1907,7 +1907,18 @@
       "generateAnyway": "Gerar mesmo assim"
     },
     "report": {
+      "overall": "Pontuação geral",
+      "strong": "Memória consolidada",
+      "needsWork": "Precisa revisar",
       "summary": "Resumo do desafio",
+      "strengths": "O que você fez bem",
+      "improvements": "Próximos avanços",
+      "evidence": "Evidência",
+      "legacyEvidenceUnavailable": "Este relatório antigo não registrou pontos fortes e melhorias com evidências.",
+      "transcriptEvidence": "Da conversa do desafio",
+      "pageEvidence": "Página {{page}} · {{status}} · {{count}} sondagens",
+      "radarLabel": "Radar de desempenho nas quatro dimensões",
+      "radarDescription": "Pontuações por dimensão: {{scores}}",
       "errors": "Erros factuais",
       "noErrors": "Nenhum erro factual foi registrado.",
       "corrected": "Corrigido",

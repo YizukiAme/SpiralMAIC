@@ -1907,7 +1907,18 @@
       "generateAnyway": "그래도 생성"
     },
     "report": {
+      "overall": "종합 점수",
+      "strong": "안정적으로 기억함",
+      "needsWork": "복습 필요",
       "summary": "챌린지 요약",
+      "strengths": "잘한 점",
+      "improvements": "다음 개선점",
+      "evidence": "근거",
+      "legacyEvidenceUnavailable": "이 이전 보고서에는 근거가 연결된 강점과 개선점이 기록되지 않았습니다.",
+      "transcriptEvidence": "챌린지 대화에서",
+      "pageEvidence": "{{page}}페이지 · {{status}} · 탐색 {{count}}회",
+      "radarLabel": "챌린지 4차원 성과 레이더",
+      "radarDescription": "차원별 점수: {{scores}}",
       "errors": "사실 오류",
       "noErrors": "기록된 사실 오류가 없습니다.",
       "corrected": "수정됨",

@@ -20,6 +20,7 @@ import { useI18n } from '@/lib/hooks/use-i18n';
 import { SceneSidebar, type SceneSidebarTailPage } from '@/components/stage/scene-sidebar';
 import { Header } from '@/components/header';
 import { CanvasArea } from '@/components/canvas/canvas-area';
+import type { ClassroomCompleteAction } from '@/components/scene-renderers/classroom-complete';
 import { Roundtable } from '@/components/roundtable';
 import { PlaybackEngine, computePlaybackView, shouldAutoResumeLecture } from '@/lib/playback';
 import type { EngineMode, TriggerEvent, Effect } from '@/lib/playback';
@@ -109,6 +110,7 @@ export interface RevisitPlaybackConfig {
   readonly participants: Participant[];
   readonly headerSlot?: ReactNode;
   readonly canvasOverlay?: ReactNode;
+  readonly completionAction?: ClassroomCompleteAction;
   readonly currentSpeech?: string | null;
   readonly engineMode?: EngineMode;
   readonly isStreaming?: boolean;
@@ -2023,6 +2025,7 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
                   : undefined
               }
               overlay={revisitConfig?.canvasOverlay}
+              completionAction={revisitConfig?.completionAction}
               hidePlaybackControls={Boolean(revisitConfig)}
             />
           </div>

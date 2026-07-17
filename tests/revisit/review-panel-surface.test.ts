@@ -25,6 +25,13 @@ describe('Reverse Challenge low-benefit dialog', () => {
   });
 });
 
+describe('Reverse panel layout regression guard', () => {
+  it('preserves the high-specificity desktop row override and its explanation', () => {
+    expect(reviewPanelSource).toContain('specificity beats md:flex-row');
+    expect(reviewPanelSource).toContain('md:flex-row!');
+  });
+});
+
 describe('Reverse history card interaction', () => {
   it('selects Reverse reports on hover and opens them on click', () => {
     const cardSource = reviewPanelSource.slice(

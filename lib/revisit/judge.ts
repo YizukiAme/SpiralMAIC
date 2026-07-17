@@ -5,7 +5,10 @@ import type {
   RevisitFactualError,
   RevisitJudgeReport,
   RevisitPageReport,
+  RevisitReportCitation,
+  RevisitReportFinding,
 } from '@/lib/revisit/types';
+import type { RevisitMessage } from '@/lib/revisit/session';
 
 const DIMENSION_WEIGHTS: Record<RevisitDimension, number> = {
   clarity: 0.25,
@@ -71,6 +74,19 @@ interface RawConceptScore {
   notes?: unknown;
 }
 
+interface RawReportCitation {
+  kind?: unknown;
+  sourceId?: unknown;
+}
+
+interface RawReportFinding {
+  title?: unknown;
+  feedback?: unknown;
+  dimension?: unknown;
+  conceptIds?: unknown;
+  citations?: unknown;
+}
+
 interface RawJudgeReport {
   attemptId?: unknown;
   stageId?: unknown;
@@ -80,10 +96,14 @@ interface RawJudgeReport {
   conceptScores?: RawConceptScore[];
   errors?: Array<Partial<RevisitFactualError>>;
   pageReports?: Array<Partial<RevisitPageReport>>;
+  strengths?: RawReportFinding[];
+  improvements?: RawReportFinding[];
 }
 
 interface NormalizeJudgeReportOptions {
   expectedConceptIds?: string[];
+  transcript?: RevisitMessage[];
+  pageReports?: RevisitPageReport[];
 }
 
 const REQUIRED_DIMENSIONS: RevisitDimension[] = [
@@ -108,6 +128,110 @@ function assertDimensionScores(
 
 function stableId(prefix: string, index: number): string {
   return `${prefix}-${String(index + 1).padStart(2, '0')}`;
+}
+
+function normalizeTranscriptExcerpt(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().slice(0, 240);
+}
+
+function normalizeFindings(
+  rawFindings: RawReportFinding[] | undefined,
+  category: 'strength' | 'improvement',
+  attemptId: string,
+  options: NormalizeJudgeReportOptions,
+): RevisitReportFinding[] {
+  if (!Array.isArray(rawFindings) || rawFindings.length === 0) {
+    throw new Error(`Judge report is missing ${category}s`);
+  }
+
+  const expectedConceptIds = new Set(options.expectedConceptIds ?? []);
+  const transcriptById = new Map(
+    (options.transcript ?? []).map((message) => [message.id, message] as const),
+  );
+  const pageReportById = new Map(
+    (options.pageReports ?? []).map((pageReport) => [pageReport.pageId, pageReport] as const),
+  );
+
+  return rawFindings
+    .map((finding, findingIndex) => {
+      const title = typeof finding.title === 'string' ? finding.title.trim() : '';
+      const feedback = typeof finding.feedback === 'string' ? finding.feedback.trim() : '';
+      if (!title) throw new Error(`Judge report ${category} ${findingIndex + 1} is missing title`);
+      if (!feedback) {
+        throw new Error(`Judge report ${category} ${findingIndex + 1} is missing feedback`);
+      }
+      if (
+        typeof finding.dimension !== 'string' ||
+        !REQUIRED_DIMENSIONS.includes(finding.dimension as RevisitDimension)
+      ) {
+        throw new Error(`Judge report ${category} ${findingIndex + 1} has unknown dimension`);
+      }
+
+      const conceptIds = Array.isArray(finding.conceptIds)
+        ? finding.conceptIds
+            .map((conceptId) => (typeof conceptId === 'string' ? conceptId.trim() : ''))
+            .filter(Boolean)
+        : [];
+      if (conceptIds.length === 0) {
+        throw new Error(`Judge report ${category} ${findingIndex + 1} is missing concept ids`);
+      }
+      for (const conceptId of conceptIds) {
+        if (!expectedConceptIds.has(conceptId)) {
+          throw new Error(`Judge report ${category} references unknown concept ${conceptId}`);
+        }
+      }
+
+      const rawCitations = Array.isArray(finding.citations)
+        ? (finding.citations as RawReportCitation[])
+        : [];
+      if (rawCitations.length === 0) {
+        throw new Error(`Judge report ${category} ${findingIndex + 1} is missing citations`);
+      }
+      const citations: RevisitReportCitation[] = rawCitations.map((citation) => {
+        const sourceId = typeof citation.sourceId === 'string' ? citation.sourceId.trim() : '';
+        if (!sourceId) {
+          throw new Error(`Judge report ${category} citation is missing source id`);
+        }
+        if (citation.kind === 'transcript') {
+          const message = transcriptById.get(sourceId);
+          if (!message) {
+            throw new Error(`Judge report ${category} references unknown transcript ${sourceId}`);
+          }
+          return {
+            kind: 'transcript',
+            sourceId,
+            excerpt: normalizeTranscriptExcerpt(message.text),
+          };
+        }
+        if (citation.kind === 'pageReport') {
+          const pageReport = pageReportById.get(sourceId);
+          if (!pageReport) {
+            throw new Error(`Judge report ${category} references unknown page report ${sourceId}`);
+          }
+          return {
+            kind: 'pageReport',
+            sourceId,
+            pageId: pageReport.pageId,
+            pageIndex: pageReport.pageIndex,
+            passed: pageReport.passed,
+            probeCount: pageReport.probeCount,
+            conceptIds: [...pageReport.conceptIds],
+            notes: pageReport.notes,
+          };
+        }
+        throw new Error(`Judge report ${category} citation has unknown kind`);
+      });
+
+      return {
+        id: stableId(`${attemptId}:${category}`, findingIndex),
+        title,
+        feedback,
+        dimension: finding.dimension as RevisitDimension,
+        conceptIds: [...new Set(conceptIds)],
+        citations: citations.slice(0, 2),
+      };
+    })
+    .slice(0, 3);
 }
 
 function normalizeErrors(rawErrors: RawJudgeReport['errors'] = []): RevisitFactualError[] {
@@ -177,6 +301,8 @@ export function normalizeJudgeReport(
   const errors = normalizeErrors(raw.errors);
   const overall = computeJudgeQ(raw.dimensions || {}, errors);
   const conceptScores = Array.isArray(raw.conceptScores) ? raw.conceptScores : [];
+  const strengths = normalizeFindings(raw.strengths, 'strength', attemptId, options);
+  const improvements = normalizeFindings(raw.improvements, 'improvement', attemptId, options);
 
   const evidence: ConceptEvidence[] = conceptScores
     .filter((score) => typeof score.conceptId === 'string' && score.conceptId.length > 0)
@@ -213,6 +339,12 @@ export function normalizeJudgeReport(
     q: overall.q,
     errors,
     evidence,
-    pageReports: Array.isArray(raw.pageReports) ? (raw.pageReports as RevisitPageReport[]) : [],
+    pageReports: (options.pageReports ?? []).map((pageReport) => ({
+      ...pageReport,
+      conceptIds: [...pageReport.conceptIds],
+    })),
+    findingsVersion: 1,
+    strengths,
+    improvements,
   };
 }

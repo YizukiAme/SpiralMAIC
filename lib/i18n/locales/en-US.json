@@ -1907,7 +1907,18 @@
       "generateAnyway": "Generate anyway"
     },
     "report": {
+      "overall": "Overall score",
+      "strong": "Strong recall",
+      "needsWork": "Needs review",
       "summary": "Challenge summary",
+      "strengths": "What you did well",
+      "improvements": "Next improvements",
+      "evidence": "Evidence",
+      "legacyEvidenceUnavailable": "This older report did not record evidence-backed strengths or improvements.",
+      "transcriptEvidence": "From the challenge conversation",
+      "pageEvidence": "Page {{page}} · {{status}} · {{count}} probes",
+      "radarLabel": "Four-dimension challenge performance radar",
+      "radarDescription": "Scores by dimension: {{scores}}",
       "errors": "Factual errors",
       "noErrors": "No factual errors were recorded.",
       "corrected": "Corrected",
