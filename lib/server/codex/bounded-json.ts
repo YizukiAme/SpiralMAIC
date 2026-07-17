@@ -45,11 +45,13 @@ export async function readBoundedJson(
   maxBytes = CODEX_OAUTH_JSON_MAX_BYTES,
 ): Promise<BoundedJsonResult> {
   const declaredLengthHeader = response.headers.get('content-length');
-  const declaredLength =
-    declaredLengthHeader !== null && /^[0-9]+$/.test(declaredLengthHeader)
-      ? Number(declaredLengthHeader)
-      : Number.NaN;
-  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+  const hasDecimalDeclaredLength =
+    declaredLengthHeader !== null && /^[0-9]+$/.test(declaredLengthHeader);
+  const declaredLength = hasDecimalDeclaredLength ? Number(declaredLengthHeader) : undefined;
+  if (
+    declaredLength !== undefined &&
+    (!Number.isSafeInteger(declaredLength) || declaredLength > maxBytes)
+  ) {
     if (response.body) cancelWithoutWaiting(() => response.body!.cancel());
     return { ok: false, reason: 'too-large' };
   }
