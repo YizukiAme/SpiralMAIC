@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { CODEX_RESPONSE_LIMITS } from '@/lib/server/codex/response-guard';
 import {
   CODEX_RESPONSES_ENDPOINT,
   CodexResponsesTransportError,
@@ -46,6 +47,62 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+function controllableByteStream() {
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  let cancelled = false;
+  const cancel = vi.fn(() => {
+    cancelled = true;
+  });
+  const stream = new ReadableStream<Uint8Array>({
+    start(nextController) {
+      controller = nextController;
+    },
+    cancel,
+  });
+
+  return {
+    cancel,
+    close() {
+      if (!cancelled) controller.close();
+    },
+    enqueue(chunk: Uint8Array) {
+      if (!cancelled) controller.enqueue(chunk);
+    },
+    error(error: unknown) {
+      if (!cancelled) controller.error(error);
+    },
+    stream,
+  };
+}
+
+function managedCredentials(
+  accessToken = 'managed-access-token',
+  accountId = 'managed-account-id',
+): CodexOAuthCredentials {
+  return {
+    version: 1,
+    accessToken,
+    refreshToken: 'managed-refresh-token',
+    expiresAt: NOW + 3_600_000,
+    accountId,
+    updatedAt: NOW,
+  };
+}
+
+function createManagedProvider(
+  tokenExchangeFetch: NonNullable<
+    ConstructorParameters<typeof ManagedCodexTokenProvider>[0]['tokenExchangeFetch']
+  > = vi.fn(async () => new Response(null, { status: 200 })),
+) {
+  const vault = new MemoryVault(managedCredentials());
+  const provider = new ManagedCodexTokenProvider({
+    vault,
+    clock: { now: () => NOW },
+    tokenExchangeFetch,
+  });
+  return { provider, tokenExchangeFetch, vault };
+}
+
 function createTokenProvider() {
   return {
     getValidCredentials: vi.fn(async () => ({
@@ -69,6 +126,11 @@ function successfulResponse(): Response {
     headers: { 'content-type': 'application/json' },
   });
 }
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 describe('Codex Responses transport boundary', () => {
   it.each([
@@ -487,13 +549,14 @@ describe('Codex Responses transport failures', () => {
   });
 
   it('refreshes and replays exactly once after a 401', async () => {
-    const getValidCredentials = vi
-      .fn<CodexTokenProvider['getValidCredentials']>()
-      .mockResolvedValueOnce({ accessToken: 'old-token', accountId: 'account-id' });
-    const refreshIfCurrent = vi.fn(async () => ({
-      accessToken: 'new-token',
-      accountId: 'account-id',
+    let current = { accessToken: 'old-token', accountId: 'account-id' };
+    const getValidCredentials = vi.fn<CodexTokenProvider['getValidCredentials']>(async () => ({
+      ...current,
     }));
+    const refreshIfCurrent = vi.fn(async () => {
+      current = { accessToken: 'new-token', accountId: 'account-id' };
+      return { ...current };
+    });
     const upstreamFetch = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(new Response('secret upstream body', { status: 401 }))
@@ -508,7 +571,7 @@ describe('Codex Responses transport failures', () => {
       transport(CODEX_RESPONSES_ENDPOINT, { method: 'POST', body: '{}' }),
     ).resolves.toMatchObject({ status: 200 });
 
-    expect(getValidCredentials).toHaveBeenCalledTimes(1);
+    expect(getValidCredentials).toHaveBeenCalledTimes(7);
     expect(getValidCredentials).toHaveBeenCalledWith();
     expect(refreshIfCurrent).toHaveBeenCalledOnce();
     expect(refreshIfCurrent).toHaveBeenCalledWith({
@@ -554,7 +617,7 @@ describe('Codex Responses transport failures', () => {
     expect(String(error)).not.toContain('upstream-secret-token');
     expect(String(error)).not.toContain('account-id');
     expect(upstreamFetch).toHaveBeenCalledTimes(status === 401 ? 2 : 1);
-    expect(tokenProvider.getValidCredentials).toHaveBeenCalledTimes(1);
+    expect(tokenProvider.getValidCredentials).toHaveBeenCalledTimes(status === 401 ? 7 : 3);
     expect(tokenProvider.refreshIfCurrent).toHaveBeenCalledTimes(status === 401 ? 1 : 0);
   });
 
@@ -581,5 +644,236 @@ describe('Codex Responses transport failures', () => {
     expect(String(error)).not.toContain('account-id');
     for (const spy of consoleSpies) expect(spy).not.toHaveBeenCalled();
     for (const spy of consoleSpies) spy.mockRestore();
+  });
+});
+
+describe('Codex Responses guarded lifecycle', () => {
+  it('cancels a successful response when logout happens after headers', async () => {
+    const { provider } = createManagedProvider();
+    const source = controllableByteStream();
+    const transport = createCodexResponsesTransport({
+      tokenProvider: provider,
+      upstreamFetch: vi.fn(async () => new Response(source.stream)),
+    });
+
+    const response = await transport(CODEX_RESPONSES_ENDPOINT, {
+      method: 'POST',
+      body: '{}',
+    });
+    const reader = response.body!.getReader();
+    const read = reader.read();
+    const logout = provider.logout();
+    source.enqueue(Uint8Array.of(1));
+
+    await expect(read).rejects.toMatchObject({ code: 'AUTH_REQUIRED' });
+    await logout;
+    expect(source.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels a late response when fetch ignores lifecycle abort', async () => {
+    const { provider } = createManagedProvider();
+    const late = deferred<Response>();
+    const source = controllableByteStream();
+    const upstreamFetch = vi.fn<typeof fetch>(() => late.promise);
+    const transport = createCodexResponsesTransport({ tokenProvider: provider, upstreamFetch });
+
+    const request = transport(CODEX_RESPONSES_ENDPOINT, { method: 'POST', body: '{}' });
+    await vi.waitFor(() => expect(upstreamFetch).toHaveBeenCalledTimes(1));
+    const logout = provider.logout();
+    late.resolve(new Response(source.stream));
+
+    await expect(request).rejects.toMatchObject({ code: 'AUTH_REQUIRED' });
+    await vi.waitFor(() => expect(source.cancel).toHaveBeenCalledTimes(1));
+    await logout;
+  });
+
+  it('disposes the first 401 guard before conditional refresh', async () => {
+    const caller = new AbortController();
+    const remove = vi.spyOn(caller.signal, 'removeEventListener');
+    let current = { accessToken: 'old-token', accountId: 'account-id' };
+    const tokenProvider = {
+      getValidCredentials: vi.fn(async () => ({ ...current })),
+      refreshIfCurrent: vi.fn(async () => {
+        expect(remove).toHaveBeenCalledTimes(1);
+        current = { accessToken: 'new-token', accountId: 'account-id' };
+        return { ...current };
+      }),
+    };
+    const first = controllableByteStream();
+    const second = controllableByteStream();
+    const upstreamFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(first.stream, { status: 401 }))
+      .mockResolvedValueOnce(new Response(second.stream));
+    const transport = createCodexResponsesTransport({ tokenProvider, upstreamFetch });
+
+    const response = await transport(CODEX_RESPONSES_ENDPOINT, {
+      body: '{}',
+      method: 'POST',
+      signal: caller.signal,
+    });
+
+    expect(response.status).toBe(200);
+    expect(first.cancel).toHaveBeenCalledTimes(1);
+    expect(remove).toHaveBeenCalledTimes(1);
+    await response.body!.cancel();
+    expect(remove).toHaveBeenCalledTimes(2);
+    expect(second.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves replay body and session while later logout cancels the replay body', async () => {
+    const tokenExchangeFetch = vi
+      .fn<
+        NonNullable<
+          ConstructorParameters<typeof ManagedCodexTokenProvider>[0]['tokenExchangeFetch']
+        >
+      >()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            access_token: unsignedJwt({ chatgpt_account_id: 'managed-account-id' }),
+            refresh_token: 'rotated-refresh-token',
+            expires_in: 3600,
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValue(new Response(null, { status: 200 }));
+    const { provider } = createManagedProvider(tokenExchangeFetch);
+    const first = controllableByteStream();
+    const second = controllableByteStream();
+    const upstreamFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(first.stream, { status: 401 }))
+      .mockResolvedValueOnce(new Response(second.stream));
+    const transport = createCodexResponsesTransport({ tokenProvider: provider, upstreamFetch });
+
+    const response = await transport(CODEX_RESPONSES_ENDPOINT, {
+      body: '{"input":[]}',
+      method: 'POST',
+    });
+    const firstInit = upstreamFetch.mock.calls[0]?.[1];
+    const secondInit = upstreamFetch.mock.calls[1]?.[1];
+    expect(secondInit?.body).toBe(firstInit?.body);
+    expect(new Headers(secondInit?.headers).get('session-id')).toBe(
+      new Headers(firstInit?.headers).get('session-id'),
+    );
+    expect(first.cancel).toHaveBeenCalledTimes(1);
+
+    const reader = response.body!.getReader();
+    const read = reader.read();
+    const logout = provider.logout();
+    second.enqueue(Uint8Array.of(1));
+
+    await expect(read).rejects.toMatchObject({ code: 'AUTH_REQUIRED' });
+    await logout;
+    expect(second.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('shares one absolute deadline across the first attempt and 401 replay', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    let current = { accessToken: 'old-token', accountId: 'account-id' };
+    const tokenProvider = {
+      getValidCredentials: vi.fn(async () => ({ ...current })),
+      refreshIfCurrent: vi.fn(async () => {
+        current = { accessToken: 'new-token', accountId: 'account-id' };
+        return { ...current };
+      }),
+    };
+    const firstResponse = deferred<Response>();
+    const replayResponse = deferred<Response>();
+    const replayStarted = deferred<void>();
+    const first = controllableByteStream();
+    const lateReplay = controllableByteStream();
+    const upstreamFetch = vi
+      .fn<typeof fetch>()
+      .mockImplementationOnce(() => firstResponse.promise)
+      .mockImplementationOnce(() => {
+        replayStarted.resolve();
+        return replayResponse.promise;
+      });
+    const transport = createCodexResponsesTransport({ tokenProvider, upstreamFetch });
+    let caught: unknown;
+    const request = transport(CODEX_RESPONSES_ENDPOINT, { body: '{}', method: 'POST' });
+    void request.then(
+      () => undefined,
+      (error: unknown) => {
+        caught = error;
+      },
+    );
+
+    await vi.advanceTimersByTimeAsync(CODEX_RESPONSE_LIMITS.totalTimeoutMs - 1);
+    firstResponse.resolve(new Response(first.stream, { status: 401 }));
+    await replayStarted.promise;
+    expect(upstreamFetch).toHaveBeenCalledTimes(2);
+    expect(first.cancel).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    replayResponse.resolve(new Response(lateReplay.stream));
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await Promise.resolve();
+    }
+
+    expect(caught).toMatchObject({ code: 'UPSTREAM_ERROR' });
+    expect(lateReplay.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('maps an asynchronous response-body read failure through the safe transport error', async () => {
+    const source = controllableByteStream();
+    const transport = createCodexResponsesTransport({
+      tokenProvider: createTokenProvider(),
+      upstreamFetch: vi.fn(async () => new Response(source.stream)),
+    });
+    const response = await transport(CODEX_RESPONSES_ENDPOINT, {
+      body: '{}',
+      method: 'POST',
+    });
+    const reader = response.body!.getReader();
+
+    source.error(new Error('upstream-secret-body access-token account-id'));
+    const error = await reader.read().catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(CodexResponsesTransportError);
+    expect(error).toMatchObject({ code: 'UPSTREAM_ERROR' });
+    expect(String(error)).not.toContain('upstream-secret-body');
+    expect(String(error)).not.toContain('access-token');
+    expect(String(error)).not.toContain('account-id');
+  });
+
+  it('maps the raw body limit to a safe error without exposing body or credentials', async () => {
+    const cancel = vi.fn();
+    const oversized = new Uint8Array(CODEX_RESPONSE_LIMITS.maxBytes + 1);
+    oversized.set(new TextEncoder().encode('upstream-secret-body'));
+    const transport = createCodexResponsesTransport({
+      tokenProvider: createTokenProvider(),
+      upstreamFetch: vi.fn(
+        async () =>
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(oversized);
+              },
+              cancel,
+            }),
+          ),
+      ),
+    });
+    const response = await transport(CODEX_RESPONSES_ENDPOINT, {
+      body: '{}',
+      method: 'POST',
+    });
+
+    const error = await response
+      .body!.getReader()
+      .read()
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(CodexResponsesTransportError);
+    expect(error).toMatchObject({ code: 'UPSTREAM_ERROR' });
+    expect(String(error)).not.toContain('upstream-secret-body');
+    expect(String(error)).not.toContain('access-token');
+    expect(String(error)).not.toContain('account-id');
+    expect(cancel).toHaveBeenCalledTimes(1);
   });
 });
