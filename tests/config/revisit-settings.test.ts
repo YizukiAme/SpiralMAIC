@@ -31,27 +31,35 @@ describe('SpiralMAIC revisit settings', () => {
     expect(store.getState()).toMatchObject({
       reverseChallengeEnabled: false,
       stableSuccessesRequired: 2,
-      activeRevisitDemoSessionId: null,
-      revisitVirtualClockOffsetHours: 0,
+      activeRevisitDemoSessionByStage: {},
+      revisitVirtualClockOffsetHoursByStage: {},
       demoGateSkipEnabled: false,
     });
   });
 
-  it('clamps and persists revisit setting changes', async () => {
+  it('clamps and persists independent per-course revisit setting changes', async () => {
     const store = await freshStore();
     const state = store.getState();
 
     state.setReverseChallengeEnabled(false);
     state.setStableSuccessesRequired(0);
-    state.setActiveRevisitDemoSession('demo-1');
-    state.setRevisitVirtualClockOffsetHours(200);
+    state.setActiveRevisitDemoSession('stage-1', 'demo-1');
+    state.setRevisitVirtualClockOffsetHours('stage-1', 200);
+    state.setActiveRevisitDemoSession('stage-2', 'demo-2');
+    state.setRevisitVirtualClockOffsetHours('stage-2', 6);
     state.setDemoGateSkipEnabled(true);
 
     expect(store.getState()).toMatchObject({
       reverseChallengeEnabled: false,
       stableSuccessesRequired: 1,
-      activeRevisitDemoSessionId: 'demo-1',
-      revisitVirtualClockOffsetHours: 168,
+      activeRevisitDemoSessionByStage: {
+        'stage-1': 'demo-1',
+        'stage-2': 'demo-2',
+      },
+      revisitVirtualClockOffsetHoursByStage: {
+        'stage-1': 168,
+        'stage-2': 6,
+      },
       demoGateSkipEnabled: true,
     });
 
@@ -59,23 +67,33 @@ describe('SpiralMAIC revisit settings', () => {
     expect(persisted.state).toMatchObject({
       reverseChallengeEnabled: false,
       stableSuccessesRequired: 1,
-      activeRevisitDemoSessionId: 'demo-1',
-      revisitVirtualClockOffsetHours: 168,
+      activeRevisitDemoSessionByStage: {
+        'stage-1': 'demo-1',
+        'stage-2': 'demo-2',
+      },
+      revisitVirtualClockOffsetHoursByStage: {
+        'stage-1': 168,
+        'stage-2': 6,
+      },
       demoGateSkipEnabled: true,
     });
   });
 
-  it('drops the retired global forgetting controls during settings migration', async () => {
+  it('drops retired global clock and forgetting controls during settings migration', async () => {
     const store = await freshStore({
       forgettingSpeedMultiplier: 60,
       demoAcceleratedClockEnabled: true,
+      activeRevisitDemoSessionId: 'legacy-demo',
+      revisitVirtualClockOffsetHours: 72,
     });
 
     expect(store.getState()).not.toHaveProperty('forgettingSpeedMultiplier');
     expect(store.getState()).not.toHaveProperty('demoAcceleratedClockEnabled');
+    expect(store.getState()).not.toHaveProperty('activeRevisitDemoSessionId');
+    expect(store.getState()).not.toHaveProperty('revisitVirtualClockOffsetHours');
     expect(store.getState()).toMatchObject({
-      activeRevisitDemoSessionId: null,
-      revisitVirtualClockOffsetHours: 0,
+      activeRevisitDemoSessionByStage: {},
+      revisitVirtualClockOffsetHoursByStage: {},
     });
   });
 

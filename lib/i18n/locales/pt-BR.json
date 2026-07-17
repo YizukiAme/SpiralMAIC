@@ -1715,7 +1715,7 @@
       "acceleratedClock": "Relógio acelerado",
       "gateSkip": "Pular travas de página",
       "virtualClock": "Relógio virtual",
-      "virtualClockDetail": "O primeiro salto copia todos os dados Spiral; os registros formais não são alterados.",
+      "virtualClockDetail": "O primeiro salto copia apenas os dados Spiral deste curso; os registros formais não são alterados.",
       "simulatedTime": "Hora atual",
       "realTime": "Hora real do sistema",
       "demoOffset": "O tempo Demo está {{hours}} horas adiantado",
@@ -1926,7 +1926,7 @@
     },
     "demo": {
       "title": "Caixa Demo",
-      "subtitle": "Veja lotes de tempo simulado salvos separadamente.",
+      "subtitle": "Veja lotes de tempo simulado salvos separadamente para este curso.",
       "batches": "Lotes de demonstração",
       "isolated": "Cada lote usa uma cópia isolada e nunca altera os registros formais.",
       "empty": "Nenhum dado de demonstração",
@@ -1935,8 +1935,8 @@
       "batchName": "Demo · {{date}}",
       "counts": "Reverse {{attempts}} · relatórios {{reports}} · materiais {{artifacts}} · prática {{practice}}",
       "clear": "Limpar dados Demo",
-      "clearTitle": "Limpar todos os dados Demo?",
-      "clearDescription": "Todos os lotes, desafios, relatórios, materiais e práticas da demonstração serão excluídos permanentemente."
+      "clearTitle": "Limpar os dados Demo deste curso?",
+      "clearDescription": "Todos os lotes, desafios, relatórios, materiais e práticas deste curso serão excluídos permanentemente."
     },
     "studio": {
       "title": "Estúdio de materiais de estudo",

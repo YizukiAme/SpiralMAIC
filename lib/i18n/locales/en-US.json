@@ -1715,7 +1715,7 @@
       "acceleratedClock": "Accelerated clock",
       "gateSkip": "Skip page gates",
       "virtualClock": "Virtual clock",
-      "virtualClockDetail": "The first time jump copies all Spiral data. Simulated actions never change formal records.",
+      "virtualClockDetail": "The first time jump copies only this course's Spiral data. Simulated actions never change formal records.",
       "simulatedTime": "Current time",
       "realTime": "Real system time",
       "demoOffset": "Demo time is {{hours}} hours ahead",
@@ -1926,7 +1926,7 @@
     },
     "demo": {
       "title": "Demo box",
-      "subtitle": "Review independently saved simulated-time batches.",
+      "subtitle": "Review independently saved simulated-time batches for this course.",
       "batches": "Demo batches",
       "isolated": "Each batch uses an isolated data copy and never writes to formal learning records.",
       "empty": "No demo data yet",
@@ -1935,8 +1935,8 @@
       "batchName": "Demo · {{date}}",
       "counts": "Reverse {{attempts}} · reports {{reports}} · materials {{artifacts}} · practice {{practice}}",
       "clear": "Clear demo data",
-      "clearTitle": "Clear all demo data?",
-      "clearDescription": "Every demo batch and its challenges, reports, materials, and practice will be permanently deleted."
+      "clearTitle": "Clear this course's demo data?",
+      "clearDescription": "Every demo batch for this course, including its challenges, reports, materials, and practice, will be permanently deleted."
     },
     "studio": {
       "title": "Study materials studio",
