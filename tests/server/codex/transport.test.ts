@@ -75,6 +75,14 @@ function controllableByteStream() {
   };
 }
 
+function neverSettlingCancelByteStream() {
+  const cancel = vi.fn(() => new Promise<void>(() => undefined));
+  const stream = new ReadableStream<Uint8Array>({
+    cancel,
+  });
+  return { cancel, stream };
+}
+
 function managedCredentials(
   accessToken = 'managed-access-token',
   accountId = 'managed-account-id',
@@ -406,6 +414,156 @@ describe('Codex Responses transport boundary', () => {
 });
 
 describe('Codex Responses transport failures', () => {
+  it('does not start credential acquisition for an already-cancelled caller', async () => {
+    const caller = new AbortController();
+    caller.abort('already-cancelled-secret');
+    const tokenProvider = createTokenProvider();
+    const upstreamFetch = vi.fn<typeof fetch>();
+    const transport = createCodexResponsesTransport({ tokenProvider, upstreamFetch });
+
+    await expect(
+      transport(CODEX_RESPONSES_ENDPOINT, {
+        body: '{}',
+        method: 'POST',
+        signal: caller.signal,
+      }),
+    ).rejects.toMatchObject({ code: 'NETWORK_ERROR' });
+
+    expect(tokenProvider.getValidCredentials).not.toHaveBeenCalled();
+    expect(upstreamFetch).not.toHaveBeenCalled();
+  });
+
+  it('does not fetch when request-header construction synchronously cancels the caller', async () => {
+    const caller = new AbortController();
+    const headers: Record<string, string> = {};
+    Object.defineProperty(headers, 'authorization', {
+      enumerable: true,
+      get() {
+        caller.abort('header-getter-secret');
+        return 'Bearer caller-value';
+      },
+    });
+    const upstreamFetch = vi.fn<typeof fetch>();
+    const transport = createCodexResponsesTransport({
+      tokenProvider: createTokenProvider(),
+      upstreamFetch,
+    });
+
+    await expect(
+      transport(CODEX_RESPONSES_ENDPOINT, {
+        body: '{}',
+        headers,
+        method: 'POST',
+        signal: caller.signal,
+      }),
+    ).rejects.toMatchObject({ code: 'NETWORK_ERROR' });
+
+    expect(upstreamFetch).not.toHaveBeenCalled();
+  });
+
+  it('honors caller cancellation while initial credentials are still pending', async () => {
+    const caller = new AbortController();
+    const tokenProvider: CodexTokenProvider = {
+      getValidCredentials: vi.fn(
+        () => new Promise<{ accessToken: string; accountId: string }>(() => undefined),
+      ),
+    };
+    const upstreamFetch = vi.fn<typeof fetch>();
+    const transport = createCodexResponsesTransport({ tokenProvider, upstreamFetch });
+    const request = transport(CODEX_RESPONSES_ENDPOINT, {
+      body: '{}',
+      method: 'POST',
+      signal: caller.signal,
+    });
+
+    caller.abort('caller-secret');
+    const outcome = await Promise.race([
+      request.catch((error: unknown) => error),
+      new Promise<'timed-out'>((resolve) => setTimeout(() => resolve('timed-out'), 50)),
+    ]);
+
+    expect(outcome).not.toBe('timed-out');
+    expect(outcome).toMatchObject({ code: 'NETWORK_ERROR' });
+    expect(String(outcome)).not.toContain('caller-secret');
+    expect(upstreamFetch).not.toHaveBeenCalled();
+  });
+
+  it('keeps the absolute deadline active while initial credentials are pending', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    let caught: unknown;
+    const tokenProvider: CodexTokenProvider = {
+      getValidCredentials: vi.fn(
+        () => new Promise<{ accessToken: string; accountId: string }>(() => undefined),
+      ),
+    };
+    const transport = createCodexResponsesTransport({
+      tokenProvider,
+      upstreamFetch: vi.fn<typeof fetch>(),
+    });
+    const request = transport(CODEX_RESPONSES_ENDPOINT, { body: '{}', method: 'POST' });
+    void request.catch((error: unknown) => {
+      caught = error;
+    });
+
+    await vi.advanceTimersByTimeAsync(CODEX_RESPONSE_LIMITS.totalTimeoutMs);
+    await Promise.resolve();
+
+    expect(caught).toMatchObject({ code: 'UPSTREAM_ERROR' });
+  });
+
+  it('honors caller cancellation while pre-send credential currentness is pending', async () => {
+    const caller = new AbortController();
+    const currentnessStarted = deferred<void>();
+    const credentials = { accessToken: 'access-token', accountId: 'account-id' };
+    const tokenProvider: CodexTokenProvider = {
+      getValidCredentials: vi
+        .fn()
+        .mockResolvedValueOnce(credentials)
+        .mockImplementationOnce(() => {
+          currentnessStarted.resolve();
+          return new Promise<{ accessToken: string; accountId: string }>(() => undefined);
+        }),
+    };
+    const upstreamFetch = vi.fn<typeof fetch>();
+    const transport = createCodexResponsesTransport({ tokenProvider, upstreamFetch });
+    const request = transport(CODEX_RESPONSES_ENDPOINT, {
+      body: '{}',
+      method: 'POST',
+      signal: caller.signal,
+    });
+
+    await currentnessStarted.promise;
+    caller.abort('pre-send-secret');
+
+    await expect(request).rejects.toMatchObject({ code: 'NETWORK_ERROR' });
+    expect(upstreamFetch).not.toHaveBeenCalled();
+  });
+
+  it('does not start fetch when pre-send currentness crosses the absolute deadline', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const credentials = { accessToken: 'access-token', accountId: 'account-id' };
+    let credentialRead = 0;
+    const tokenProvider: CodexTokenProvider = {
+      getValidCredentials: vi.fn(() => {
+        credentialRead += 1;
+        if (credentialRead === 2) {
+          vi.setSystemTime(NOW + CODEX_RESPONSE_LIMITS.totalTimeoutMs);
+        }
+        return Promise.resolve(credentials);
+      }),
+    };
+    const upstreamFetch = vi.fn<typeof fetch>(async () => new Response('{}'));
+    const transport = createCodexResponsesTransport({ tokenProvider, upstreamFetch });
+
+    await expect(
+      transport(CODEX_RESPONSES_ENDPOINT, { body: '{}', method: 'POST' }),
+    ).rejects.toMatchObject({ code: 'UPSTREAM_ERROR' });
+
+    expect(upstreamFetch).not.toHaveBeenCalled();
+  });
+
   it('does not send an account-A capability after credentials switch to account B', async () => {
     const accountA = { accessToken: 'account-a-token', accountId: 'account-a' };
     const tokenProvider = {
@@ -635,6 +793,25 @@ describe('Codex Responses transport failures', () => {
     expect(tokenProvider.refreshIfCurrent).toHaveBeenCalledTimes(status === 401 ? 1 : 0);
   });
 
+  it('classifies a non-success response without waiting for a hung body cancellation', async () => {
+    const source = neverSettlingCancelByteStream();
+    const transport = createCodexResponsesTransport({
+      tokenProvider: createTokenProvider(),
+      upstreamFetch: vi.fn(async () => new Response(source.stream, { status: 403 })),
+    });
+
+    const outcome = await Promise.race([
+      transport(CODEX_RESPONSES_ENDPOINT, { body: '{}', method: 'POST' }).catch(
+        (error: unknown) => error,
+      ),
+      new Promise<'timed-out'>((resolve) => setTimeout(() => resolve('timed-out'), 50)),
+    ]);
+
+    expect(outcome).not.toBe('timed-out');
+    expect(outcome).toMatchObject({ code: 'WORKSPACE_FORBIDDEN', upstreamStatus: 403 });
+    expect(source.cancel).toHaveBeenCalledTimes(1);
+  });
+
   it('maps network failures without logging credentials', async () => {
     const consoleSpies = [
       vi.spyOn(console, 'error').mockImplementation(() => undefined),
@@ -662,6 +839,231 @@ describe('Codex Responses transport failures', () => {
 });
 
 describe('Codex Responses guarded lifecycle', () => {
+  it('does not start a 401 refresh after first-body cleanup synchronously cancels the caller', async () => {
+    const caller = new AbortController();
+    const tokenProvider = createTokenProvider();
+    const first = new ReadableStream<Uint8Array>({
+      cancel() {
+        caller.abort('first-body-cancel-secret');
+      },
+    });
+    const upstreamFetch = vi.fn<typeof fetch>(async () => new Response(first, { status: 401 }));
+    const transport = createCodexResponsesTransport({ tokenProvider, upstreamFetch });
+
+    await expect(
+      transport(CODEX_RESPONSES_ENDPOINT, {
+        body: '{}',
+        method: 'POST',
+        signal: caller.signal,
+      }),
+    ).rejects.toMatchObject({ code: 'NETWORK_ERROR' });
+
+    expect(tokenProvider.refreshIfCurrent).not.toHaveBeenCalled();
+    expect(upstreamFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('replays a 401 without waiting for the first body cancellation to settle', async () => {
+    let current = { accessToken: 'old-token', accountId: 'account-id' };
+    const tokenProvider = {
+      getValidCredentials: vi.fn(async () => ({ ...current })),
+      refreshIfCurrent: vi.fn(async () => {
+        current = { accessToken: 'new-token', accountId: 'account-id' };
+        return { ...current };
+      }),
+    };
+    const first = neverSettlingCancelByteStream();
+    const upstreamFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(first.stream, { status: 401 }))
+      .mockResolvedValueOnce(new Response('{}'));
+    const transport = createCodexResponsesTransport({ tokenProvider, upstreamFetch });
+
+    const outcome = await Promise.race([
+      transport(CODEX_RESPONSES_ENDPOINT, { body: '{"input":[]}', method: 'POST' }),
+      new Promise<'timed-out'>((resolve) => setTimeout(() => resolve('timed-out'), 50)),
+    ]);
+
+    expect(outcome).not.toBe('timed-out');
+    expect(outcome).toBeInstanceOf(Response);
+    expect((outcome as Response).status).toBe(200);
+    expect(first.cancel).toHaveBeenCalledTimes(1);
+    expect(upstreamFetch).toHaveBeenCalledTimes(2);
+    expect(upstreamFetch.mock.calls[1]?.[1]?.body).toBe(upstreamFetch.mock.calls[0]?.[1]?.body);
+    expect(new Headers(upstreamFetch.mock.calls[1]?.[1]?.headers).get('session-id')).toBe(
+      new Headers(upstreamFetch.mock.calls[0]?.[1]?.headers).get('session-id'),
+    );
+  });
+
+  it('honors caller cancellation while a 401 credential refresh is pending', async () => {
+    const caller = new AbortController();
+    const refreshStarted = deferred<void>();
+    const tokenProvider = {
+      getValidCredentials: vi.fn(async () => ({
+        accessToken: 'old-token',
+        accountId: 'account-id',
+      })),
+      refreshIfCurrent: vi.fn(() => {
+        refreshStarted.resolve();
+        return new Promise<{ accessToken: string; accountId: string }>(() => undefined);
+      }),
+    };
+    const upstreamFetch = vi.fn<typeof fetch>(async () => new Response(null, { status: 401 }));
+    const transport = createCodexResponsesTransport({ tokenProvider, upstreamFetch });
+    const request = transport(CODEX_RESPONSES_ENDPOINT, {
+      body: '{}',
+      method: 'POST',
+      signal: caller.signal,
+    });
+
+    await refreshStarted.promise;
+    caller.abort('refresh-caller-secret');
+    const outcome = await Promise.race([
+      request.catch((error: unknown) => error),
+      new Promise<'timed-out'>((resolve) => setTimeout(() => resolve('timed-out'), 50)),
+    ]);
+
+    expect(outcome).not.toBe('timed-out');
+    expect(outcome).toMatchObject({ code: 'NETWORK_ERROR' });
+    expect(String(outcome)).not.toContain('refresh-caller-secret');
+    expect(upstreamFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('honors caller cancellation while post-header currentness is pending', async () => {
+    const caller = new AbortController();
+    const headerCurrentnessStarted = deferred<void>();
+    const credentials = { accessToken: 'access-token', accountId: 'account-id' };
+    let credentialRead = 0;
+    const tokenProvider: CodexTokenProvider = {
+      getValidCredentials: vi.fn(() => {
+        credentialRead += 1;
+        if (credentialRead === 3) {
+          headerCurrentnessStarted.resolve();
+          return new Promise<{ accessToken: string; accountId: string }>(() => undefined);
+        }
+        return Promise.resolve(credentials);
+      }),
+    };
+    const source = controllableByteStream();
+    const transport = createCodexResponsesTransport({
+      tokenProvider,
+      upstreamFetch: vi.fn(async () => new Response(source.stream)),
+    });
+    const request = transport(CODEX_RESPONSES_ENDPOINT, {
+      body: '{}',
+      method: 'POST',
+      signal: caller.signal,
+    });
+
+    await headerCurrentnessStarted.promise;
+    caller.abort('post-header-secret');
+
+    await expect(request).rejects.toMatchObject({ code: 'NETWORK_ERROR' });
+    expect(source.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not publish response headers when post-header currentness crosses the deadline', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const credentials = { accessToken: 'access-token', accountId: 'account-id' };
+    let credentialRead = 0;
+    const tokenProvider: CodexTokenProvider = {
+      getValidCredentials: vi.fn(() => {
+        credentialRead += 1;
+        if (credentialRead === 3) {
+          vi.setSystemTime(NOW + CODEX_RESPONSE_LIMITS.totalTimeoutMs);
+        }
+        return Promise.resolve(credentials);
+      }),
+    };
+    const source = controllableByteStream();
+    const transport = createCodexResponsesTransport({
+      tokenProvider,
+      upstreamFetch: vi.fn(async () => new Response(source.stream)),
+    });
+
+    await expect(
+      transport(CODEX_RESPONSES_ENDPOINT, { body: '{}', method: 'POST' }),
+    ).rejects.toMatchObject({ code: 'UPSTREAM_ERROR' });
+
+    expect(source.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the absolute deadline active while a 401 credential refresh is pending', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    let caught: unknown;
+    const tokenProvider = {
+      getValidCredentials: vi.fn(async () => ({
+        accessToken: 'old-token',
+        accountId: 'account-id',
+      })),
+      refreshIfCurrent: vi.fn(
+        () => new Promise<{ accessToken: string; accountId: string }>(() => undefined),
+      ),
+    };
+    const transport = createCodexResponsesTransport({
+      tokenProvider,
+      upstreamFetch: vi.fn(async () => new Response(null, { status: 401 })),
+    });
+    const request = transport(CODEX_RESPONSES_ENDPOINT, { body: '{}', method: 'POST' });
+    void request.catch((error: unknown) => {
+      caught = error;
+    });
+
+    await vi.advanceTimersByTimeAsync(CODEX_RESPONSE_LIMITS.totalTimeoutMs);
+    await Promise.resolve();
+
+    expect(caught).toMatchObject({ code: 'UPSTREAM_ERROR' });
+  });
+
+  it('treats a successful null body as immediate EOF without synthesizing a 204 body', async () => {
+    const transport = createCodexResponsesTransport({
+      tokenProvider: createTokenProvider(),
+      upstreamFetch: vi.fn(async () => new Response(null, { status: 204 })),
+    });
+
+    const response = await transport(CODEX_RESPONSES_ENDPOINT, {
+      body: '{}',
+      method: 'POST',
+    });
+
+    expect(response.status).toBe(204);
+    expect(response.body).toBeNull();
+  });
+
+  it('does not publish a null-body success after cancellation wins the final EOF microtask race', async () => {
+    const caller = new AbortController();
+    const credentials = { accessToken: 'access-token', accountId: 'account-id' };
+    let credentialRead = 0;
+    const tokenProvider: CodexTokenProvider = {
+      getValidCredentials: vi.fn(() => {
+        credentialRead += 1;
+        if (credentialRead === 4) {
+          queueMicrotask(() =>
+            queueMicrotask(() =>
+              queueMicrotask(() => queueMicrotask(() => caller.abort('null-body-race-secret'))),
+            ),
+          );
+        }
+        return Promise.resolve(credentials);
+      }),
+    };
+    const transport = createCodexResponsesTransport({
+      tokenProvider,
+      upstreamFetch: vi.fn(async () => new Response(null, { status: 204 })),
+    });
+
+    const outcome = await transport(CODEX_RESPONSES_ENDPOINT, {
+      body: '{}',
+      method: 'POST',
+      signal: caller.signal,
+    }).catch((error: unknown) => error);
+
+    expect(caller.signal.aborted).toBe(true);
+    expect(outcome).toMatchObject({ code: 'NETWORK_ERROR' });
+    expect(String(outcome)).not.toContain('null-body-race-secret');
+  });
+
   it('cancels a successful response when logout happens after headers', async () => {
     const { provider } = createManagedProvider();
     const source = controllableByteStream();
@@ -756,7 +1158,9 @@ describe('Codex Responses guarded lifecycle', () => {
     const tokenProvider = {
       getValidCredentials: vi.fn(async () => ({ ...current })),
       refreshIfCurrent: vi.fn(async () => {
-        expect(remove).toHaveBeenCalledTimes(1);
+        // The acquisition guard and first response guard are both gone before
+        // refresh; the replay gets a fresh guard with the same deadline.
+        expect(remove).toHaveBeenCalledTimes(2);
         current = { accessToken: 'new-token', accountId: 'account-id' };
         return { ...current };
       }),
@@ -777,9 +1181,9 @@ describe('Codex Responses guarded lifecycle', () => {
 
     expect(response.status).toBe(200);
     expect(first.cancel).toHaveBeenCalledTimes(1);
-    expect(remove).toHaveBeenCalledTimes(1);
-    await response.body!.cancel();
     expect(remove).toHaveBeenCalledTimes(2);
+    await response.body!.cancel();
+    expect(remove).toHaveBeenCalledTimes(3);
     expect(second.cancel).toHaveBeenCalledTimes(1);
   });
 

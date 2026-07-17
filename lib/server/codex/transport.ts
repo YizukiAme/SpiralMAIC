@@ -152,8 +152,13 @@ function createHeaders(
   return headers;
 }
 
-async function cancelResponseBody(response: Response): Promise<void> {
-  await response.body?.cancel().catch(() => undefined);
+function cancelResponseBody(response: Response): void {
+  if (!response.body) return;
+  try {
+    void response.body.cancel().catch(() => undefined);
+  } catch {
+    // Response cleanup is best-effort and must never delay retry or classification.
+  }
 }
 
 function errorForStatus(status: number): CodexResponsesTransportError {
@@ -213,21 +218,37 @@ export function createCodexResponsesTransport(
     const deadlineAt = Date.now() + CODEX_RESPONSE_LIMITS.totalTimeoutMs;
     let capabilityLease = options.capabilityLease;
     let credentialLease: InternalCodexCredentialLease;
+    const acquisitionGuard = createCodexResponseRequestGuard({
+      callerSignal: init?.signal ?? undefined,
+      lifecycleSignal: capabilityLease?.credentialLease.lifecycleSignal,
+      deadlineAt,
+    });
     try {
+      // Fail before starting vault/OAuth work when cancellation or the shared
+      // absolute deadline was already published.
+      await acquisitionGuard.race(Promise.resolve());
+      acquisitionGuard.assertActive();
       if (capabilityLease) {
         if (capabilityLease.credentialLease.tokenProvider !== options.tokenProvider) {
           throw errorForStatus(401);
         }
-        if (!(await isCodexCapabilityLeaseCurrent(capabilityLease))) {
+        if (!(await acquisitionGuard.race(isCodexCapabilityLeaseCurrent(capabilityLease)))) {
           throw errorForStatus(401);
         }
         credentialLease = capabilityLease.credentialLease;
       } else {
-        credentialLease = await acquireCodexCredentialLease(options.tokenProvider);
+        credentialLease = await acquisitionGuard.race(
+          acquireCodexCredentialLease(options.tokenProvider),
+        );
       }
     } catch (error) {
+      if (error instanceof CodexResponseGuardError) {
+        throw errorForGuardFailure(error.failure);
+      }
       if (isCodexCredentialsChangedError(error)) throw errorForStatus(401);
       throw error;
+    } finally {
+      acquisitionGuard.dispose();
     }
 
     const assertSendCurrent = async (): Promise<boolean> =>
@@ -246,40 +267,65 @@ export function createCodexResponsesTransport(
       | { readonly kind: 'success'; readonly response: Response };
 
     const request = async (forceRefresh: boolean): Promise<AttemptResult> => {
-      try {
-        if (forceRefresh) {
-          if (capabilityLease) {
-            capabilityLease = await refreshCodexCapabilityLease(capabilityLease);
-            credentialLease = capabilityLease.credentialLease;
-          } else {
-            credentialLease = await refreshCodexCredentialLease(credentialLease);
-          }
-        }
-      } catch (error) {
-        if (isCodexCredentialsChangedError(error)) throw errorForStatus(401);
-        throw error;
-      }
-      if (!(await assertSendCurrent())) {
-        throw errorForStatus(401);
-      }
-
-      const credentials = credentialLease.credentials;
       const guard = createCodexResponseRequestGuard({
         callerSignal: init?.signal ?? undefined,
         lifecycleSignal: credentialLease.lifecycleSignal,
         deadlineAt,
       });
+      try {
+        // The 401 cleanup path can synchronously publish caller cancellation.
+        // Observe it before starting a shared refresh for the replay.
+        await guard.race(Promise.resolve());
+        guard.assertActive();
+        if (forceRefresh) {
+          if (capabilityLease) {
+            capabilityLease = await guard.race(refreshCodexCapabilityLease(capabilityLease));
+            credentialLease = capabilityLease.credentialLease;
+          } else {
+            credentialLease = await guard.race(refreshCodexCredentialLease(credentialLease));
+          }
+        }
+      } catch (error) {
+        guard.dispose();
+        if (error instanceof CodexResponseGuardError) {
+          throw errorForGuardFailure(error.failure);
+        }
+        if (isCodexCredentialsChangedError(error)) throw errorForStatus(401);
+        throw error;
+      }
+      let sendCurrent = false;
+      try {
+        guard.assertActive();
+        sendCurrent = await guard.race(assertSendCurrent());
+        guard.assertActive();
+      } catch (error) {
+        guard.dispose();
+        if (error instanceof CodexResponseGuardError) {
+          throw errorForGuardFailure(error.failure);
+        }
+        if (isCodexCredentialsChangedError(error)) throw errorForStatus(401);
+        throw error;
+      }
+      if (!sendCurrent) {
+        guard.dispose();
+        throw errorForStatus(401);
+      }
+
+      const credentials = credentialLease.credentials;
       let response: Response;
       try {
-        response = await guard.race(
-          upstreamFetch(CODEX_RESPONSES_ENDPOINT, {
-            ...init,
-            signal: guard.signal,
-            body,
-            headers: createHeaders(init?.headers, credentials, sessionId),
-            redirect: 'manual',
-          }),
-        );
+        const requestInit: RequestInit = {
+          ...init,
+          signal: guard.signal,
+          body,
+          headers: createHeaders(init?.headers, credentials, sessionId),
+          redirect: 'manual',
+        };
+        // RequestInit/HeadersInit may contain user-controlled getters. If one
+        // publishes cancellation, do not invoke the credential-bearing fetch.
+        guard.assertActive();
+        const upstreamRequest = upstreamFetch(CODEX_RESPONSES_ENDPOINT, requestInit);
+        response = await guard.race(upstreamRequest);
       } catch (error) {
         guard.dispose();
         if (error instanceof CodexResponseGuardError) {
@@ -290,9 +336,11 @@ export function createCodexResponsesTransport(
 
       let current = false;
       try {
+        guard.assertActive();
         current = await guard.race(assertResponseCurrent());
+        guard.assertActive();
       } catch (error) {
-        await cancelResponseBody(response);
+        cancelResponseBody(response);
         guard.dispose();
         if (error instanceof CodexResponseGuardError) {
           throw errorForGuardFailure(error.failure);
@@ -300,20 +348,37 @@ export function createCodexResponsesTransport(
         throw errorForStatus(401);
       }
       if (!current) {
-        await cancelResponseBody(response);
+        cancelResponseBody(response);
         guard.dispose();
         throw errorForStatus(401);
       }
 
       if (response.status === 401) {
-        await cancelResponseBody(response);
+        cancelResponseBody(response);
         guard.dispose();
         return { kind: 'retry-auth' };
       }
       if (!response.ok) {
-        await cancelResponseBody(response);
+        cancelResponseBody(response);
         guard.dispose();
         throw errorForStatus(response.status);
+      }
+
+      if (!response.body) {
+        try {
+          guard.assertActive();
+          current = await guard.race(assertResponseCurrent());
+          guard.assertActive();
+        } catch (error) {
+          guard.dispose();
+          if (error instanceof CodexResponseGuardError) {
+            throw errorForGuardFailure(error.failure);
+          }
+          throw errorForStatus(401);
+        }
+        guard.dispose();
+        if (!current) throw errorForStatus(401);
+        return { kind: 'success', response };
       }
 
       return {

@@ -879,6 +879,7 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
             if (!codexCredentialsEqual(current, credentials)) {
               return { replacement: current, cleared: false };
             }
+            advanceCodexCredentialLifecycle(this.sharedState);
             await this.vault.clear();
             return { replacement: null, cleared: true };
           });
@@ -887,7 +888,6 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
           throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.STORAGE_ERROR, false);
         }
         if (clearResult.cleared) {
-          advanceCodexCredentialLifecycle(this.sharedState);
           await this.notifyCredentialsCleared();
         }
         if (refreshGeneration !== this.sharedState.generation) throw signedOutError();

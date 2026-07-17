@@ -124,6 +124,7 @@ function streamResult(parts: Array<Record<string, unknown>>, options: { stayOpen
   return {
     cancel,
     result: { stream: stream as never },
+    stream,
   };
 }
 
@@ -202,6 +203,48 @@ describe('guardCodexStream decoded budgets', () => {
       collectStream(guardCodexStream(over.result as never, limits).stream),
     ).rejects.toThrow(CODEX_STREAM_ERROR_MESSAGE);
     expect(over.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('surfaces a safe budget error and releases the source when cancel never settles', async () => {
+    const cancel = vi.fn(() => new Promise<void>(() => undefined));
+    const source = new ReadableStream<Record<string, unknown>>({
+      start(controller) {
+        controller.enqueue({ type: 'raw', rawValue: { secret: 'decoded-secret' } });
+      },
+      cancel,
+    });
+    const guarded = guardCodexStream(
+      { stream: source as never },
+      { ...TEST_DECODED_STREAM_LIMITS, maxParts: 0 },
+    );
+
+    const outcome = await Promise.race([
+      guarded.stream
+        .getReader()
+        .read()
+        .catch((error: unknown) => error),
+      new Promise<'timed-out'>((resolve) => setTimeout(() => resolve('timed-out'), 50)),
+    ]);
+
+    expect(outcome).not.toBe('timed-out');
+    expectSafeStreamError(outcome, 'decoded-secret');
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(source.locked).toBe(false);
+  });
+
+  it('settles consumer cancellation and releases the source when cancel never settles', async () => {
+    const cancel = vi.fn(() => new Promise<void>(() => undefined));
+    const source = new ReadableStream<Record<string, unknown>>({ cancel });
+    const guarded = guardCodexStream({ stream: source as never });
+
+    const outcome = await Promise.race([
+      guarded.stream.cancel().then(() => 'cancelled' as const),
+      new Promise<'timed-out'>((resolve) => setTimeout(() => resolve('timed-out'), 50)),
+    ]);
+
+    expect(outcome).toBe('cancelled');
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(source.locked).toBe(false);
   });
 
   it('applies the same maxParts boundary before generate aggregation', async () => {
@@ -975,6 +1018,59 @@ describe('Codex language model middleware', () => {
       },
       providerMetadata: { openai: { responseId: 'response-1' } },
     });
+  });
+
+  it('wires the decoded content budget through the actual generate middleware path', async () => {
+    const source = streamResult(
+      [
+        { type: 'stream-start', warnings: [] },
+        ...Array.from({ length: CODEX_DECODED_STREAM_LIMITS.maxContentItems + 1 }, (_, index) => ({
+          type: 'source',
+          sourceType: 'url',
+          id: `source-${index}`,
+          url: 'https://example.com',
+        })),
+        {
+          type: 'finish',
+          usage: USAGE,
+          finishReason: { unified: 'stop', raw: 'completed' },
+        },
+      ],
+      { stayOpen: true },
+    );
+    const model = wrapCodexLanguageModel(
+      createLanguageModel({ doStream: vi.fn(async () => source.result as never) }),
+    );
+
+    const error = await Promise.resolve(
+      model.doGenerate({
+        prompt: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }],
+      }),
+    ).catch((caught: unknown) => caught);
+
+    expectSafeStreamError(error);
+    expect(source.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not wait for a hung source cancel when aggregation rejects a malformed stream', async () => {
+    const secret = 'aggregate-source-secret';
+    const cancel = vi.fn(() => new Promise<void>(() => undefined));
+    const source = new ReadableStream<Record<string, unknown>>({
+      start(controller) {
+        controller.enqueue({ type: 'text-delta', id: 'missing', delta: secret });
+      },
+      cancel,
+    });
+
+    const outcome = await Promise.race([
+      aggregateCodexStream({ stream: source as never }).catch((error: unknown) => error),
+      new Promise<'timed-out'>((resolve) => setTimeout(() => resolve('timed-out'), 50)),
+    ]);
+
+    expect(outcome).not.toBe('timed-out');
+    expectSafeStreamError(outcome, secret);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(source.locked).toBe(false);
   });
 
   it.each([

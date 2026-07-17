@@ -708,6 +708,73 @@ describe('ManagedCodexTokenProvider', () => {
     expect(lease.lifecycleSignal?.aborted).toBe(true);
   });
 
+  it('aborts the terminal lifecycle before clear starts or clear-queued work runs', async () => {
+    const vault = new MemoryVault(credentials());
+    const onCredentialsCleared = vi.fn();
+    const provider = createProvider(
+      vault,
+      vi.fn().mockResolvedValue(jsonResponse({ error: 'invalid_grant' }, 400)),
+      { onCredentialsCleared },
+    );
+    const lease = await acquireCodexCredentialLease(provider);
+    const abortedInClearMicrotask = deferred<boolean>();
+    let abortedAtClearEntry: boolean | undefined;
+    vault.clear = vi.fn(async () => {
+      vault.clearCount += 1;
+      abortedAtClearEntry = lease.lifecycleSignal?.aborted;
+      queueMicrotask(() => {
+        abortedInClearMicrotask.resolve(lease.lifecycleSignal?.aborted ?? false);
+      });
+      await Promise.resolve();
+      vault.current = null;
+    });
+
+    await expect(provider.getValidCredentials({ forceRefresh: true })).rejects.toMatchObject({
+      code: CODEX_OAUTH_ERROR_CODES.INVALID_GRANT,
+      retryable: false,
+    });
+
+    expect(abortedAtClearEntry).toBe(true);
+    await expect(abortedInClearMicrotask.promise).resolves.toBe(true);
+    expect(vault.current).toBeNull();
+    expect(onCredentialsCleared).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps credentials but starts a usable new lifecycle when terminal clear fails', async () => {
+    const initial = credentials();
+    const vault = new MemoryVault(initial);
+    const onCredentialsCleared = vi.fn();
+    vault.clear = vi.fn(async () => {
+      vault.clearCount += 1;
+      throw new Error('private clear failure');
+    });
+    const provider = createProvider(
+      vault,
+      vi.fn().mockResolvedValue(jsonResponse({ error: 'invalid_grant' }, 400)),
+      { onCredentialsCleared },
+    );
+    const staleLease = await acquireCodexCredentialLease(provider);
+
+    await expect(provider.getValidCredentials({ forceRefresh: true })).rejects.toMatchObject({
+      code: CODEX_OAUTH_ERROR_CODES.STORAGE_ERROR,
+      retryable: false,
+    });
+
+    expect(vault.current).toBe(initial);
+    expect(vault.clearCount).toBe(1);
+    expect(staleLease.lifecycleSignal?.aborted).toBe(true);
+    expect(onCredentialsCleared).not.toHaveBeenCalled();
+
+    const currentLease = await acquireCodexCredentialLease(provider);
+    expect(currentLease.lifecycleSignal).not.toBe(staleLease.lifecycleSignal);
+    expect(currentLease.lifecycleSignal?.aborted).toBe(false);
+    expect(currentLease.credentials).toEqual({
+      accessToken: initial.accessToken,
+      accountId: initial.accountId,
+    });
+    await expect(isCodexCredentialLeaseCurrent(currentLease)).resolves.toBe(true);
+  });
+
   it.each([
     ['nested expired', { error: { code: ' Refresh_Token_Expired ' } }],
     ['string reused', { error: ' REFRESH_TOKEN_REUSED ' }],
