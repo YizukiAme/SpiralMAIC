@@ -35,6 +35,8 @@ import { streamLLM } from '@/lib/ai/llm';
 import type { ThinkingConfig } from '@/lib/types/provider';
 import {
   captureToolCallMetadata,
+  decodeOpenAIReasoningSignature,
+  encodeOpenAIReasoningSignature,
   emitToolCallProviderOptions,
   type ToolCallProviderMetadata,
 } from './provider-metadata';
@@ -132,7 +134,45 @@ export function createPartMapper(
   // tool call, an explicit reasoning-end, or finalize closes it — so interleaved
   // reasoning/text streams ("reason → answer → reason → answer") produce blocks
   // in arrival order instead of merging later text back into an earlier block.
-  let active: { kind: 'text' | 'thinking'; index: number; buf: string } | null = null;
+  let active: {
+    kind: 'text' | 'thinking';
+    index: number;
+    buf: string;
+    reasoningId?: string;
+  } | null = null;
+  const reasoningBlocks = new Map<string, { index: number; metadata?: ToolCallProviderMetadata }>();
+
+  const mergeMetadata = (
+    current: ToolCallProviderMetadata | undefined,
+    incoming: ToolCallProviderMetadata | undefined,
+  ): ToolCallProviderMetadata | undefined => {
+    if (!incoming) return current;
+    const merged: ToolCallProviderMetadata = { ...(current ?? {}) };
+    for (const [provider, value] of Object.entries(incoming)) {
+      merged[provider] = { ...(merged[provider] ?? {}), ...value };
+    }
+    return merged;
+  };
+
+  const applyReasoningMetadata = (reasoningId: string, part: Record<string, unknown>) => {
+    const block = reasoningBlocks.get(reasoningId);
+    if (!block) return;
+    block.metadata = mergeMetadata(block.metadata, captureToolCallMetadata(part));
+    const signature = encodeOpenAIReasoningSignature(block.metadata);
+    if (signature) {
+      (partial.content[block.index] as ThinkingContent).thinkingSignature = signature;
+    }
+  };
+
+  const openReasoningBlock = (reasoningId?: string) => {
+    closeActive();
+    const index = partial.content.length;
+    partial.content.push({ type: 'thinking', thinking: '' } as ThinkingContent);
+    active = { kind: 'thinking', index, buf: '', ...(reasoningId ? { reasoningId } : {}) };
+    if (reasoningId) reasoningBlocks.set(reasoningId, { index });
+    push({ type: 'thinking_start', contentIndex: index, partial });
+    return index;
+  };
 
   const closeActive = () => {
     if (!active) return;
@@ -159,21 +199,66 @@ export function createPartMapper(
       active.buf += delta;
       (partial.content[active.index] as TextContent).text = active.buf;
       push({ type: 'text_delta', contentIndex: active.index, delta, partial });
-    } else if (type === 'reasoning-delta' || type === 'reasoning') {
-      const delta = (part.text ?? part.delta ?? '') as string;
-      if (!delta) return;
-      if (active?.kind !== 'thinking') {
-        closeActive();
-        const index = partial.content.length;
-        partial.content.push({ type: 'thinking', thinking: '' } as ThinkingContent);
-        active = { kind: 'thinking', index, buf: '' };
-        push({ type: 'thinking_start', contentIndex: index, partial });
+    } else if (type === 'reasoning-start') {
+      const reasoningId = typeof part.id === 'string' ? part.id : undefined;
+      if (reasoningId && !reasoningBlocks.has(reasoningId)) {
+        openReasoningBlock(reasoningId);
+        applyReasoningMetadata(reasoningId, part);
       }
-      active.buf += delta;
-      (partial.content[active.index] as ThinkingContent).thinking = active.buf;
-      push({ type: 'thinking_delta', contentIndex: active.index, delta, partial });
+    } else if (type === 'reasoning-delta' || type === 'reasoning') {
+      const reasoningId = typeof part.id === 'string' ? part.id : undefined;
+      const delta = (part.text ?? part.delta ?? '') as string;
+      if (!delta) {
+        if (reasoningId) applyReasoningMetadata(reasoningId, part);
+        return;
+      }
+      let index = reasoningId
+        ? reasoningBlocks.get(reasoningId)?.index
+        : active?.kind === 'thinking'
+          ? active.index
+          : undefined;
+      if (index === undefined) {
+        index = openReasoningBlock(reasoningId);
+      } else if (active?.kind !== 'thinking' || active.index !== index) {
+        closeActive();
+        const thinking = partial.content[index] as ThinkingContent;
+        active = { kind: 'thinking', index, buf: thinking.thinking, reasoningId };
+      }
+      if (reasoningId) applyReasoningMetadata(reasoningId, part);
+      const thinkingActive = active;
+      if (!thinkingActive || thinkingActive.kind !== 'thinking') {
+        throw new Error('Reasoning stream did not initialize a thinking block');
+      }
+      thinkingActive.buf += delta;
+      (partial.content[thinkingActive.index] as ThinkingContent).thinking = thinkingActive.buf;
+      push({ type: 'thinking_delta', contentIndex: thinkingActive.index, delta, partial });
     } else if (type === 'reasoning-end') {
-      if (active?.kind === 'thinking') closeActive();
+      const reasoningId = typeof part.id === 'string' ? part.id : active?.reasoningId;
+      if (reasoningId) applyReasoningMetadata(reasoningId, part);
+      const blockIndex = reasoningId ? reasoningBlocks.get(reasoningId)?.index : undefined;
+      if (
+        active?.kind === 'thinking' &&
+        (blockIndex === undefined || active.index === blockIndex)
+      ) {
+        closeActive();
+      }
+    } else if (type === 'finish' || type === 'finish-step') {
+      const metadata = captureToolCallMetadata(part);
+      const itemId = metadata?.openai?.itemId;
+      if (typeof itemId === 'string' && itemId.length > 0) {
+        for (const [reasoningId, block] of reasoningBlocks) {
+          if (block.metadata?.openai?.itemId === itemId) {
+            applyReasoningMetadata(reasoningId, part);
+          }
+        }
+      } else if (
+        reasoningBlocks.size === 1 &&
+        typeof metadata?.openai?.reasoningEncryptedContent === 'string' &&
+        metadata.openai.reasoningEncryptedContent.length > 0
+      ) {
+        const reasoningId = reasoningBlocks.keys().next().value;
+        if (reasoningId) applyReasoningMetadata(reasoningId, part);
+      }
     } else if (type === 'tool-call') {
       closeActive();
       const idx = partial.content.length;
@@ -282,7 +367,12 @@ export function toModelMessages(messages: PiMessage[]): ModelMessage[] {
       const parts: Array<Record<string, unknown>> = [];
       for (const c of m.content) {
         if (c.type === 'text') parts.push({ type: 'text', text: c.text });
-        else if (c.type === 'toolCall') {
+        else if (c.type === 'thinking') {
+          const part: Record<string, unknown> = { type: 'reasoning', text: c.thinking };
+          const providerOptions = decodeOpenAIReasoningSignature(c.thinkingSignature);
+          if (providerOptions) part.providerOptions = providerOptions;
+          parts.push(part);
+        } else if (c.type === 'toolCall') {
           const part: Record<string, unknown> = {
             type: 'tool-call',
             toolCallId: c.id,

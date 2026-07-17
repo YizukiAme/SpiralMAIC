@@ -17,6 +17,7 @@ import {
 import { runPiDirectorLoop } from '@/lib/chat/pi/director-loop';
 import type { SendEvent } from '@/lib/chat/pi/types';
 import { resolveModel } from '@/lib/server/resolve-model';
+import { parseExternalCodexLogicalSession } from '@/lib/server/codex/logical-session';
 import { apiError } from '@/lib/server/api-response';
 import type { ThinkingConfig } from '@/lib/types/provider';
 import type { StatelessChatRequest } from '@/lib/types/chat';
@@ -80,6 +81,7 @@ export async function POST(req: NextRequest) {
       // Let resolveModel arbitrate thinking too: a routed chat-adapter's thinking
       // wins, an unrouted one honors this client thinking (see resolve-model.ts).
       thinkingConfig: body.thinkingConfig ?? body.thinking,
+      logicalSession: parseExternalCodexLogicalSession(body.session),
     });
 
     if (isProviderKeyRequired(providerId) && !resolvedApiKey) {

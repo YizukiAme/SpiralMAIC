@@ -7,7 +7,9 @@
 
 import type { NextRequest } from 'next/server';
 import { getModel, parseModelString, type ModelWithInfo } from '@/lib/ai/providers';
-import type { ThinkingConfig } from '@/lib/types/provider';
+import type { ModelServiceTier, ThinkingConfig } from '@/lib/types/provider';
+import { rebuildCodexModelInfo } from '@/lib/ai/codex-catalog';
+import { bindCodexLanguageModelMetadata } from '@/lib/ai/codex-model';
 import {
   isServerConfiguredProvider,
   resolveApiKey,
@@ -16,6 +18,14 @@ import {
 } from '@/lib/server/provider-config';
 import { validateUrlForSSRF } from '@/lib/server/ssrf-guard';
 import { getStageRoute, type LlmStage } from '@/lib/server/model-routes';
+import { getCodexOAuthAvailability } from '@/lib/server/codex/availability';
+import { getCodexAuthRuntime } from '@/lib/server/codex/runtime';
+import { createCodexResponsesTransport } from '@/lib/server/codex/transport';
+import {
+  createEphemeralCodexLogicalSession,
+  deriveCodexUpstreamSessionId,
+  type CodexLogicalSession,
+} from '@/lib/server/codex/logical-session';
 
 export interface ResolvedModel extends ModelWithInfo {
   /** Original model string (e.g. "openai/gpt-4o-mini") */
@@ -30,6 +40,32 @@ export interface ResolvedModel extends ModelWithInfo {
   baseUrl?: string;
   /** Optional per-request thinking configuration from the client. */
   thinkingConfig?: ThinkingConfig;
+  /** Server-validated Codex request tier. */
+  serviceTier?: ModelServiceTier;
+}
+
+export interface ExpectedResolvedModel {
+  providerId: string;
+  modelId: string;
+}
+
+class ResolvedModelAssertionError extends Error {
+  readonly code = 'RESOLVED_MODEL_MISMATCH';
+
+  constructor() {
+    super('Resolved model does not match the request assertion');
+    this.name = 'ResolvedModelAssertionError';
+  }
+}
+
+export function getExpectedResolvedModelFromHeaders(
+  req: Pick<NextRequest, 'headers'>,
+): ExpectedResolvedModel | undefined {
+  const providerId = req.headers.get('x-openmaic-expected-provider');
+  const modelId = req.headers.get('x-openmaic-expected-model');
+  if (providerId === null && modelId === null) return undefined;
+  if (!providerId || !modelId) throw new ResolvedModelAssertionError();
+  return { providerId, modelId };
 }
 
 /**
@@ -51,6 +87,9 @@ export async function resolveModel(params: {
   baseUrl?: string;
   providerType?: string;
   thinkingConfig?: ThinkingConfig;
+  serviceTier?: ModelServiceTier;
+  logicalSession?: CodexLogicalSession;
+  expectedResolvedModel?: ExpectedResolvedModel;
 }): Promise<ResolvedModel> {
   // Resolution order: stage route > x-model > DEFAULT_MODEL.
   // A configured stage route is the operator's deliberate per-stage choice and
@@ -68,6 +107,65 @@ export async function resolveModel(params: {
     );
   }
   const { providerId, modelId } = parseModelString(modelString);
+
+  // This is an assertion only: stage routing has already selected the model
+  // above, and the expected values never participate in that selection. Keep
+  // the check before provider discovery/model construction so a mismatch
+  // cannot send a generation request upstream.
+  if (
+    params.expectedResolvedModel &&
+    (params.expectedResolvedModel.providerId !== providerId ||
+      params.expectedResolvedModel.modelId !== modelId)
+  ) {
+    throw new ResolvedModelAssertionError();
+  }
+
+  if (providerId === 'openai-codex') {
+    const availability = await getCodexOAuthAvailability();
+    if (!availability.available) {
+      throw new Error(`Codex OAuth provider is unavailable (${availability.reason})`);
+    }
+
+    const { tokenProvider, modelDiscovery } = getCodexAuthRuntime();
+    const modelCapability = await modelDiscovery.getModelCapability(modelId);
+    const discoveredModel = rebuildCodexModelInfo(modelCapability?.modelInfo);
+    if (!discoveredModel) {
+      throw new Error('Codex model is unavailable for the connected account');
+    }
+    let serviceTier: ModelServiceTier | undefined;
+    if (!stageModel && params.serviceTier === 'priority') {
+      if (discoveredModel.capabilities?.serviceTiers?.includes('priority')) {
+        serviceTier = 'priority';
+      }
+    }
+    const transport = createCodexResponsesTransport({
+      tokenProvider,
+      capabilityLease: modelCapability!.capabilityLease,
+      sessionId: deriveCodexUpstreamSessionId(
+        params.logicalSession ?? createEphemeralCodexLogicalSession(),
+      ),
+    });
+    const { model: unboundModel } = getModel({
+      providerId,
+      modelId,
+      apiKey: '',
+      customFetch: transport,
+      ...(serviceTier ? { serviceTier } : {}),
+    });
+    const model = bindCodexLanguageModelMetadata(unboundModel, discoveredModel);
+
+    return {
+      model,
+      modelInfo: discoveredModel,
+      modelString,
+      providerId,
+      modelId,
+      apiKey: '',
+      baseUrl: undefined,
+      thinkingConfig: stageModel ? stageRoute?.thinking : params.thinkingConfig,
+      ...(serviceTier ? { serviceTier } : {}),
+    };
+  }
 
   // When a stage route overrides the client's model, the client-sent connection
   // params (apiKey/baseUrl/providerType) belong to the client's *other* model
@@ -134,10 +232,19 @@ function getThinkingConfigFromBody(body: unknown): ThinkingConfig | undefined {
   return config && typeof config === 'object' ? (config as ThinkingConfig) : undefined;
 }
 
+function normalizeServiceTier(value: unknown): ModelServiceTier | undefined {
+  return value === 'priority' ? value : undefined;
+}
+
+function getServiceTierFromBody(body: unknown): ModelServiceTier | undefined {
+  if (!body || typeof body !== 'object') return undefined;
+  return normalizeServiceTier((body as { serviceTier?: unknown }).serviceTier);
+}
+
 /**
  * Resolve a language model from standard request headers.
  *
- * Reads: x-model, x-api-key, x-base-url, x-provider-type
+ * Reads: x-model, x-api-key, x-base-url, x-provider-type, x-service-tier
  * Note: requiresApiKey is derived server-side from the provider registry,
  * never from client headers, to prevent auth bypass.
  */
@@ -145,6 +252,8 @@ export async function resolveModelFromHeaders(
   req: NextRequest,
   stage?: LlmStage,
   thinkingConfig?: ThinkingConfig,
+  serviceTier?: ModelServiceTier,
+  logicalSession?: CodexLogicalSession,
 ): Promise<ResolvedModel> {
   return resolveModel({
     modelString: req.headers.get('x-model') || undefined,
@@ -153,6 +262,9 @@ export async function resolveModelFromHeaders(
     baseUrl: req.headers.get('x-base-url') || undefined,
     providerType: req.headers.get('x-provider-type') || undefined,
     thinkingConfig,
+    serviceTier: serviceTier ?? normalizeServiceTier(req.headers.get('x-service-tier')),
+    expectedResolvedModel: getExpectedResolvedModelFromHeaders(req),
+    ...(logicalSession ? { logicalSession } : {}),
   });
 }
 
@@ -166,8 +278,15 @@ export async function resolveModelFromRequest(
   req: NextRequest,
   body: unknown,
   stage?: LlmStage,
+  logicalSession?: CodexLogicalSession,
 ): Promise<ResolvedModel> {
   // Pass the client's body thinking into resolveModel so the single arbiter
   // there decides (a routed stage may override or drop it). See resolveModel.
-  return resolveModelFromHeaders(req, stage, getThinkingConfigFromBody(body));
+  return resolveModelFromHeaders(
+    req,
+    stage,
+    getThinkingConfigFromBody(body),
+    getServiceTierFromBody(body),
+    logicalSession,
+  );
 }
