@@ -326,6 +326,13 @@ describe('director routing contract', () => {
     expect(out).toContain('next_agent');
   });
 
+  test('balances turns among equally suitable student agents', () => {
+    const out = buildDirectorPrompt([baseAgent], 'No history', [], 0);
+    expect(out).toContain(
+      'When multiple student agents are equally suitable, rotate among them instead of repeatedly selecting the same student.',
+    );
+  });
+
   test('Q&A mode omits Discussion Mode block', () => {
     const out = buildDirectorPrompt([baseAgent], 'No history', [], 0);
     expect(out).not.toContain('Discussion Mode');
