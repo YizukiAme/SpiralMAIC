@@ -16,6 +16,14 @@ export function isValidSpiralAgentRoster(
   );
 }
 
+export function getSpiralAgentPreparationAction(
+  agents: readonly PersistedAgentConfig[] | null | undefined,
+  state: 'pending-reveal' | 'revealed' | undefined,
+): 'generate' | 'reveal' | 'continue' {
+  if (!isValidSpiralAgentRoster(agents)) return 'generate';
+  return state === 'pending-reveal' ? 'reveal' : 'continue';
+}
+
 export async function saveStageSpiralAgents(
   stageId: string,
   agents: readonly PersistedAgentConfig[],

@@ -3,6 +3,7 @@ import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  getSpiralAgentPreparationAction,
   isValidSpiralAgentRoster,
   saveStageSpiralAgents,
 } from '@/lib/revisit/spiral-agents';
@@ -73,9 +74,18 @@ describe('Spiral agent roster persistence', () => {
     ).toBe(true);
     expect(isValidSpiralAgentRoster([assistant, students[0]])).toBe(false);
     expect(isValidSpiralAgentRoster([{ ...assistant, role: 'teacher' }, ...students])).toBe(false);
-    expect(isValidSpiralAgentRoster([assistant, { ...assistant, id: 'assistant-2' }, ...students])).toBe(
-      false,
+    expect(
+      isValidSpiralAgentRoster([assistant, { ...assistant, id: 'assistant-2' }, ...students]),
+    ).toBe(false);
+  });
+
+  it('selects generation, reveal recovery, or continuation without another model call', () => {
+    expect(getSpiralAgentPreparationAction(undefined, undefined)).toBe('generate');
+    expect(getSpiralAgentPreparationAction([assistant, ...students], 'pending-reveal')).toBe(
+      'reveal',
     );
+    expect(getSpiralAgentPreparationAction([assistant, ...students], 'revealed')).toBe('continue');
+    expect(getSpiralAgentPreparationAction([assistant, ...students], undefined)).toBe('continue');
   });
 
   it('round-trips the roster on the stage without changing normal generated agents', async () => {
@@ -96,8 +106,8 @@ describe('Spiral agent roster persistence', () => {
 
     const loaded = await loadStageData(stage.id);
     expect(loaded?.stage.spiralAgentConfigs).toEqual([assistant, ...students]);
-    expect((await db.generatedAgents.where('stageId').equals(stage.id).toArray()).map((a) => a.id)).toEqual([
-      'gen-course-teacher',
-    ]);
+    expect(
+      (await db.generatedAgents.where('stageId').equals(stage.id).toArray()).map((a) => a.id),
+    ).toEqual(['gen-course-teacher']);
   });
 });
