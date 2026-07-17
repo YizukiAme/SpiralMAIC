@@ -19,6 +19,7 @@ import type { StatelessChatRequest, StatelessEvent } from '@/lib/types/chat';
 import { apiError } from '@/lib/server/api-response';
 import { createLogger } from '@/lib/logger';
 import { resolveModel } from '@/lib/server/resolve-model';
+import { parseExternalCodexLogicalSession } from '@/lib/server/codex/logical-session';
 import type { ThinkingConfig } from '@/lib/types/provider';
 const log = createLogger('Chat API');
 
@@ -79,6 +80,7 @@ export async function POST(req: NextRequest) {
       // wins, an unrouted one honors this client thinking (see resolve-model.ts).
       thinkingConfig: body.thinkingConfig ?? body.thinking,
       serviceTier: body.serviceTier,
+      logicalSession: parseExternalCodexLogicalSession(body.session),
     });
 
     if (isProviderKeyRequired(providerId) && !resolvedApiKey) {

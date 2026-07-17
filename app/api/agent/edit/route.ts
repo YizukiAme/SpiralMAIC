@@ -16,6 +16,7 @@ import { buildToolset } from '@/lib/agent/tools/registry';
 import { callLLM } from '@/lib/ai/llm';
 import { createLogger } from '@/lib/logger';
 import type { SceneContext } from '@/lib/agent/tools/regenerate-scene-actions';
+import { parseCodexLogicalSession } from '@/lib/server/codex/logical-session';
 
 const log = createLogger('MAIC Agent');
 
@@ -33,6 +34,7 @@ export const maxDuration = 300;
 export type SceneContextMap = Record<string, SceneContext>;
 
 interface AgentEditBody {
+  sessionId?: string;
   message: string;
   scene?: { id: string; title: string };
   /**
@@ -91,6 +93,10 @@ export async function POST(req: NextRequest) {
   if (!message) {
     return new Response('message is required', { status: 400 });
   }
+  const logicalSession = parseCodexLogicalSession({
+    kind: 'agent-edit',
+    id: body.sessionId,
+  });
 
   // Resolve via the 'maic-agent' stage so operators can route the editor agent
   // to a dedicated model via MODEL_ROUTES (per-stage config). When unrouted it
@@ -100,6 +106,7 @@ export async function POST(req: NextRequest) {
     req,
     body,
     'maic-agent',
+    logicalSession,
   );
 
   // Per-stage model resolution for the generation tools. Each tool is a
@@ -118,7 +125,7 @@ export async function POST(req: NextRequest) {
   ): Promise<string> => {
     let resolved = stageCache.get(stage);
     if (!resolved) {
-      resolved = await resolveModelFromRequest(req, body, stage);
+      resolved = await resolveModelFromRequest(req, body, stage, logicalSession);
       stageCache.set(stage, resolved);
     }
     const r = await callLLM(

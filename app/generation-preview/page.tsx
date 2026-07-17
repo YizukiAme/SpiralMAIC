@@ -434,6 +434,7 @@ function GenerationPreviewContent() {
         const blueprint =
           attempt.blueprint ??
           (await ensureRevisitBlueprint({
+            attemptId: revisit.attemptId,
             stage: attempt.sourceStage,
             scenes: attempt.sourceScenes,
             modelConfig,

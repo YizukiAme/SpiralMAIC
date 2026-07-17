@@ -73,6 +73,7 @@
  */
 export type ImageProviderId =
   | 'seedream'
+  | 'codex-image'
   | 'openai-image'
   | 'qwen-image'
   | 'nano-banana'
@@ -106,6 +107,8 @@ export interface ImageProviderConfig {
   name: string;
   /** Whether the provider requires an API key for authentication */
   requiresApiKey: boolean;
+  /** Credential path. Omitted providers preserve requiresApiKey-based behavior. */
+  credentialMode?: 'api-key' | 'oauth' | 'none';
   /** Default API base URL (can be overridden in user settings) */
   defaultBaseUrl?: string;
   /** Path to provider icon asset */

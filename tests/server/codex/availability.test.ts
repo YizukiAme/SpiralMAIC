@@ -19,7 +19,6 @@ async function makeTemporaryPath(): Promise<string> {
 function createEnv(overrides: Partial<NodeJS.ProcessEnv> = {}): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     NODE_ENV: 'development',
-    OPENMAIC_ENABLE_CODEX_OAUTH: 'true',
   };
 
   for (const [key, value] of Object.entries(overrides)) {
@@ -34,40 +33,29 @@ afterEach(async () => {
 });
 
 describe('getCodexOAuthAvailability', () => {
-  it('defaults off and returns no login methods', async () => {
+  it('is enabled without Codex feature environment variables', async () => {
     const dataDir = await makeTemporaryPath();
 
     const result = await getCodexOAuthAvailability({
-      env: createEnv({ OPENMAIC_ENABLE_CODEX_OAUTH: undefined }),
+      env: createEnv(),
       dataDir,
     });
 
     expect(result).toEqual({
-      available: false,
-      reason: CODEX_OAUTH_AVAILABILITY_REASONS.FEATURE_DISABLED,
-      methods: [],
+      available: true,
+      reason: CODEX_OAUTH_AVAILABILITY_REASONS.AVAILABLE,
+      methods: ['browser', 'device'],
     });
   });
 
-  it('offers device login in development without an access code', async () => {
+  it('offers browser and device login in development without an access code', async () => {
     const dataDir = await makeTemporaryPath();
 
     await expect(getCodexOAuthAvailability({ env: createEnv(), dataDir })).resolves.toEqual({
       available: true,
       reason: CODEX_OAUTH_AVAILABILITY_REASONS.AVAILABLE,
-      methods: ['device'],
+      methods: ['browser', 'device'],
     });
-  });
-
-  it('offers browser login only when its local-only flag is enabled', async () => {
-    const dataDir = await makeTemporaryPath();
-
-    const result = await getCodexOAuthAvailability({
-      env: createEnv({ OPENMAIC_CODEX_BROWSER_LOGIN: 'true' }),
-      dataDir,
-    });
-
-    expect(result.methods).toEqual(['browser', 'device']);
   });
 
   it('requires ACCESS_CODE in production', async () => {
@@ -87,7 +75,11 @@ describe('getCodexOAuthAvailability', () => {
       reason: CODEX_OAUTH_AVAILABILITY_REASONS.ACCESS_CODE_REQUIRED,
       methods: [],
     });
-    expect(withAccessCode.available).toBe(true);
+    expect(withAccessCode).toEqual({
+      available: true,
+      reason: CODEX_OAUTH_AVAILABILITY_REASONS.AVAILABLE,
+      methods: ['browser', 'device'],
+    });
   });
 
   it.each([

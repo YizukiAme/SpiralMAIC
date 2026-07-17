@@ -24,10 +24,10 @@ const CODEX_KEYS = [
   'settings.connected',
   'settings.codexOAuth.experimental',
   'settings.codexOAuth.unavailableTitle',
-  'settings.codexOAuth.unavailable.FEATURE_DISABLED',
   'settings.codexOAuth.unavailable.SERVERLESS_UNSUPPORTED',
   'settings.codexOAuth.unavailable.ACCESS_CODE_REQUIRED',
   'settings.codexOAuth.unavailable.DATA_DIR_UNWRITABLE',
+  'settings.codexOAuth.unavailable.RUNTIME_LOCKED',
   'settings.codexOAuth.connectedAs',
   'settings.codexOAuth.connected',
   'settings.codexOAuth.signInBrowser',
@@ -91,6 +91,26 @@ describe('Codex OAuth locale coverage', () => {
   it('does not keep copy for the removed connection notice', () => {
     for (const messages of Object.values(locales)) {
       expect(messages.settings.codexOAuth).not.toHaveProperty('connectTitle');
+    }
+  });
+
+  it('removes feature-disabled copy and keeps login failure neutral between methods', () => {
+    const expectedLoginFailed = {
+      'ar-SA': 'فشل تسجيل الدخول. اختر إحدى طريقتي تسجيل الدخول للمحاولة مرة أخرى.',
+      'en-US': 'Sign-in failed. Choose either sign-in method to try again.',
+      'ja-JP': 'サインインに失敗しました。いずれかのサインイン方法を選んで再試行してください。',
+      'ko-KR': '로그인에 실패했습니다. 로그인 방법 중 하나를 선택해 다시 시도하세요.',
+      'pt-BR': 'Falha no login. Escolha um dos métodos de login para tentar novamente.',
+      'ru-RU': 'Не удалось войти. Выберите любой способ входа и повторите попытку.',
+      'zh-CN': '登录失败，请重新选择任一登录方式重试。',
+      'zh-TW': '登入失敗，請重新選擇任一登入方式再試一次。',
+    } as const;
+
+    for (const [locale, messages] of Object.entries(locales)) {
+      expect(messages.settings.codexOAuth.unavailable).not.toHaveProperty('FEATURE_DISABLED');
+      expect(messages.settings.codexOAuth.loginFailed).toBe(
+        expectedLoginFailed[locale as keyof typeof expectedLoginFailed],
+      );
     }
   });
 });

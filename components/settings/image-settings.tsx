@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { useSettingsStore } from '@/lib/store/settings';
-import { IMAGE_PROVIDERS } from '@/lib/media/image-providers';
+import { IMAGE_PROVIDERS, getImageProviderCredentialMode } from '@/lib/media/image-providers';
 import {
   Loader2,
   CheckCircle2,
@@ -19,12 +19,14 @@ import {
   Settings2,
   Trash2,
   RefreshCw,
+  LogIn,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { ImageProviderId } from '@/lib/media/types';
 
 interface ImageSettingsProps {
   selectedProviderId: ImageProviderId;
+  onManageCodexLogin: () => void;
 }
 
 interface WorkflowEntry {
@@ -32,7 +34,7 @@ interface WorkflowEntry {
   name: string;
 }
 
-export function ImageSettings({ selectedProviderId }: ImageSettingsProps) {
+export function ImageSettings({ selectedProviderId, onManageCodexLogin }: ImageSettingsProps) {
   const { t } = useI18n();
 
   const imageModelId = useSettingsStore((state) => state.imageModelId);
@@ -97,6 +99,10 @@ export function ImageSettings({ selectedProviderId }: ImageSettingsProps) {
   );
   const isServerConfigured = !!currentConfig?.isServerConfigured;
   const requiresApiKey = currentProvider?.requiresApiKey ?? true;
+  const credentialMode = currentProvider
+    ? getImageProviderCredentialMode(currentProvider)
+    : 'api-key';
+  const isOAuth = credentialMode === 'oauth';
 
   const handleApiKeyChange = (apiKey: string) => {
     setImageProviderConfig(selectedProviderId, { apiKey });
@@ -123,14 +129,16 @@ export function ImageSettings({ selectedProviderId }: ImageSettingsProps) {
       const data = await response.json();
       if (data.success) {
         setTestStatus('success');
-        setTestMessage(t('settings.imageConnectivitySuccess'));
+        setTestMessage(
+          isOAuth ? t('settings.codexImageLoginValid') : t('settings.imageConnectivitySuccess'),
+        );
       } else {
         setTestStatus('error');
-        setTestMessage(`${t('settings.imageConnectivityFailed')}: ${data.message}`);
+        setTestMessage(t('settings.imageConnectivityFailed'));
       }
-    } catch (err) {
+    } catch {
       setTestStatus('error');
-      setTestMessage(`${t('settings.imageConnectivityFailed')}: ${err}`);
+      setTestMessage(t('settings.imageConnectivityFailed'));
     } finally {
       setTestLoading(false);
     }
@@ -179,7 +187,7 @@ export function ImageSettings({ selectedProviderId }: ImageSettingsProps) {
   return (
     <div className="space-y-6 max-w-3xl">
       {/* Server-configured notice */}
-      {isServerConfigured && (
+      {!isOAuth && isServerConfigured && (
         <div className="rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30 p-3 text-sm text-blue-700 dark:text-blue-300">
           {t('settings.serverConfiguredNotice')}
         </div>
@@ -188,7 +196,89 @@ export function ImageSettings({ selectedProviderId }: ImageSettingsProps) {
       {/* Managed providers are admin-owned: the operator's key and base URL
           are authoritative and not overridable here, so the editing inputs
           are hidden (server ignores client-sent overrides for these). */}
-      {!isServerConfigured && (
+      {isOAuth && (
+        <div className="space-y-4 rounded-lg border border-border/60 bg-muted/20 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <span
+                className={cn(
+                  'size-2 rounded-full',
+                  isServerConfigured ? 'bg-emerald-500' : 'bg-muted-foreground/40',
+                )}
+              />
+              <span className="text-sm font-medium">
+                {isServerConfigured
+                  ? t('settings.codexImageConnected')
+                  : t('settings.codexImageLoginRequired')}
+              </span>
+            </div>
+            {isServerConfigured ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleTest}
+                disabled={testLoading}
+                className="gap-1.5"
+              >
+                {testLoading ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Zap className="h-3.5 w-3.5" />
+                )}
+                {t('settings.testConnection')}
+              </Button>
+            ) : (
+              <Button size="sm" onClick={onManageCodexLogin} className="gap-1.5">
+                <LogIn className="h-3.5 w-3.5" />
+                {t('settings.codexImageManageLogin')}
+              </Button>
+            )}
+          </div>
+
+          {isServerConfigured && (
+            <p className="text-xs text-muted-foreground">{t('settings.codexImageTestHint')}</p>
+          )}
+
+          {testMessage && (
+            <div
+              className={cn(
+                'rounded-lg p-3 text-sm overflow-hidden',
+                testStatus === 'success' &&
+                  'bg-green-50 text-green-700 border border-green-200 dark:bg-green-950/50 dark:text-green-400 dark:border-green-800',
+                testStatus === 'error' &&
+                  'bg-red-50 text-red-700 border border-red-200 dark:bg-red-950/50 dark:text-red-400 dark:border-red-800',
+              )}
+            >
+              <div className="flex items-start gap-2 min-w-0">
+                {testStatus === 'success' && <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />}
+                {testStatus === 'error' && <XCircle className="h-4 w-4 mt-0.5 shrink-0" />}
+                <p className="flex-1 min-w-0 break-all">{testMessage}</p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {isOAuth && (
+        <div className="space-y-3">
+          <Label className="text-base">{t('settings.codexImageFixedModel')}</Label>
+          {builtInModels.map((model) => (
+            <div
+              key={model.id}
+              className="flex items-center justify-between rounded-lg border border-border/50 bg-card p-3"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="font-mono text-sm font-medium">{model.name}</div>
+                <div className="mt-0.5 font-mono text-xs text-muted-foreground">{model.id}</div>
+              </div>
+              <CheckCircle2 className="ml-2 h-4 w-4 shrink-0 text-primary" />
+            </div>
+          ))}
+          <p className="text-xs text-muted-foreground">{t('settings.codexImagePlanLimits')}</p>
+        </div>
+      )}
+
+      {!isOAuth && !isServerConfigured && (
         <>
           {/* API Key + Test inline */}
           <div className="space-y-2">
@@ -285,7 +375,7 @@ export function ImageSettings({ selectedProviderId }: ImageSettingsProps) {
       )}
 
       {/* ── ComfyUI: Workflow list ── */}
-      {isComfyUI ? (
+      {isOAuth ? null : isComfyUI ? (
         <div className="space-y-3">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <Label className="text-base">{t('settings.comfyuiWorkflows')}</Label>
@@ -368,10 +458,12 @@ export function ImageSettings({ selectedProviderId }: ImageSettingsProps) {
         <div className="space-y-3">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <Label className="text-base">{t('settings.models')}</Label>
-            <Button variant="outline" size="sm" onClick={handleOpenAddModel} className="gap-1.5">
-              <Plus className="h-3.5 w-3.5" />
-              {t('settings.addNewModel')}
-            </Button>
+            {!isOAuth && (
+              <Button variant="outline" size="sm" onClick={handleOpenAddModel} className="gap-1.5">
+                <Plus className="h-3.5 w-3.5" />
+                {t('settings.addNewModel')}
+              </Button>
+            )}
           </div>
 
           <div className="space-y-1.5">
@@ -424,8 +516,8 @@ export function ImageSettings({ selectedProviderId }: ImageSettingsProps) {
         </div>
       )}
 
-      {/* Add/Edit Model Dialog — only used for non-ComfyUI providers */}
-      <Dialog open={showModelDialog} onOpenChange={setShowModelDialog}>
+      {/* Add/Edit Model Dialog — unavailable to fixed OAuth providers */}
+      <Dialog open={!isOAuth && showModelDialog} onOpenChange={setShowModelDialog}>
         <DialogContent className="sm:max-w-md">
           <DialogTitle>
             {editingModelIndex !== null ? t('settings.editModel') : t('settings.addNewModel')}

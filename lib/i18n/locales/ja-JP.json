@@ -1568,6 +1568,14 @@
     "testImageConnectivity": "接続テスト",
     "imageConnectivitySuccess": "画像サービスへの接続に成功しました",
     "imageConnectivityFailed": "画像サービスへの接続に失敗しました",
+    "providerCodexImage": "Codex",
+    "codexImageLoginRequired": "画像生成を使うには「LLMプロバイダー → Codex」でログインしてください。",
+    "codexImageConnected": "Codex に接続済み",
+    "codexImageManageLogin": "Codex ログインを管理",
+    "codexImageFixedModel": "固定モデル",
+    "codexImageTestHint": "画像を生成せず、画像枠を消費せずに Codex ログインだけを確認します。",
+    "codexImagePlanLimits": "Codex ログインと ChatGPT プラン枠を使用します。画像はテキストより多くの枠を使う場合があります。",
+    "codexImageLoginValid": "Codex ログインで画像生成を利用できます",
     "imageTestSuccess": "画像生成テストに成功しました",
     "imageTestFailed": "画像生成テストに失敗しました",
     "imageTestPromptPlaceholder": "テスト用の画像の説明を入力",
@@ -1719,10 +1727,10 @@
       "experimental": "実験的なサードパーティ Codex 連携です。ChatGPT プランの利用枠を使用します。",
       "unavailableTitle": "Codex サインインは利用できません",
       "unavailable": {
-        "FEATURE_DISABLED": "サーバーで Codex OAuth を有効にしてください。",
         "SERVERLESS_UNSUPPORTED": "Codex OAuth には永続ストレージを備えたセルフホスト Node サーバーが必要です。",
-        "ACCESS_CODE_REQUIRED": "本番環境で Codex OAuth を有効にする前に ACCESS_CODE を設定してください。",
-        "DATA_DIR_UNWRITABLE": "データディレクトリに書き込めません。/app/data の権限を確認してください。"
+        "ACCESS_CODE_REQUIRED": "本番環境で Codex OAuth を利用するには ACCESS_CODE を設定してください。",
+        "DATA_DIR_UNWRITABLE": "データディレクトリに書き込めません。/app/data の権限を確認してください。",
+        "RUNTIME_LOCKED": "別の OpenMAIC Node プロセスが Codex 認証データディレクトリを使用しています。"
       },
       "connectedAs": "{email} として接続中",
       "connected": "ChatGPT に接続済み",
@@ -1744,7 +1752,7 @@
       "testForbidden": "この ChatGPT ワークスペースには Codex の権限がありません。",
       "testRateLimited": "ChatGPT プランの利用枠またはレート上限に達しました。",
       "testFailed": "Codex への接続に失敗しました。",
-      "loginFailed": "サインインに失敗しました。再試行するかデバイスコードを使用してください。",
+      "loginFailed": "サインインに失敗しました。いずれかのサインイン方法を選んで再試行してください。",
       "loginExpired": "サインインの有効期限が切れました。もう一度開始してください。"
     },
     "connected": "接続済み"

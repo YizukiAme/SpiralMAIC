@@ -11,7 +11,7 @@
  * indicate something is wrong.
  */
 
-import type { StatelessEvent, DirectorState } from '@/lib/types/chat';
+import type { StatelessEvent, DirectorState, StatelessChatSessionContext } from '@/lib/types/chat';
 import type { ModelServiceTier, ThinkingConfig } from '@/lib/types/provider';
 import { createLogger } from '@/lib/logger';
 
@@ -46,6 +46,7 @@ export interface AgentLoopStoreState {
 
 /** Request template — fields that stay constant across loop iterations */
 export interface AgentLoopRequest {
+  session?: StatelessChatSessionContext;
   config: {
     agentIds: string[];
     sessionType?: string;
@@ -146,6 +147,7 @@ export async function runAgentLoop(
 
     // Build request body
     const body: Record<string, unknown> = {
+      session: request.session,
       messages: currentMessages,
       storeState: freshStoreState,
       config: request.config,

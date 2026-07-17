@@ -102,10 +102,10 @@ function parseAuthStatus(value: unknown): CodexAuthPublicStatus | null {
   const record = value as Record<string, unknown>;
   const reasons = new Set([
     'AVAILABLE',
-    'FEATURE_DISABLED',
     'SERVERLESS_UNSUPPORTED',
     'ACCESS_CODE_REQUIRED',
     'DATA_DIR_UNWRITABLE',
+    'RUNTIME_LOCKED',
   ]);
   if (
     typeof record.available !== 'boolean' ||
@@ -242,45 +242,42 @@ export class CodexOAuthClient {
       !popup ||
       popup.closed
     ) {
-      await this.fallbackFromBrowser(generation, popup);
+      await this.failBrowserAttempt(generation, popup);
       return;
     }
 
     try {
       popup.navigate(attempt.authorizationUrl);
     } catch {
-      await this.fallbackFromBrowser(generation, popup);
+      await this.failBrowserAttempt(generation, popup);
       return;
     }
     await this.acceptAttempt(attempt, generation);
   }
 
-  private async fallbackFromBrowser(
+  private async failBrowserAttempt(
     generation: number,
     popup: CodexPopupHandle | null,
   ): Promise<void> {
     popup?.close();
+    if (this.popup === popup) this.popup = null;
     if (!this.isCurrent(generation)) return;
     try {
       await this.dependencies.fetcher(LOGIN_ENDPOINT, { method: 'DELETE' });
     } catch {
-      // The device POST replaces any surviving server attempt too.
+      // Keep browser cleanup best-effort while surfacing the fixed login error.
     }
     if (!this.isCurrent(generation)) return;
-    const supportsDevice = this.snapshot.auth?.methods.includes('device') ?? true;
-    if (supportsDevice) {
-      await this.startDeviceInternal();
-    } else {
-      this.publish({ busy: null, startingMethod: null, errorKey: 'loginFailed' });
-    }
+    this.publish({
+      attempt: null,
+      busy: null,
+      startingMethod: null,
+      errorKey: 'loginFailed',
+    });
   }
 
   async startDevice(): Promise<void> {
     if (!this.canStartAction()) return;
-    await this.startDeviceInternal();
-  }
-
-  private async startDeviceInternal(): Promise<void> {
     this.popup?.close();
     this.popup = null;
     const generation = this.beginGeneration();
@@ -485,7 +482,9 @@ export class CodexOAuthClient {
 }
 
 interface CodexProviderState {
-  fetchServerProviders: () => Promise<void>;
+  fetchServerProviders: (options?: {
+    reconcileOAuthImageSelectionImmediately?: boolean;
+  }) => Promise<void>;
   providersConfig: Record<string, { isServerConfigured?: boolean; models?: Array<{ id: string }> }>;
   setModel: (providerId: 'openai-codex', modelId: string) => void;
 }
@@ -503,7 +502,9 @@ export async function syncCodexProviderAndSelect(
 export async function syncServerProvidersAfterAccessUnlock(
   getState: () => Pick<CodexProviderState, 'fetchServerProviders'>,
 ): Promise<void> {
-  await getState().fetchServerProviders();
+  await getState().fetchServerProviders({
+    reconcileOAuthImageSelectionImmediately: true,
+  });
 }
 
 export function getProviderBadgeTranslationKey(provider: {

@@ -6,6 +6,7 @@ import type {
   CodexOAuthLoginMethod,
 } from '@/lib/types/codex-auth';
 
+import { readBoundedJson } from './bounded-json';
 import {
   CODEX_OAUTH_BROWSER_REDIRECT_URI,
   CODEX_OAUTH_DEVICE_REDIRECT_URI,
@@ -19,9 +20,12 @@ import {
 import {
   CODEX_OAUTH_CLIENT_ID,
   CODEX_OAUTH_ERROR_CODES,
+  CODEX_OAUTH_REQUEST_TIMEOUT_MS,
   CodexOAuthError,
+  isCodexOAuthRequestTimeoutError,
   type CodexClock,
   type TokenExchangeFetch,
+  withCodexOAuthRequestTimeout,
 } from './token-provider';
 import { codexCredentialsEqual, withCodexCredentialVaultMutation } from './vault';
 import type { CodexCredentialVault, CodexOAuthCredentials } from './vault';
@@ -38,6 +42,8 @@ interface CodexLoginManagerOptions {
   clock?: CodexClock;
   randomBytes?: (size: number) => Buffer;
   scheduler?: CodexLoginScheduler;
+  oauthRequestTimeoutMs?: number;
+  onCredentialsReplaced?: () => void | Promise<void>;
 }
 
 interface CodexLoginScheduler {
@@ -57,6 +63,8 @@ interface BrowserAttempt {
   timeoutHandle?: unknown;
   verificationUrl?: string;
   callbackClaimed?: boolean;
+  abortController: AbortController;
+  operationInFlight?: Promise<void>;
 }
 
 interface DeviceAttempt {
@@ -70,6 +78,7 @@ interface DeviceAttempt {
   nextPollAt: number;
   errorCode?: CodexLoginErrorCode;
   pollInFlight?: Promise<CodexLoginAttempt>;
+  abortController: AbortController;
 }
 
 interface TerminalAttempt {
@@ -80,6 +89,12 @@ interface TerminalAttempt {
 }
 
 type ActiveAttempt = BrowserAttempt | DeviceAttempt | TerminalAttempt;
+
+interface ProvisionalDeviceAttempt {
+  generation: number;
+  abortController: AbortController;
+  operationInFlight?: Promise<unknown>;
+}
 
 function closeServer(server: Server): Promise<void> {
   if (!server.listening) return Promise.resolve();
@@ -122,7 +137,11 @@ export class CodexLoginManager {
   private readonly clock: CodexClock;
   private readonly randomBytes?: (size: number) => Buffer;
   private readonly scheduler: CodexLoginScheduler;
+  private readonly oauthRequestTimeoutMs: number;
+  private readonly onCredentialsReplaced?: () => void | Promise<void>;
   private activeAttempt: ActiveAttempt | null = null;
+  private provisionalBrowserAttempt: BrowserAttempt | null = null;
+  private provisionalDeviceAttempt: ProvisionalDeviceAttempt | null = null;
   private attemptGeneration = 0;
   private browserSetupTail: Promise<void> = Promise.resolve();
   private readonly credentialWrites = new Set<Promise<boolean>>();
@@ -136,6 +155,8 @@ export class CodexLoginManager {
       setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
       clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
     };
+    this.oauthRequestTimeoutMs = options.oauthRequestTimeoutMs ?? CODEX_OAUTH_REQUEST_TIMEOUT_MS;
+    this.onCredentialsReplaced = options.onCredentialsReplaced;
   }
 
   async begin(method: CodexOAuthLoginMethod): Promise<CodexLoginAttempt> {
@@ -175,9 +196,16 @@ export class CodexLoginManager {
       verifier: authorization.verifier,
       state: authorization.state,
       server,
+      abortController: new AbortController(),
     };
+    this.provisionalBrowserAttempt = attempt;
     server.on('request', (request, response) => {
-      void this.handleBrowserCallback(attempt, request.url ?? '/', response);
+      const operation = this.handleBrowserCallback(attempt, request.url ?? '/', response);
+      attempt.operationInFlight = operation;
+      const clearOperation = () => {
+        if (attempt.operationInFlight === operation) attempt.operationInFlight = undefined;
+      };
+      void operation.then(clearOperation, clearOperation);
     });
     try {
       await new Promise<void>((resolve, reject) => {
@@ -188,15 +216,23 @@ export class CodexLoginManager {
         });
       });
     } catch {
+      if (generation !== this.attemptGeneration || attempt.abortController.signal.aborted) {
+        if (this.provisionalBrowserAttempt === attempt) this.provisionalBrowserAttempt = null;
+        return this.currentOrReplacedAttempt('browser');
+      }
       attempt.status = 'failed';
       attempt.errorCode = 'BROWSER_UNAVAILABLE';
       attempt.verificationUrl = CODEX_OAUTH_DEVICE_VERIFICATION_URL;
+      if (this.provisionalBrowserAttempt === attempt) this.provisionalBrowserAttempt = null;
       return this.activateStartedAttempt(generation, attempt);
     }
-    if (generation !== this.attemptGeneration) {
+    if (generation !== this.attemptGeneration || attempt.abortController.signal.aborted) {
+      attempt.abortController.abort();
       await closeServer(server);
+      if (this.provisionalBrowserAttempt === attempt) this.provisionalBrowserAttempt = null;
       return this.currentOrReplacedAttempt('browser');
     }
+    if (this.provisionalBrowserAttempt === attempt) this.provisionalBrowserAttempt = null;
     this.activeAttempt = attempt;
     attempt.timeoutHandle = this.scheduler.setTimeout(
       () => this.expireBrowserAttempt(attempt),
@@ -209,14 +245,20 @@ export class CodexLoginManager {
     const attempt = this.activeAttempt;
     if (!attempt) return null;
     if (attempt.method !== 'device' || attempt.status !== 'pending') {
-      if (attempt.status === 'expired') await this.waitForCredentialWrites();
+      if (attempt.status === 'expired' || attempt.status === 'complete') {
+        await this.waitForCredentialWrites();
+      }
       return toPublicAttempt(attempt);
     }
 
     const now = this.clock.now();
     if (now >= attempt.expiresAt) {
       attempt.status = 'expired';
-      await this.waitForCredentialWrites();
+      attempt.abortController.abort();
+      await Promise.all([
+        attempt.pollInFlight?.catch(() => undefined),
+        this.waitForCredentialWrites(),
+      ]);
       return toPublicAttempt(attempt);
     }
     if (attempt.pollInFlight) return attempt.pollInFlight;
@@ -237,11 +279,28 @@ export class CodexLoginManager {
 
   private async cancelActiveAttempt(): Promise<void> {
     const attempt = this.activeAttempt;
+    const provisionalBrowser = this.provisionalBrowserAttempt;
+    const provisionalDevice = this.provisionalDeviceAttempt;
     this.activeAttempt = null;
+    this.provisionalBrowserAttempt = null;
+    this.provisionalDeviceAttempt = null;
     const cleanup: Array<Promise<unknown>> = [this.waitForCredentialWrites()];
+
+    provisionalBrowser?.abortController.abort();
+    provisionalDevice?.abortController.abort();
+    if (provisionalBrowser) cleanup.push(closeServer(provisionalBrowser.server));
+    if (provisionalDevice?.operationInFlight) {
+      cleanup.push(provisionalDevice.operationInFlight.catch(() => undefined));
+    }
+
     if (attempt?.method === 'browser' && 'server' in attempt) {
+      attempt.abortController.abort();
       this.clearBrowserTimeout(attempt);
       cleanup.push(closeServer(attempt.server));
+      if (attempt.operationInFlight) cleanup.push(attempt.operationInFlight.catch(() => undefined));
+    } else if (attempt?.method === 'device' && 'abortController' in attempt) {
+      attempt.abortController.abort();
+      if (attempt.pollInFlight) cleanup.push(attempt.pollInFlight.catch(() => undefined));
     }
     await Promise.all(cleanup);
   }
@@ -254,6 +313,7 @@ export class CodexLoginManager {
     if (this.activeAttempt !== attempt || attempt.status !== 'pending') return false;
     if (this.clock.now() < attempt.expiresAt) return true;
     attempt.status = 'expired';
+    attempt.abortController.abort();
     return false;
   }
 
@@ -261,22 +321,39 @@ export class CodexLoginManager {
     attempt: BrowserAttempt | DeviceAttempt,
     credentials: CodexOAuthCredentials,
   ): Promise<boolean> {
-    const write = withCodexCredentialVaultMutation(this.vault, async () => {
-      if (!this.isAttemptCommitEligible(attempt)) return false;
-      const previous = await this.vault.load();
-      if (!this.isAttemptCommitEligible(attempt)) return false;
-      await this.vault.save(credentials);
-      if (this.isAttemptCommitEligible(attempt)) {
-        attempt.status = 'complete';
-        return true;
-      }
+    const write = (async () => {
+      const result = await withCodexCredentialVaultMutation(this.vault, async () => {
+        if (!this.isAttemptCommitEligible(attempt)) {
+          return { committed: false, replaced: false };
+        }
+        const previous = await this.vault.load();
+        if (!this.isAttemptCommitEligible(attempt)) {
+          return { committed: false, replaced: false };
+        }
+        // The catalog clear is a publication barrier for every interactive
+        // login, including a first login after logout or terminal invalidation.
+        // A prior best-effort clear may have failed after the vault was emptied,
+        // so new credentials must never make that stale capability cache usable.
+        await this.onCredentialsReplaced?.();
+        if (!this.isAttemptCommitEligible(attempt)) {
+          return { committed: false, replaced: false };
+        }
+        await this.vault.save(credentials);
+        if (this.isAttemptCommitEligible(attempt)) {
+          attempt.status = 'complete';
+          return { committed: true, replaced: previous !== null };
+        }
 
-      const current = await this.vault.load();
-      if (!codexCredentialsEqual(current, credentials)) return false;
-      if (previous) await this.vault.save(previous);
-      else await this.vault.clear();
-      return false;
-    });
+        const current = await this.vault.load();
+        if (!codexCredentialsEqual(current, credentials)) {
+          return { committed: false, replaced: false };
+        }
+        if (previous) await this.vault.save(previous);
+        else await this.vault.clear();
+        return { committed: false, replaced: false };
+      });
+      return result.committed;
+    })();
     this.credentialWrites.add(write);
     try {
       return await write;
@@ -286,95 +363,123 @@ export class CodexLoginManager {
   }
 
   private async beginDeviceAttempt(generation: number): Promise<CodexLoginAttempt> {
-    let response: Response;
+    const lifecycle: ProvisionalDeviceAttempt = {
+      generation,
+      abortController: new AbortController(),
+    };
+    this.provisionalDeviceAttempt = lifecycle;
+    const operation = withCodexOAuthRequestTimeout(
+      async (signal) => {
+        const response = await this.oauthFetch(CODEX_OAUTH_DEVICE_USERCODE_ENDPOINT, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ client_id: CODEX_OAUTH_CLIENT_ID }),
+          redirect: 'error',
+          signal,
+        });
+        if (response.status === 404 || response.status >= 500) {
+          return { response, payload: null, invalidJson: false };
+        }
+        const json = await readBoundedJson(response, signal);
+        return {
+          response,
+          payload: json.ok ? json.payload : null,
+          invalidJson: !json.ok,
+        };
+      },
+      {
+        signal: lifecycle.abortController.signal,
+        timeoutMs: this.oauthRequestTimeoutMs,
+      },
+    );
+    lifecycle.operationInFlight = operation;
+
     try {
-      response = await this.oauthFetch(CODEX_OAUTH_DEVICE_USERCODE_ENDPOINT, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ client_id: CODEX_OAUTH_CLIENT_ID }),
+      const { response, payload, invalidJson } = await operation;
+      if (generation !== this.attemptGeneration || lifecycle.abortController.signal.aborted) {
+        return this.currentOrReplacedAttempt('device');
+      }
+      if (response.status === 404) {
+        return this.activateStartedAttempt(generation, {
+          method: 'device',
+          status: 'failed',
+          errorCode: 'DEVICE_UNAVAILABLE',
+        });
+      }
+      if (response.status >= 500) {
+        return this.activateStartedAttempt(generation, {
+          method: 'device',
+          status: 'failed',
+          errorCode: 'UPSTREAM_ERROR',
+        });
+      }
+      if (
+        invalidJson ||
+        !response.ok ||
+        !payload ||
+        typeof payload !== 'object' ||
+        Array.isArray(payload)
+      ) {
+        return this.activateStartedAttempt(generation, {
+          method: 'device',
+          status: 'failed',
+          errorCode: 'INVALID_RESPONSE',
+        });
+      }
+
+      const record = payload as Record<string, unknown>;
+      const deviceAuthId =
+        typeof record.device_auth_id === 'string' ? record.device_auth_id : undefined;
+      const userCode = typeof record.user_code === 'string' ? record.user_code : undefined;
+      const parsedInterval = Number(record.interval);
+      const interval =
+        Number.isFinite(parsedInterval) && parsedInterval > 0
+          ? parsedInterval
+          : DEFAULT_DEVICE_INTERVAL_SECONDS;
+      const parsedExpiresIn = Number(record.expires_in);
+      const durationMs =
+        Number.isFinite(parsedExpiresIn) && parsedExpiresIn > 0
+          ? Math.min(parsedExpiresIn * 1000, DEVICE_TIMEOUT_MS)
+          : DEVICE_TIMEOUT_MS;
+      if (!deviceAuthId || !userCode) {
+        return this.activateStartedAttempt(generation, {
+          method: 'device',
+          status: 'failed',
+          errorCode: 'INVALID_RESPONSE',
+        });
+      }
+
+      const now = this.clock.now();
+      return this.activateStartedAttempt(generation, {
+        method: 'device',
+        status: 'pending',
+        verificationUrl: CODEX_OAUTH_DEVICE_VERIFICATION_URL,
+        userCode,
+        expiresAt: now + durationMs,
+        interval,
+        deviceAuthId,
+        nextPollAt: now + interval * 1000,
+        abortController: lifecycle.abortController,
       });
     } catch {
-      const attempt: TerminalAttempt = {
+      if (generation !== this.attemptGeneration || lifecycle.abortController.signal.aborted) {
+        return this.currentOrReplacedAttempt('device');
+      }
+      return this.activateStartedAttempt(generation, {
         method: 'device',
         status: 'failed',
         errorCode: 'NETWORK_ERROR',
-      };
-      return this.activateStartedAttempt(generation, attempt);
+      });
+    } finally {
+      if (this.provisionalDeviceAttempt === lifecycle) this.provisionalDeviceAttempt = null;
     }
-    if (response.status === 404) {
-      const attempt: TerminalAttempt = {
-        method: 'device',
-        status: 'failed',
-        errorCode: 'DEVICE_UNAVAILABLE',
-      };
-      return this.activateStartedAttempt(generation, attempt);
-    }
-    if (response.status >= 500) {
-      const attempt: TerminalAttempt = {
-        method: 'device',
-        status: 'failed',
-        errorCode: 'UPSTREAM_ERROR',
-      };
-      return this.activateStartedAttempt(generation, attempt);
-    }
-    let payload: unknown;
-    try {
-      payload = await response.json();
-    } catch {
-      const attempt: TerminalAttempt = {
-        method: 'device',
-        status: 'failed',
-        errorCode: 'INVALID_RESPONSE',
-      };
-      return this.activateStartedAttempt(generation, attempt);
-    }
-    if (!response.ok || !payload || typeof payload !== 'object' || Array.isArray(payload)) {
-      const attempt: TerminalAttempt = {
-        method: 'device',
-        status: 'failed',
-        errorCode: 'INVALID_RESPONSE',
-      };
-      return this.activateStartedAttempt(generation, attempt);
-    }
-    const record = payload as Record<string, unknown>;
-    const deviceAuthId =
-      typeof record.device_auth_id === 'string' ? record.device_auth_id : undefined;
-    const userCode = typeof record.user_code === 'string' ? record.user_code : undefined;
-    const parsedInterval = Number(record.interval);
-    const interval =
-      Number.isFinite(parsedInterval) && parsedInterval > 0
-        ? parsedInterval
-        : DEFAULT_DEVICE_INTERVAL_SECONDS;
-    const parsedExpiresIn = Number(record.expires_in);
-    const durationMs =
-      Number.isFinite(parsedExpiresIn) && parsedExpiresIn > 0
-        ? Math.min(parsedExpiresIn * 1000, DEVICE_TIMEOUT_MS)
-        : DEVICE_TIMEOUT_MS;
-    if (!deviceAuthId || !userCode) {
-      const attempt: TerminalAttempt = {
-        method: 'device',
-        status: 'failed',
-        errorCode: 'INVALID_RESPONSE',
-      };
-      return this.activateStartedAttempt(generation, attempt);
-    }
-
-    const now = this.clock.now();
-    const attempt: DeviceAttempt = {
-      method: 'device',
-      status: 'pending',
-      verificationUrl: CODEX_OAUTH_DEVICE_VERIFICATION_URL,
-      userCode,
-      expiresAt: now + durationMs,
-      interval,
-      deviceAuthId,
-      nextPollAt: now + interval * 1000,
-    };
-    return this.activateStartedAttempt(generation, attempt);
   }
 
   private activateStartedAttempt(generation: number, attempt: ActiveAttempt): CodexLoginAttempt {
-    if (generation !== this.attemptGeneration) return this.currentOrReplacedAttempt(attempt.method);
+    if (generation !== this.attemptGeneration) {
+      if ('abortController' in attempt) attempt.abortController.abort();
+      return this.currentOrReplacedAttempt(attempt.method);
+    }
     this.activeAttempt = attempt;
     return toPublicAttempt(attempt);
   }
@@ -387,30 +492,56 @@ export class CodexLoginManager {
 
   private async pollDeviceAttempt(attempt: DeviceAttempt, now: number): Promise<CodexLoginAttempt> {
     attempt.nextPollAt = now + attempt.interval * 1000;
-    let response: Response;
+    const remainingAtPollStart = Math.max(0, attempt.expiresAt - now);
+    const pollTimeoutMs = Math.min(this.oauthRequestTimeoutMs, remainingAtPollStart);
+    const pollDeadlineBound = remainingAtPollStart <= this.oauthRequestTimeoutMs;
+    let requestResult: {
+      response: Response;
+      payload: unknown;
+      invalidJson: boolean;
+    };
     try {
-      response = await this.oauthFetch(CODEX_OAUTH_DEVICE_TOKEN_ENDPOINT, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          device_auth_id: attempt.deviceAuthId,
-          user_code: attempt.userCode,
-        }),
-      });
-    } catch {
+      requestResult = await withCodexOAuthRequestTimeout(
+        async (signal) => {
+          const response = await this.oauthFetch(CODEX_OAUTH_DEVICE_TOKEN_ENDPOINT, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              device_auth_id: attempt.deviceAuthId,
+              user_code: attempt.userCode,
+            }),
+            redirect: 'error',
+            signal,
+          });
+          if (response.status === 403 || response.status === 404) {
+            return { response, payload: null, invalidJson: false };
+          }
+          const json = await readBoundedJson(response, signal);
+          return {
+            response,
+            payload: json.ok ? json.payload : null,
+            invalidJson: !json.ok,
+          };
+        },
+        { signal: attempt.abortController.signal, timeoutMs: pollTimeoutMs },
+      );
+    } catch (error) {
       if (!this.isAttemptCommitEligible(attempt)) return toPublicAttempt(attempt);
+      if (pollDeadlineBound && isCodexOAuthRequestTimeoutError(error)) {
+        attempt.status = 'expired';
+        attempt.abortController.abort();
+        return toPublicAttempt(attempt);
+      }
       attempt.status = 'failed';
       attempt.errorCode = 'NETWORK_ERROR';
       return toPublicAttempt(attempt);
     }
+    const { response, payload, invalidJson } = requestResult;
     if (response.status === 403 || response.status === 404) {
       this.isAttemptCommitEligible(attempt);
       return toPublicAttempt(attempt);
     }
-    let payload: unknown;
-    try {
-      payload = await response.json();
-    } catch {
+    if (invalidJson) {
       if (!this.isAttemptCommitEligible(attempt)) return toPublicAttempt(attempt);
       attempt.status = 'failed';
       attempt.errorCode = 'INVALID_RESPONSE';
@@ -441,6 +572,9 @@ export class CodexLoginManager {
     }
     if (!this.isAttemptCommitEligible(attempt)) return toPublicAttempt(attempt);
     let credentials;
+    const remainingAtExchangeStart = Math.max(0, attempt.expiresAt - this.clock.now());
+    const exchangeTimeoutMs = Math.min(this.oauthRequestTimeoutMs, remainingAtExchangeStart);
+    const exchangeDeadlineBound = remainingAtExchangeStart <= this.oauthRequestTimeoutMs;
     try {
       credentials = await exchangeAuthorizationCode({
         code: authorizationCode,
@@ -448,9 +582,16 @@ export class CodexLoginManager {
         redirectUri: CODEX_OAUTH_DEVICE_REDIRECT_URI,
         tokenExchangeFetch: this.oauthFetch,
         clock: this.clock,
+        signal: attempt.abortController.signal,
+        timeoutMs: exchangeTimeoutMs,
       });
     } catch (error) {
       if (!this.isAttemptCommitEligible(attempt)) return toPublicAttempt(attempt);
+      if (exchangeDeadlineBound && isCodexOAuthRequestTimeoutError(error)) {
+        attempt.status = 'expired';
+        attempt.abortController.abort();
+        return toPublicAttempt(attempt);
+      }
       attempt.status = 'failed';
       attempt.errorCode =
         error instanceof CodexOAuthError && error.code === CODEX_OAUTH_ERROR_CODES.NETWORK_ERROR
@@ -525,6 +666,8 @@ export class CodexLoginManager {
         redirectUri: CODEX_OAUTH_BROWSER_REDIRECT_URI,
         tokenExchangeFetch: this.oauthFetch,
         clock: this.clock,
+        signal: attempt.abortController.signal,
+        timeoutMs: this.oauthRequestTimeoutMs,
       });
       if (!this.isAttemptCommitEligible(attempt)) {
         response.statusCode = 409;
@@ -582,7 +725,12 @@ export class CodexLoginManager {
     }
     attempt.status = 'expired';
     attempt.timeoutHandle = undefined;
-    await Promise.all([closeServer(attempt.server), this.waitForCredentialWrites()]);
+    attempt.abortController.abort();
+    await Promise.all([
+      closeServer(attempt.server),
+      attempt.operationInFlight?.catch(() => undefined),
+      this.waitForCredentialWrites(),
+    ]);
   }
 
   private clearBrowserTimeout(attempt: BrowserAttempt): void {

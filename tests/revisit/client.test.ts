@@ -359,6 +359,7 @@ describe('revisit client blueprint generation', () => {
     );
 
     await ensureRevisitBlueprint({
+      attemptId: 'attempt-1',
       stage,
       scenes,
       forceRegenerate: true,
@@ -389,6 +390,7 @@ describe('revisit client blueprint generation', () => {
     expect(body.adaptiveContext.latestReport.attemptId).toBe('attempt-old');
     expect(body.adaptiveContext.completedChallengeCount).toBe(1);
     expect(body.adaptiveContext.memorySummary.status).toBe('review');
+    expect(body.attemptId).toBe('attempt-1');
     expect(new Headers(init?.headers).get('x-service-tier')).toBe('priority');
     expect(dbMocks.saveExamBlueprint).toHaveBeenCalledWith(blueprint);
   });
@@ -468,6 +470,7 @@ describe('revisit study artifact generation', () => {
     );
 
     const result = await generateRevisitStudyArtifact({
+      jobId: 'job-1',
       stage,
       scenes,
       kind: 'faq',
@@ -485,6 +488,7 @@ describe('revisit study artifact generation', () => {
     const [, init] = vi.mocked(fetch).mock.calls[0];
     expect(new Headers(init?.headers).get('x-service-tier')).toBe('priority');
     expect(JSON.parse(String(init?.body))).toMatchObject({
+      jobId: 'job-1',
       kind: 'faq',
       options: { count: 10 },
       adaptiveContext: { completedChallengeCount: 0 },

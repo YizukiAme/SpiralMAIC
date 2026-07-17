@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   availability: vi.fn(),
   runtime: undefined as unknown as CodexAuthRuntime,
   getRuntime: vi.fn(),
+  oauthFetch: vi.fn(),
 }));
 
 vi.mock('@/lib/server/codex/availability', () => ({
@@ -53,7 +54,10 @@ function credentials(): CodexOAuthCredentials {
 function runtimeFor(vault: MemoryVault): CodexAuthRuntime {
   return {
     vault,
-    tokenProvider: new ManagedCodexTokenProvider({ vault }),
+    tokenProvider: new ManagedCodexTokenProvider({
+      vault,
+      tokenExchangeFetch: mocks.oauthFetch,
+    }),
     loginManager: new CodexLoginManager({ vault }),
     modelDiscovery: {
       getModels: vi.fn(async () => []),
@@ -77,6 +81,8 @@ beforeEach(() => {
   mocks.runtime = runtimeFor(new MemoryVault(credentials()));
   mocks.getRuntime.mockReset();
   mocks.getRuntime.mockImplementation(() => mocks.runtime);
+  mocks.oauthFetch.mockReset();
+  mocks.oauthFetch.mockResolvedValue(new Response(null, { status: 200 }));
 });
 
 afterEach(() => {
@@ -134,6 +140,26 @@ describe('/api/codex/auth', () => {
     expectNoStore(response);
     await expect(response.json()).resolves.toEqual({ connected: false });
     await expect(runtime.vault.load()).resolves.toBeNull();
+    expect(runtime.modelDiscovery.invalidate).toHaveBeenCalledTimes(1);
+    expect(mocks.oauthFetch).toHaveBeenCalledTimes(1);
+    expect(mocks.oauthFetch.mock.calls[0]?.[0]).toBe('https://auth.openai.com/oauth/revoke');
+  });
+
+  it.each([
+    ['network rejection', () => Promise.reject(new Error('private revoke route failure'))],
+    ['non-2xx response', () => Promise.resolve(new Response('private body', { status: 503 }))],
+  ])('returns disconnected and invalidates models after a revoke %s', async (_name, revoke) => {
+    mocks.oauthFetch.mockImplementation(revoke);
+    const route = await import('@/app/api/codex/auth/route');
+    const runtime = mocks.runtime;
+
+    const response = await route.DELETE(new Request('http://localhost/api/codex/auth'));
+
+    expect(response.status).toBe(200);
+    expectNoStore(response);
+    await expect(response.json()).resolves.toEqual({ connected: false });
+    await expect(runtime.vault.load()).resolves.toBeNull();
+    expect(mocks.oauthFetch).toHaveBeenCalledTimes(1);
     expect(runtime.modelDiscovery.invalidate).toHaveBeenCalledTimes(1);
   });
 

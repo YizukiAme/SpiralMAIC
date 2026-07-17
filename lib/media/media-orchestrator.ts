@@ -8,6 +8,7 @@
 
 import { useMediaGenerationStore } from '@/lib/store/media-generation';
 import { useSettingsStore } from '@/lib/store/settings';
+import { syncServerProvidersAfterAccessUnlock } from '@/lib/client/codex-oauth';
 import { db, mediaFileKey } from '@/lib/utils/database';
 import type { SceneOutline } from '@/lib/types/generation';
 import type { MediaGenerationRequest } from '@/lib/media/types';
@@ -15,12 +16,49 @@ import { createLogger } from '@/lib/logger';
 
 const log = createLogger('MediaOrchestrator');
 
+type MediaDiagnosticSource = 'upstream-http' | 'network' | 'invalid-response' | 'timeout';
+
+interface MediaApiDiagnostics {
+  diagnosticSource?: MediaDiagnosticSource;
+  upstreamStatus?: number;
+}
+
+function readCodexImageDiagnostics(response: Response): MediaApiDiagnostics {
+  const source = response.headers.get('x-openmaic-codex-image-error-source');
+  if (
+    source !== 'upstream-http' &&
+    source !== 'network' &&
+    source !== 'invalid-response' &&
+    source !== 'timeout'
+  ) {
+    return {};
+  }
+
+  const upstreamStatusHeader = response.headers.get('x-openmaic-codex-image-upstream-status');
+  const upstreamStatus =
+    source === 'upstream-http' &&
+    upstreamStatusHeader !== null &&
+    /^[1-5]\d{2}$/.test(upstreamStatusHeader)
+      ? Number(upstreamStatusHeader)
+      : undefined;
+
+  return {
+    diagnosticSource: source,
+    ...(upstreamStatus !== undefined ? { upstreamStatus } : {}),
+  };
+}
+
 /** Error with a structured errorCode from the API */
 class MediaApiError extends Error {
   errorCode?: string;
-  constructor(message: string, errorCode?: string) {
+  diagnosticSource?: MediaDiagnosticSource;
+  upstreamStatus?: number;
+
+  constructor(message: string, errorCode?: string, diagnostics: MediaApiDiagnostics = {}) {
     super(message);
     this.errorCode = errorCode;
+    this.diagnosticSource = diagnostics.diagnosticSource;
+    this.upstreamStatus = diagnostics.upstreamStatus;
   }
 }
 
@@ -156,7 +194,14 @@ async function generateSingleMedia(
     if (abortSignal?.aborted) return;
     const message = err instanceof Error ? err.message : String(err);
     const errorCode = err instanceof MediaApiError ? err.errorCode : undefined;
-    log.error(`Failed ${req.elementId}:`, message);
+    if (err instanceof MediaApiError && err.diagnosticSource) {
+      log.error(`Failed ${req.elementId}:`, message, {
+        diagnosticSource: err.diagnosticSource,
+        ...(err.upstreamStatus !== undefined ? { upstreamStatus: err.upstreamStatus } : {}),
+      });
+    } else {
+      log.error(`Failed ${req.elementId}:`, message);
+    }
     useMediaGenerationStore.getState().markFailed(req.elementId, message, errorCode);
 
     // Persist non-retryable failures to IndexedDB so they survive page refresh
@@ -188,6 +233,9 @@ async function callImageApi(
   abortSignal?: AbortSignal,
 ): Promise<{ url: string }> {
   const settings = useSettingsStore.getState();
+  if (!settings.imageGenerationEnabled || !settings.imageProviderId) {
+    throw new MediaApiError('Image generation disabled', 'GENERATION_DISABLED');
+  }
   const providerConfig = settings.imageProvidersConfig?.[settings.imageProviderId];
 
   const response = await fetch('/api/generate/image', {
@@ -209,7 +257,20 @@ async function callImageApi(
 
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
-    throw new MediaApiError(data.error || `Image API returned ${response.status}`, data.errorCode);
+    const diagnostics =
+      settings.imageProviderId === 'codex-image' ? readCodexImageDiagnostics(response) : undefined;
+    if (
+      settings.imageProviderId === 'codex-image' &&
+      response.status === 401 &&
+      data.errorCode === 'INVALID_CREDENTIALS'
+    ) {
+      void syncServerProvidersAfterAccessUnlock(() => useSettingsStore.getState()).catch(() => {});
+    }
+    throw new MediaApiError(
+      data.error || `Image API returned ${response.status}`,
+      data.errorCode,
+      diagnostics,
+    );
   }
 
   const data = await response.json();

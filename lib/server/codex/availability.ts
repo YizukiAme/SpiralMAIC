@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { lstat, mkdir, open, rename, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
+import { ensureCodexRuntimeLock, isCodexRuntimeLockError } from './runtime-lock';
 
 import {
   CODEX_OAUTH_AVAILABILITY_REASONS,
@@ -74,10 +75,6 @@ export async function getCodexOAuthAvailability(
 ): Promise<CodexOAuthAvailability> {
   const env = options.env ?? process.env;
 
-  if (env.OPENMAIC_ENABLE_CODEX_OAUTH !== 'true') {
-    return unavailable(CODEX_OAUTH_AVAILABILITY_REASONS.FEATURE_DISABLED);
-  }
-
   if (isServerlessEnvironment(env)) {
     return unavailable(CODEX_OAUTH_AVAILABILITY_REASONS.SERVERLESS_UNSUPPORTED);
   }
@@ -90,9 +87,17 @@ export async function getCodexOAuthAvailability(
   if (!(await canWriteAuthDirectory(dataDir))) {
     return unavailable(CODEX_OAUTH_AVAILABILITY_REASONS.DATA_DIR_UNWRITABLE);
   }
+  try {
+    ensureCodexRuntimeLock({ baseDir: dataDir });
+  } catch (error) {
+    return unavailable(
+      isCodexRuntimeLockError(error) && error.code === 'CODEX_RUNTIME_LOCKED'
+        ? CODEX_OAUTH_AVAILABILITY_REASONS.RUNTIME_LOCKED
+        : CODEX_OAUTH_AVAILABILITY_REASONS.DATA_DIR_UNWRITABLE,
+    );
+  }
 
-  const methods: CodexOAuthLoginMethod[] =
-    env.OPENMAIC_CODEX_BROWSER_LOGIN === 'true' ? ['browser', 'device'] : ['device'];
+  const methods: CodexOAuthLoginMethod[] = ['browser', 'device'];
 
   return {
     available: true,

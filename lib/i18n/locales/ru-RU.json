@@ -1568,6 +1568,14 @@
     "testImageConnectivity": "Тест подключения",
     "imageConnectivitySuccess": "Подключение к сервису изображений успешно",
     "imageConnectivityFailed": "Подключение к сервису изображений не удалось",
+    "providerCodexImage": "Codex",
+    "codexImageLoginRequired": "Войдите в Codex в разделе провайдеров LLM, чтобы создавать изображения.",
+    "codexImageConnected": "Codex подключён",
+    "codexImageManageLogin": "Управление входом в Codex",
+    "codexImageFixedModel": "Фиксированная модель",
+    "codexImageTestHint": "Проверяет вход в Codex без создания изображения и расхода лимита изображений.",
+    "codexImagePlanLimits": "Использует вход в Codex и лимит плана ChatGPT; изображения могут расходовать больше лимита, чем текст.",
+    "codexImageLoginValid": "Вход в Codex готов для генерации изображений",
     "imageTestSuccess": "Тест генерации изображений пройден",
     "imageTestFailed": "Тест генерации изображений не пройден",
     "imageTestPromptPlaceholder": "Введите описание изображения для теста",
@@ -1719,10 +1727,10 @@
       "experimental": "Экспериментальная сторонняя интеграция Codex; использует квоту вашего тарифа ChatGPT.",
       "unavailableTitle": "Вход в Codex недоступен",
       "unavailable": {
-        "FEATURE_DISABLED": "Включите Codex OAuth на сервере, чтобы использовать этого провайдера.",
         "SERVERLESS_UNSUPPORTED": "Для Codex OAuth нужен самостоятельно размещённый Node-сервер с постоянным хранилищем.",
-        "ACCESS_CODE_REQUIRED": "Перед включением Codex OAuth в production настройте ACCESS_CODE.",
-        "DATA_DIR_UNWRITABLE": "Сервер не может записывать в каталог данных. Проверьте права /app/data."
+        "ACCESS_CODE_REQUIRED": "Для использования Codex OAuth в production настройте ACCESS_CODE.",
+        "DATA_DIR_UNWRITABLE": "Сервер не может записывать в каталог данных. Проверьте права /app/data.",
+        "RUNTIME_LOCKED": "Каталог данных Codex уже используется другим процессом OpenMAIC Node."
       },
       "connectedAs": "Подключено как {email}",
       "connected": "Подключено к ChatGPT",
@@ -1744,7 +1752,7 @@
       "testForbidden": "У этого рабочего пространства ChatGPT нет доступа к Codex.",
       "testRateLimited": "Достигнута квота или частотный лимит тарифа ChatGPT.",
       "testFailed": "Не удалось подключиться к Codex.",
-      "loginFailed": "Не удалось войти. Повторите попытку или используйте код устройства.",
+      "loginFailed": "Не удалось войти. Выберите любой способ входа и повторите попытку.",
       "loginExpired": "Срок этой попытки входа истёк. Начните заново."
     },
     "connected": "Подключено"

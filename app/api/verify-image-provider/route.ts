@@ -25,6 +25,13 @@ import type { ImageProviderId } from '@/lib/media/types';
 import { apiError, apiSuccess } from '@/lib/server/api-response';
 import { createLogger } from '@/lib/logger';
 import { validateUrlForSSRF } from '@/lib/server/ssrf-guard';
+import { getCodexOAuthAvailability } from '@/lib/server/codex/availability';
+import { getCodexAuthRuntime } from '@/lib/server/codex/runtime';
+import {
+  CODEX_OAUTH_ERROR_CODES,
+  CodexOAuthError,
+  type CodexOAuthErrorCode,
+} from '@/lib/server/codex/token-provider';
 
 const log = createLogger('VerifyImageProvider');
 
@@ -33,9 +40,42 @@ const log = createLogger('VerifyImageProvider');
 // upstream can't tie up the function indefinitely.
 export const maxDuration = 30;
 
+const CODEX_REAUTH_ERROR_CODES = new Set<CodexOAuthErrorCode>([
+  CODEX_OAUTH_ERROR_CODES.CREDENTIALS_MISSING,
+  CODEX_OAUTH_ERROR_CODES.SIGNED_OUT,
+  CODEX_OAUTH_ERROR_CODES.INVALID_GRANT,
+  CODEX_OAUTH_ERROR_CODES.REFRESH_REJECTED,
+]);
+
+function requiresCodexReauthentication(error: unknown): boolean {
+  return error instanceof CodexOAuthError && CODEX_REAUTH_ERROR_CODES.has(error.code);
+}
+
+async function verifyCodexImageProvider() {
+  try {
+    const availability = await getCodexOAuthAvailability();
+    if (!availability.available) {
+      return apiError('PROVIDER_DISABLED', 503, 'Codex OAuth image generation is unavailable');
+    }
+  } catch {
+    return apiError('PROVIDER_DISABLED', 503, 'Codex OAuth image generation is unavailable');
+  }
+
+  try {
+    await getCodexAuthRuntime().tokenProvider.getValidCredentials();
+    return apiSuccess({ message: 'Codex OAuth connection is ready' });
+  } catch (error) {
+    return requiresCodexReauthentication(error)
+      ? apiError('INVALID_CREDENTIALS', 401, 'Reconnect Codex to generate images')
+      : apiError('PROVIDER_DISABLED', 503, 'Codex OAuth connection could not be verified');
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const providerId = (request.headers.get('x-image-provider') || 'seedream') as ImageProviderId;
+    if (providerId === 'codex-image') return verifyCodexImageProvider();
+
     const model = request.headers.get('x-image-model') || undefined;
     // Managed providers are admin-owned: ignore any client-sent key/baseUrl.
     const managed = isServerConfiguredProvider('image', providerId);

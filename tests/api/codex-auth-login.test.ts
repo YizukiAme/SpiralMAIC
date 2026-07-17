@@ -163,7 +163,7 @@ describe('/api/codex/auth/login', () => {
 
     mocks.availability.mockResolvedValueOnce({
       available: false,
-      reason: 'FEATURE_DISABLED',
+      reason: 'SERVERLESS_UNSUPPORTED',
       methods: [],
     });
     const unavailable = await route.POST(
@@ -176,7 +176,7 @@ describe('/api/codex/auth/login', () => {
     expectNoStore(unavailable);
     await expect(unavailable.json()).resolves.toEqual({
       errorCode: 'UNAVAILABLE',
-      reason: 'FEATURE_DISABLED',
+      reason: 'SERVERLESS_UNSUPPORTED',
     });
   });
 

@@ -1568,6 +1568,14 @@
     "testImageConnectivity": "测试连接",
     "imageConnectivitySuccess": "图像服务连接成功",
     "imageConnectivityFailed": "图像服务连接失败",
+    "providerCodexImage": "Codex",
+    "codexImageLoginRequired": "请先在“LLM 提供方 → Codex”中登录，才能生成图片。",
+    "codexImageConnected": "Codex 已连接",
+    "codexImageManageLogin": "前往 Codex 登录",
+    "codexImageFixedModel": "固定模型",
+    "codexImageTestHint": "仅检查 Codex 登录状态，不会生成图片或消耗图片额度。",
+    "codexImagePlanLimits": "使用 Codex 登录与 ChatGPT 方案额度；图片通常比文本消耗更多额度。",
+    "codexImageLoginValid": "Codex 登录有效，可用于图片生成",
     "imageTestSuccess": "图像生成测试成功",
     "imageTestFailed": "图像生成测试失败",
     "imageTestPromptPlaceholder": "输入图像描述进行测试",
@@ -1719,10 +1727,10 @@
       "experimental": "实验性第三方 Codex 接入；使用你的 ChatGPT 方案额度。",
       "unavailableTitle": "Codex 登录当前不可用",
       "unavailable": {
-        "FEATURE_DISABLED": "请在服务端启用 Codex OAuth 后使用此提供方。",
         "SERVERLESS_UNSUPPORTED": "Codex OAuth 需要带持久化存储的自托管 Node 服务。",
-        "ACCESS_CODE_REQUIRED": "生产环境启用 Codex OAuth 前必须配置 ACCESS_CODE。",
-        "DATA_DIR_UNWRITABLE": "服务端无法写入数据目录，请检查 /app/data 权限。"
+        "ACCESS_CODE_REQUIRED": "生产环境使用 Codex OAuth 前必须配置 ACCESS_CODE。",
+        "DATA_DIR_UNWRITABLE": "服务端无法写入数据目录，请检查 /app/data 权限。",
+        "RUNTIME_LOCKED": "另一个 OpenMAIC Node 进程正在使用 Codex 认证数据目录。"
       },
       "connectedAs": "已连接为 {email}",
       "connected": "已连接 ChatGPT",
@@ -1744,7 +1752,7 @@
       "testForbidden": "此 ChatGPT 工作区没有 Codex 权限。",
       "testRateLimited": "已达到 ChatGPT 方案额度或频率限制。",
       "testFailed": "Codex 连接失败。",
-      "loginFailed": "登录失败，请重试或改用设备代码。",
+      "loginFailed": "登录失败，请重新选择任一登录方式重试。",
       "loginExpired": "本次登录已过期，请重新开始。"
     },
     "connected": "已连接"

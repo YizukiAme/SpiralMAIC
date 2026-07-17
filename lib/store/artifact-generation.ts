@@ -72,6 +72,7 @@ async function executeArtifactGeneration(
   const settings = settingsModule.useSettingsStore.getState();
   const scope = parseRevisitScope(job.scope);
   const artifact = await revisitClient.generateRevisitStudyArtifact({
+    jobId: job.id,
     stage: stageData.stage,
     scenes: stageData.scenes,
     kind: job.kind,

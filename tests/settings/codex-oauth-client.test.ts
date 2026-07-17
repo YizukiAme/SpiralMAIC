@@ -257,7 +257,7 @@ describe('CodexOAuthClient', () => {
     expect(client.getSnapshot().startingMethod).toBeNull();
   });
 
-  it('cancels a blocked browser attempt before falling back to device login', async () => {
+  it('cancels a blocked browser attempt without starting device login', async () => {
     const events: string[] = [];
     const client = createClient(
       vi.fn(async (_input, init) => {
@@ -265,7 +265,6 @@ describe('CodexOAuthClient', () => {
         if (method === 'POST') {
           const body = JSON.parse(String(init?.body)) as { method: string };
           events.push(`POST:${body.method}`);
-          if (body.method === 'device') return jsonResponse(pendingDevice());
           return jsonResponse({
             method: 'browser',
             status: 'pending',
@@ -285,10 +284,12 @@ describe('CodexOAuthClient', () => {
 
     await client.startBrowser();
 
-    expect(events).toEqual(['open', 'POST:browser', 'DELETE', 'POST:device']);
-    expect(client.getSnapshot().attempt).toMatchObject({
-      method: 'device',
-      userCode: 'ABCD-EFGH',
+    expect(events).toEqual(['open', 'POST:browser', 'DELETE']);
+    expect(client.getSnapshot()).toMatchObject({
+      attempt: null,
+      busy: null,
+      startingMethod: null,
+      errorKey: 'loginFailed',
     });
   });
 
@@ -305,13 +306,11 @@ describe('CodexOAuthClient', () => {
         if (method === 'POST') {
           const body = JSON.parse(String(init?.body)) as { method: string };
           events.push(`POST:${body.method}`);
-          return body.method === 'browser'
-            ? jsonResponse({
-                method: 'browser',
-                status: 'pending',
-                authorizationUrl: 'https://auth.openai.com/oauth/authorize',
-              })
-            : jsonResponse(pendingDevice());
+          return jsonResponse({
+            method: 'browser',
+            status: 'pending',
+            authorizationUrl: 'https://auth.openai.com/oauth/authorize',
+          });
         }
         events.push(method);
         return jsonResponse({ cancelled: true });
@@ -326,8 +325,115 @@ describe('CodexOAuthClient', () => {
 
     await client.startBrowser();
 
-    expect(events).toEqual(['open', 'POST:browser', 'DELETE', 'POST:device']);
+    expect(events).toEqual(['open', 'POST:browser', 'DELETE']);
     expect(popup.navigate).not.toHaveBeenCalled();
+    expect(client.getSnapshot()).toMatchObject({
+      attempt: null,
+      busy: null,
+      startingMethod: null,
+      errorKey: 'loginFailed',
+    });
+  });
+
+  it('cancels the browser attempt when popup navigation fails without starting device login', async () => {
+    const events: string[] = [];
+    const popup = {
+      closed: false,
+      navigate: vi.fn(() => {
+        events.push('navigate');
+        throw new Error('navigation blocked');
+      }),
+      close: vi.fn(() => events.push('close')),
+    };
+    const client = createClient(
+      vi.fn(async (_input, init) => {
+        const method = init?.method ?? 'GET';
+        if (method === 'POST') {
+          const body = JSON.parse(String(init?.body)) as { method: string };
+          events.push(`POST:${body.method}`);
+          return jsonResponse({
+            method: 'browser',
+            status: 'pending',
+            authorizationUrl: 'https://auth.openai.com/oauth/authorize',
+          });
+        }
+        events.push(method);
+        return jsonResponse({ cancelled: true });
+      }),
+      { openPopup: () => popup },
+    );
+
+    await client.startBrowser();
+
+    expect(events).toEqual(['POST:browser', 'navigate', 'close', 'DELETE']);
+    expect(client.getSnapshot()).toMatchObject({
+      attempt: null,
+      busy: null,
+      startingMethod: null,
+      errorKey: 'loginFailed',
+    });
+  });
+
+  it('cleans up an invalid browser response without starting device login', async () => {
+    const requests: string[] = [];
+    const popup = { closed: false, navigate: vi.fn(), close: vi.fn() };
+    const client = createClient(
+      vi.fn(async (_input, init) => {
+        const method = init?.method ?? 'GET';
+        if (method === 'POST') {
+          const body = JSON.parse(String(init?.body)) as { method: string };
+          requests.push(`POST:${body.method}`);
+          return jsonResponse({ method: 'browser', status: 'pending' });
+        }
+        requests.push(method);
+        return jsonResponse({ cancelled: true });
+      }),
+      { openPopup: () => popup },
+    );
+
+    await client.startBrowser();
+
+    expect(requests).toEqual(['POST:browser', 'DELETE']);
+    expect(popup.navigate).not.toHaveBeenCalled();
+    expect(client.getSnapshot()).toMatchObject({
+      attempt: null,
+      busy: null,
+      startingMethod: null,
+      errorKey: 'loginFailed',
+    });
+  });
+
+  it('keeps a newer browser popup owned when stale browser cleanup arrives late', async () => {
+    const delayedOldResponse = deferred();
+    const oldPopup = { closed: false, navigate: vi.fn(), close: vi.fn() };
+    const newPopup = { closed: false, navigate: vi.fn(), close: vi.fn() };
+    const client = createClient(
+      vi.fn(async (_input, init) =>
+        init?.method === 'POST'
+          ? jsonResponse({
+              method: 'browser',
+              status: 'pending',
+              authorizationUrl: 'https://auth.openai.com/oauth/authorize',
+            })
+          : jsonResponse({ cancelled: true }),
+      ),
+      { openPopup: () => newPopup },
+    );
+    const staleBrowserCompletion = delayedOldResponse.promise.then(() =>
+      (
+        client as unknown as {
+          failBrowserAttempt: (generation: number, popup: typeof oldPopup) => Promise<void>;
+        }
+      ).failBrowserAttempt(0, oldPopup),
+    );
+
+    await client.startBrowser();
+    delayedOldResponse.resolve();
+    await staleBrowserCompletion;
+    await client.cancel();
+
+    expect(oldPopup.close).toHaveBeenCalledTimes(1);
+    expect(newPopup.close).toHaveBeenCalledTimes(1);
   });
 
   it('ignores a late poll result from an older login generation', async () => {
@@ -556,7 +662,9 @@ describe('Codex settings integration helpers', () => {
 
     await syncServerProvidersAfterAccessUnlock(() => ({ fetchServerProviders }));
 
-    expect(fetchServerProviders).toHaveBeenCalledTimes(1);
+    expect(fetchServerProviders).toHaveBeenCalledWith({
+      reconcileOAuthImageSelectionImmediately: true,
+    });
   });
 
   it('uses Connected only for server-connected OAuth providers', () => {

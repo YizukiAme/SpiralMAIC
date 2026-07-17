@@ -157,6 +157,7 @@ export async function runRevisitAgentLoop({
     try {
       return await runAgentLoop(
         {
+          session: request.session,
           config: request.config,
           userProfile: request.userProfile,
           apiKey: request.apiKey,

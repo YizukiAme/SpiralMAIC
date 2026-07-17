@@ -1568,6 +1568,14 @@
     "testImageConnectivity": "Test Connection",
     "imageConnectivitySuccess": "Image service connected successfully",
     "imageConnectivityFailed": "Image service connection failed",
+    "providerCodexImage": "Codex",
+    "codexImageLoginRequired": "Sign in to Codex under LLM Providers to use image generation.",
+    "codexImageConnected": "Codex is connected",
+    "codexImageManageLogin": "Manage Codex sign-in",
+    "codexImageFixedModel": "Fixed model",
+    "codexImageTestHint": "Checks your Codex sign-in without generating an image or using image quota.",
+    "codexImagePlanLimits": "Uses your Codex sign-in and ChatGPT plan allowance; images may use more allowance than text.",
+    "codexImageLoginValid": "Codex sign-in is ready for image generation",
     "imageTestSuccess": "Image generation test succeeded",
     "imageTestFailed": "Image generation test failed",
     "imageTestPromptPlaceholder": "Enter image description to test",
@@ -1719,10 +1727,10 @@
       "experimental": "Experimental third-party Codex integration; uses your ChatGPT plan quota.",
       "unavailableTitle": "Codex sign-in is unavailable",
       "unavailable": {
-        "FEATURE_DISABLED": "Enable Codex OAuth on the server to use this provider.",
         "SERVERLESS_UNSUPPORTED": "Codex OAuth requires a self-hosted Node server with persistent storage.",
-        "ACCESS_CODE_REQUIRED": "Set ACCESS_CODE before enabling Codex OAuth in production.",
-        "DATA_DIR_UNWRITABLE": "The server cannot write to its data directory. Check /app/data permissions."
+        "ACCESS_CODE_REQUIRED": "Set ACCESS_CODE to use Codex OAuth in production.",
+        "DATA_DIR_UNWRITABLE": "The server cannot write to its data directory. Check /app/data permissions.",
+        "RUNTIME_LOCKED": "Another OpenMAIC Node process is already using the Codex auth data directory."
       },
       "connectedAs": "Connected as {email}",
       "connected": "Connected with ChatGPT",
@@ -1744,7 +1752,7 @@
       "testForbidden": "This ChatGPT workspace does not have Codex access.",
       "testRateLimited": "Your ChatGPT plan quota or rate limit has been reached.",
       "testFailed": "Codex connection failed.",
-      "loginFailed": "Sign-in failed. Try again or use the device-code flow.",
+      "loginFailed": "Sign-in failed. Choose either sign-in method to try again.",
       "loginExpired": "This sign-in attempt expired. Start a new one."
     },
     "connected": "Connected"
