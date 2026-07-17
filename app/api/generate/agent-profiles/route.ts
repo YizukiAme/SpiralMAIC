@@ -19,6 +19,7 @@ const log = createLogger('Agent Profiles API');
 export const maxDuration = 120;
 
 interface RequestBody {
+  mode?: 'course' | 'spiral';
   stageInfo: { name: string; description?: string };
   sceneOutlines?: { title: string; description?: string }[];
   languageDirective: string;
@@ -54,6 +55,7 @@ export async function POST(req: NextRequest) {
       avatarDescriptions,
       availableVoices,
     } = body;
+    const mode = body.mode ?? 'course';
     stageName = stageInfo?.name;
 
     // ── Validate required fields ──
@@ -86,7 +88,10 @@ export async function POST(req: NextRequest) {
           .join('\n')
       : null;
 
-    const systemPrompt = `You are an expert instructional designer. Generate agent profiles for a multi-agent classroom simulation. Decide the appropriate number of agents (typically 3-5) based on the course content and complexity. Return ONLY valid JSON, no markdown or explanation.`;
+    const systemPrompt =
+      mode === 'spiral'
+        ? 'You are an expert instructional designer. Generate one assistant and two or three AI students for a reversed classroom where the human user teaches them. Return ONLY valid JSON, no markdown or explanation.'
+        : 'You are an expert instructional designer. Generate agent profiles for a multi-agent classroom simulation. Decide the appropriate number of agents (typically 3-5) based on the course content and complexity. Return ONLY valid JSON, no markdown or explanation.';
 
     // Build voice list for prompt (if available)
     const voiceListStr =
@@ -111,15 +116,24 @@ export async function POST(req: NextRequest) {
       ? ',\n      "voice": "string (voice id from available list, e.g. \'qwen-tts::Cherry\')"'
       : '';
 
+    const roleRequirements =
+      mode === 'spiral'
+        ? `- The user is the teacher. Do not generate an AI teacher.
+- Generate exactly 1 agent with role "assistant" and 2-3 agents with role "student"
+- Give students meaningfully different knowledge gaps, reasoning habits, and questioning styles
+- The assistant should scaffold or rescue the user only when needed
+- Priority values: assistant=7, student=4-6`
+        : `- Decide the appropriate number of agents based on the course content (typically 3-5)
+- Exactly 1 agent must have role "teacher", the rest can be "assistant" or "student"
+- Priority values: teacher=10 (highest), assistant=7, student=4-6`;
+
     const userPrompt = `Generate agent profiles for the following course:
 
 Course name: ${stageInfo.name}
 ${stageInfo.description ? `Course description: ${stageInfo.description}` : ''}
 ${sceneSummary ? `\nScene outlines:\n${sceneSummary}\n` : ''}
 Requirements:
-- Decide the appropriate number of agents based on the course content (typically 3-5)
-- Exactly 1 agent must have role "teacher", the rest can be "assistant" or "student"
-- Priority values: teacher=10 (highest), assistant=7, student=4-6
+${roleRequirements}
 - Each agent needs: name, role, persona (2-3 sentences describing personality and teaching/learning style)
 - Language directive for this course: ${languageDirective}
   Agent names and personas must follow this language directive.
@@ -197,14 +211,34 @@ Return a JSON object with this exact structure:
       );
     }
 
-    const teacherCount = parsed.agents.filter((a) => a.role === 'teacher').length;
-    if (teacherCount !== 1) {
-      log.error(`Expected exactly 1 teacher, got ${teacherCount}`);
-      return apiError(
-        'GENERATION_FAILED',
-        500,
-        `Expected exactly 1 teacher but LLM returned ${teacherCount}`,
-      );
+    if (mode === 'spiral') {
+      const assistantCount = parsed.agents.filter((a) => a.role === 'assistant').length;
+      const studentCount = parsed.agents.filter((a) => a.role === 'student').length;
+      if (
+        assistantCount !== 1 ||
+        studentCount < 2 ||
+        studentCount > 3 ||
+        assistantCount + studentCount !== parsed.agents.length
+      ) {
+        log.error(
+          `Expected 1 assistant and 2-3 students, got assistants=${assistantCount}, students=${studentCount}, total=${parsed.agents.length}`,
+        );
+        return apiError(
+          'GENERATION_FAILED',
+          500,
+          `Expected 1 assistant and 2-3 students but LLM returned assistants=${assistantCount}, students=${studentCount}, total=${parsed.agents.length}`,
+        );
+      }
+    } else {
+      const teacherCount = parsed.agents.filter((a) => a.role === 'teacher').length;
+      if (teacherCount !== 1) {
+        log.error(`Expected exactly 1 teacher, got ${teacherCount}`);
+        return apiError(
+          'GENERATION_FAILED',
+          500,
+          `Expected exactly 1 teacher but LLM returned ${teacherCount}`,
+        );
+      }
     }
 
     // ── Build output with IDs ──
@@ -221,7 +255,7 @@ Return a JSON object with this exact structure:
       const voiceDesign = normalizeVoiceDesign(agent.voiceDesign);
 
       return {
-        id: `gen-${nanoid(8)}`,
+        id: `${mode === 'spiral' ? 'spiral' : 'gen'}-${nanoid(8)}`,
         name: agent.name,
         role: agent.role,
         persona: agent.persona,
