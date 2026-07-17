@@ -60,22 +60,16 @@ beforeEach(clearImportTables);
 afterEach(clearImportTables);
 
 describe('importClassroomBlob', () => {
-  it('returns the new stage id and persists featured provenance', async () => {
+  it('returns the new stage id and persists an ordinary classroom', async () => {
     const phases: string[] = [];
 
     const stageId = await importClassroomBlob(await classroomBlob(), {
-      provenance: {
-        featuredDemoId: 'firmicutes-obesity',
-        featuredDemoRevision: '1',
-      },
       onPhase: (phase) => phases.push(phase),
     });
 
     await expect(db.stages.get(stageId)).resolves.toMatchObject({
       id: stageId,
       name: 'Demo',
-      featuredDemoId: 'firmicutes-obesity',
-      featuredDemoRevision: '1',
     });
     await expect(db.scenes.where('stageId').equals(stageId).count()).resolves.toBe(1);
     expect(phases).toEqual(['parsing', 'validating', 'writingMedia', 'writingCourse', 'done']);

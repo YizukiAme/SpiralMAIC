@@ -26,10 +26,6 @@ export class ClassroomImportError extends Error {
 
 export interface ClassroomImportOptions {
   onPhase?: (phase: ImportPhase) => void;
-  provenance?: {
-    featuredDemoId: string;
-    featuredDemoRevision: string;
-  };
 }
 
 async function bestEffortRollback(created: {
@@ -157,7 +153,6 @@ export async function importClassroomBlob(
       createdAt: manifest.stage.createdAt || now,
       updatedAt: now,
       agentIds: newAgentIds.length > 0 ? newAgentIds : undefined,
-      ...options.provenance,
     };
     await db.stages.put(stage);
 
