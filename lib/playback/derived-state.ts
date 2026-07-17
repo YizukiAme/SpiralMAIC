@@ -70,6 +70,17 @@ export interface PlaybackView {
   isTopicActive: boolean;
 }
 
+/**
+ * Prefer the Stage-provided view, but derive the same shape for callers such
+ * as Spiral/Reverse that feed Roundtable directly from a live session.
+ */
+export function resolvePlaybackView(
+  playbackView: PlaybackView | undefined,
+  raw: PlaybackRawState,
+): PlaybackView {
+  return playbackView ?? computePlaybackView(raw);
+}
+
 // ---------------------------------------------------------------------------
 // Pure computation
 // ---------------------------------------------------------------------------
