@@ -238,6 +238,7 @@ export function getRevisitDatabase(
 
 export async function createRevisitDemoSession(args: {
   id: string;
+  stageId: string;
   createdAt?: number;
 }): Promise<RevisitDemoSession> {
   const existing = await revisitDb.revisitDemoSessions.get(args.id);
@@ -248,7 +249,13 @@ export async function createRevisitDemoSession(args: {
   const destination = getRevisitDatabase({ kind: 'demo', sessionId: args.id });
   await Promise.all([revisitDb.open(), destination.open()]);
   const snapshots = await Promise.all(
-    CLONED_TABLE_NAMES.map(async (name) => [name, await revisitDb.table(name).toArray()] as const),
+    CLONED_TABLE_NAMES.map(
+      async (name) =>
+        [
+          name,
+          await revisitDb.table(name).where('stageId').equals(args.stageId).toArray(),
+        ] as const,
+    ),
   );
   await destination.transaction(
     'rw',
@@ -261,6 +268,7 @@ export async function createRevisitDemoSession(args: {
   );
   const session: RevisitDemoSession = {
     id: args.id,
+    stageId: args.stageId,
     databaseName,
     status: 'active',
     createdAt,
@@ -307,8 +315,11 @@ export async function archiveRevisitDemoSession(
   });
 }
 
-export async function listRevisitDemoSessions(): Promise<RevisitDemoSession[]> {
-  return (await revisitDb.revisitDemoSessions.toArray()).sort((a, b) => b.createdAt - a.createdAt);
+export async function listRevisitDemoSessions(stageId?: string): Promise<RevisitDemoSession[]> {
+  const sessions = await revisitDb.revisitDemoSessions.toArray();
+  return sessions
+    .filter((session) => stageId === undefined || session.stageId === stageId)
+    .sort((a, b) => b.createdAt - a.createdAt);
 }
 
 export interface RevisitDemoSessionContents {
@@ -320,19 +331,26 @@ export interface RevisitDemoSessionContents {
   practiceCount: number;
 }
 
-export async function listRevisitDemoSessionContents(): Promise<RevisitDemoSessionContents[]> {
-  const sessions = await listRevisitDemoSessions();
-  return Promise.all(
-    sessions.map(async (session) => {
-      const db = getRevisitDatabase({ kind: 'demo', sessionId: session.id });
+export async function listRevisitDemoSessionContents(
+  stageId: string,
+): Promise<RevisitDemoSessionContents[]> {
+  const sessions = (await listRevisitDemoSessions()).filter(
+    (session) => session.stageId === stageId || session.stageId === undefined,
+  );
+  const contents = await Promise.all(
+    sessions.map(async (storedSession) => {
+      const db = getRevisitDatabase({ kind: 'demo', sessionId: storedSession.id });
       const [attempts, reports, artifacts, practice] = await Promise.all([
-        db.revisitAttempts.toArray(),
-        db.revisitReports.toArray(),
-        db.studyArtifacts.toArray(),
-        db.studyPractice.toArray(),
+        db.revisitAttempts.where('stageId').equals(stageId).toArray(),
+        db.revisitReports.where('stageId').equals(stageId).toArray(),
+        db.studyArtifacts.where('stageId').equals(stageId).toArray(),
+        db.studyPractice.where('stageId').equals(stageId).toArray(),
       ]);
       return {
-        session,
+        session:
+          storedSession.stageId === undefined
+            ? { ...storedSession, status: 'archived' as const }
+            : storedSession,
         attempts: attempts.sort((a, b) => b.createdAt - a.createdAt),
         reports: reports.sort((a, b) => b.completedAt - a.completedAt),
         artifacts: artifacts.sort((a, b) => b.updatedAt - a.updatedAt),
@@ -341,18 +359,60 @@ export async function listRevisitDemoSessionContents(): Promise<RevisitDemoSessi
       };
     }),
   );
+  return contents.filter(
+    (content) =>
+      content.session.stageId === stageId ||
+      content.attempts.length > 0 ||
+      content.reports.length > 0 ||
+      content.artifacts.length > 0 ||
+      content.practice.length > 0,
+  );
 }
 
 export async function clearAllRevisitDemoData(): Promise<void> {
   const sessions = await revisitDb.revisitDemoSessions.toArray();
   for (const session of sessions) {
-    clearedDemoSessionIds.add(session.id);
-    const db = demoDatabases.get(session.id);
-    db?.close();
-    await Dexie.delete(session.databaseName);
-    demoDatabases.delete(session.id);
+    await deleteRevisitDemoSession(session);
   }
   await revisitDb.revisitDemoSessions.clear();
+}
+
+export async function clearRevisitDemoData(stageId: string): Promise<void> {
+  const sessions = await revisitDb.revisitDemoSessions.toArray();
+  for (const session of sessions) {
+    if (session.stageId === stageId) {
+      await deleteRevisitDemoSession(session);
+      await revisitDb.revisitDemoSessions.delete(session.id);
+      continue;
+    }
+    if (session.stageId !== undefined) continue;
+
+    const db = getRevisitDatabase({ kind: 'demo', sessionId: session.id });
+    await db.transaction(
+      'rw',
+      CLONED_TABLE_NAMES.map((name) => db.table(name)),
+      async () => {
+        for (const name of CLONED_TABLE_NAMES) {
+          await db.table(name).where('stageId').equals(stageId).delete();
+        }
+      },
+    );
+    const remainingCounts = await Promise.all(
+      CLONED_TABLE_NAMES.map((name) => db.table(name).count()),
+    );
+    if (remainingCounts.every((count) => count === 0)) {
+      await deleteRevisitDemoSession(session);
+      await revisitDb.revisitDemoSessions.delete(session.id);
+    }
+  }
+}
+
+async function deleteRevisitDemoSession(session: RevisitDemoSession): Promise<void> {
+  clearedDemoSessionIds.add(session.id);
+  const db = demoDatabases.get(session.id);
+  db?.close();
+  await Dexie.delete(session.databaseName);
+  demoDatabases.delete(session.id);
 }
 
 export async function getLatestExamBlueprint(stageId: string, scope = FORMAL_REVISIT_SCOPE) {

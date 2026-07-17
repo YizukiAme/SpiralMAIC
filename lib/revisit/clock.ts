@@ -11,14 +11,13 @@ export const REVISIT_VIRTUAL_CLOCK_MAX_HOURS = 168;
 export const REVISIT_VIRTUAL_CLOCK_MIN_STEP_HOURS = 1;
 export const HOUR_MS = 60 * 60 * 1000;
 
-export async function startRevisitDemoClock(
-  args: {
-    sessionId?: string;
-    realNow?: number;
-  } = {},
-): Promise<RevisitDemoSession> {
+export async function startRevisitDemoClock(args: {
+  stageId: string;
+  sessionId?: string;
+  realNow?: number;
+}): Promise<RevisitDemoSession> {
   const realNow = args.realNow ?? Date.now();
-  const sessions = await listRevisitDemoSessions();
+  const sessions = await listRevisitDemoSessions(args.stageId);
   for (const active of sessions.filter((session) => session.status === 'active')) {
     await archiveRevisitDemoSession(active.id, {
       offsetHours: active.offsetHours,
@@ -28,6 +27,7 @@ export async function startRevisitDemoClock(
   }
   return createRevisitDemoSession({
     id: args.sessionId ?? crypto.randomUUID(),
+    stageId: args.stageId,
     createdAt: realNow,
   });
 }
@@ -72,7 +72,11 @@ export async function getRevisitNow(
   return realNow + session.offsetHours * HOUR_MS;
 }
 
-export function resolveActiveRevisitScope(activeDemoSessionId: string | null): RevisitDataScope {
+export function resolveActiveRevisitScope(
+  stageId: string,
+  activeDemoSessionByStage: Record<string, string>,
+): RevisitDataScope {
+  const activeDemoSessionId = activeDemoSessionByStage[stageId];
   return activeDemoSessionId
     ? { kind: 'demo', sessionId: activeDemoSessionId }
     : FORMAL_REVISIT_SCOPE;

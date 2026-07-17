@@ -149,6 +149,8 @@ export interface RevisitAttempt {
 
 export interface RevisitDemoSession {
   id: string;
+  /** Missing only on demo batches created before course-scoped demos were introduced. */
+  stageId?: string;
   databaseName: string;
   status: 'active' | 'archived';
   createdAt: number;
@@ -520,8 +522,8 @@ export interface RevisitGateDecision {
 export interface RevisitSettings {
   reverseChallengeEnabled: boolean;
   stableSuccessesRequired: number;
-  activeRevisitDemoSessionId: string | null;
-  revisitVirtualClockOffsetHours: number;
+  activeRevisitDemoSessionByStage: Record<string, string>;
+  revisitVirtualClockOffsetHoursByStage: Record<string, number>;
   demoGateSkipEnabled: boolean;
 }
 
