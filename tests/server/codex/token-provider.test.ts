@@ -11,6 +11,9 @@ import {
   ManagedCodexTokenProvider,
   acquireCodexCredentialLease,
   invalidateCodexCredentialLeases,
+  isCodexCapabilityLifecycleCurrent,
+  isCodexCredentialLeaseCurrent,
+  isCodexCredentialLifecycleCurrent,
   refreshCodexCredentialLease,
   type CodexTokenProvider,
   type TokenExchangeFetch,
@@ -206,6 +209,44 @@ describe('ManagedCodexTokenProvider', () => {
     const refreshed = await refreshCodexCredentialLease(current);
     expect(refreshed.lifecycleSignal).toBe(current.lifecycleSignal);
     expect(current.lifecycleSignal?.aborted).toBe(false);
+  });
+
+  it('separates exact send authority from response lifecycle and catalog currentness', async () => {
+    const vault = new MemoryVault(credentials({ expiresAt: NOW + 60_001 }));
+    const provider = createProvider(
+      vault,
+      vi.fn().mockResolvedValue(
+        jsonResponse({
+          access_token: unsignedJwt({ chatgpt_account_id: 'current-account' }),
+          expires_in: 300,
+        }),
+      ),
+    );
+    const lease = await acquireCodexCredentialLease(provider);
+    let catalogCurrent = true;
+    const capabilityLease = {
+      credentialLease: lease,
+      isCatalogCurrent: vi.fn(() => catalogCurrent),
+    };
+
+    await provider.getValidCredentials({ forceRefresh: true });
+
+    await expect(isCodexCredentialLeaseCurrent(lease)).resolves.toBe(false);
+    await expect(isCodexCredentialLifecycleCurrent(lease)).resolves.toBe(true);
+    await expect(isCodexCapabilityLifecycleCurrent(capabilityLease)).resolves.toBe(true);
+
+    catalogCurrent = false;
+    await expect(isCodexCapabilityLifecycleCurrent(capabilityLease)).resolves.toBe(false);
+
+    catalogCurrent = true;
+    await vault.save(
+      credentials({
+        accessToken: 'replacement-access',
+        accountId: 'replacement-account',
+      }),
+    );
+    await expect(isCodexCredentialLifecycleCurrent(lease)).resolves.toBe(false);
+    await expect(isCodexCapabilityLifecycleCurrent(capabilityLease)).resolves.toBe(false);
   });
 
   it('implements the exact credential provider contract without refreshing a fresh token', async () => {

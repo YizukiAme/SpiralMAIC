@@ -4,8 +4,10 @@ import { CODEX_RESPONSES_ENDPOINT } from '@/lib/ai/codex-model';
 
 import {
   acquireCodexCredentialLease,
+  isCodexCapabilityLifecycleCurrent,
   isCodexCapabilityLeaseCurrent,
   isCodexCredentialLeaseCurrent,
+  isCodexCredentialLifecycleCurrent,
   isCodexCredentialsChangedError,
   refreshCodexCapabilityLease,
   refreshCodexCredentialLease,
@@ -228,11 +230,16 @@ export function createCodexResponsesTransport(
       throw error;
     }
 
-    const assertCurrent = async (): Promise<boolean> =>
+    const assertSendCurrent = async (): Promise<boolean> =>
       capabilityLease
         ? capabilityLease.credentialLease.tokenProvider === options.tokenProvider &&
           (await isCodexCapabilityLeaseCurrent(capabilityLease))
         : isCodexCredentialLeaseCurrent(credentialLease);
+    const assertResponseCurrent = async (): Promise<boolean> =>
+      capabilityLease
+        ? capabilityLease.credentialLease.tokenProvider === options.tokenProvider &&
+          (await isCodexCapabilityLifecycleCurrent(capabilityLease))
+        : isCodexCredentialLifecycleCurrent(credentialLease);
 
     type AttemptResult =
       | { readonly kind: 'retry-auth' }
@@ -252,7 +259,7 @@ export function createCodexResponsesTransport(
         if (isCodexCredentialsChangedError(error)) throw errorForStatus(401);
         throw error;
       }
-      if (!(await assertCurrent())) {
+      if (!(await assertSendCurrent())) {
         throw errorForStatus(401);
       }
 
@@ -283,7 +290,7 @@ export function createCodexResponsesTransport(
 
       let current = false;
       try {
-        current = await guard.race(assertCurrent());
+        current = await guard.race(assertResponseCurrent());
       } catch (error) {
         await cancelResponseBody(response);
         guard.dispose();
@@ -312,7 +319,7 @@ export function createCodexResponsesTransport(
       return {
         kind: 'success',
         response: guard.bind(response, {
-          assertCurrent,
+          assertCurrent: assertResponseCurrent,
           errorForFailure: errorForGuardFailure,
         }),
       };

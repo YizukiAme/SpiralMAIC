@@ -406,6 +406,20 @@ async function managedLeaseCredentialsMatch(
   }
 }
 
+async function managedLeaseAccountMatches(
+  authority: CredentialLeaseAuthority,
+  accountId: string,
+): Promise<boolean> {
+  try {
+    const current = await withCodexCredentialVaultMutation(authority.vault, () =>
+      authority.vault.load(),
+    );
+    return current?.accountId === accountId;
+  } catch {
+    return false;
+  }
+}
+
 /** @internal Acquire an account/lifecycle snapshot without changing CodexTokenProvider. */
 export async function acquireCodexCredentialLease(
   tokenProvider: CodexTokenProvider,
@@ -473,6 +487,37 @@ export async function isCodexCredentialLeaseCurrent(
   }
 }
 
+/**
+ * @internal Validate response publication/completion against the account
+ * lifecycle without rejecting an allowed same-account access-token rotation.
+ */
+export async function isCodexCredentialLifecycleCurrent(
+  lease: InternalCodexCredentialLease,
+): Promise<boolean> {
+  const authority = credentialLeaseAuthorities.get(lease.tokenProvider);
+  if (authority) {
+    const lifecycleSignal = lease.lifecycleSignal;
+    return (
+      lease.lifecycleGeneration !== null &&
+      lifecycleSignal !== null &&
+      lifecycleSignal === authority.sharedState.lifecycleController.signal &&
+      !lifecycleSignal.aborted &&
+      lease.lifecycleGeneration === authority.sharedState.catalogGeneration &&
+      (await managedLeaseAccountMatches(authority, lease.credentials.accountId)) &&
+      lifecycleSignal === authority.sharedState.lifecycleController.signal &&
+      !lifecycleSignal.aborted &&
+      lease.lifecycleGeneration === authority.sharedState.catalogGeneration
+    );
+  }
+
+  try {
+    const current = await lease.tokenProvider.getValidCredentials();
+    return current.accountId === lease.credentials.accountId;
+  } catch {
+    return false;
+  }
+}
+
 /** @internal Rotate one lease only while its account/catalog lifecycle remains current. */
 export async function refreshCodexCredentialLease(
   lease: InternalCodexCredentialLease,
@@ -507,6 +552,19 @@ export async function isCodexCapabilityLeaseCurrent(
   try {
     if (!(await lease.isCatalogCurrent())) return false;
     if (!(await isCodexCredentialLeaseCurrent(lease.credentialLease))) return false;
+    return await lease.isCatalogCurrent();
+  } catch {
+    return false;
+  }
+}
+
+/** @internal Validate response lifecycle/account plus the selected catalog capability. */
+export async function isCodexCapabilityLifecycleCurrent(
+  lease: InternalCodexCapabilityLease,
+): Promise<boolean> {
+  try {
+    if (!(await lease.isCatalogCurrent())) return false;
+    if (!(await isCodexCredentialLifecycleCurrent(lease.credentialLease))) return false;
     return await lease.isCatalogCurrent();
   } catch {
     return false;

@@ -219,7 +219,9 @@ export function createCodexResponseRequestGuard(options: {
         if (result.done) {
           let isCurrent = false;
           try {
-            isCurrent = await race(Promise.resolve().then(bindOptions.assertCurrent));
+            isCurrent = await race(
+              Promise.resolve().then(() => (terminated ? false : bindOptions.assertCurrent())),
+            );
           } catch (error) {
             if (terminated) return;
             if (error instanceof CodexResponseGuardError) {
@@ -229,6 +231,7 @@ export function createCodexResponseRequestGuard(options: {
             }
             return;
           }
+          if (terminated) return;
           if (!isCurrent) {
             fail('stale-at-eof');
             return;

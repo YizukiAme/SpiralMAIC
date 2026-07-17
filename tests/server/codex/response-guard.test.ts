@@ -290,6 +290,22 @@ describe('Codex response request guard', () => {
     expect(source.cancel).toHaveBeenCalledTimes(1);
   });
 
+  it('does not start EOF currentness I/O after consumer cancellation wins the microtask race', async () => {
+    const assertCurrent = vi.fn(async () => true);
+    const source = controllableByteStream();
+    const guard = createCodexResponseRequestGuard(testGuardOptions());
+    const reader = bindGuard(guard, new Response(source.stream), assertCurrent).body!.getReader();
+
+    const read = reader.read();
+    await Promise.resolve();
+    source.close();
+    const cancel = Promise.resolve().then(() => Promise.resolve().then(() => reader.cancel()));
+
+    await cancel;
+    await expect(read).resolves.toMatchObject({ done: true });
+    expect(assertCurrent).not.toHaveBeenCalled();
+  });
+
   it('disposes parent listeners and timers after normal EOF', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);

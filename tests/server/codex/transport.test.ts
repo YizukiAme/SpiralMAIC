@@ -127,6 +127,20 @@ function successfulResponse(): Response {
   });
 }
 
+function successfulManagedRefresh(
+  accountId = 'managed-account-id',
+  refreshToken = 'managed-rotated-refresh-token',
+): Response {
+  return new Response(
+    JSON.stringify({
+      access_token: unsignedJwt({ chatgpt_account_id: accountId }),
+      refresh_token: refreshToken,
+      expires_in: 3600,
+    }),
+    { status: 200, headers: { 'content-type': 'application/json' } },
+  );
+}
+
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -685,6 +699,54 @@ describe('Codex Responses guarded lifecycle', () => {
     await expect(request).rejects.toMatchObject({ code: 'AUTH_REQUIRED' });
     await vi.waitFor(() => expect(source.cancel).toHaveBeenCalledTimes(1));
     await logout;
+  });
+
+  it('publishes a response after a managed same-account refresh while awaiting headers', async () => {
+    const rotatedAccessToken = unsignedJwt({ chatgpt_account_id: 'managed-account-id' });
+    const { provider, vault } = createManagedProvider(
+      vi.fn(async () => successfulManagedRefresh()),
+    );
+    const pendingHeaders = deferred<Response>();
+    const upstreamFetch = vi.fn<typeof fetch>(() => pendingHeaders.promise);
+    const transport = createCodexResponsesTransport({ tokenProvider: provider, upstreamFetch });
+
+    const request = transport(CODEX_RESPONSES_ENDPOINT, { method: 'POST', body: '{}' });
+    await vi.waitFor(() => expect(upstreamFetch).toHaveBeenCalledTimes(1));
+    await provider.getValidCredentials({ forceRefresh: true });
+    expect(vault.current?.accessToken).toBe(rotatedAccessToken);
+    pendingHeaders.resolve(new Response('response-after-rotation'));
+
+    const response = await request;
+    await expect(response.text()).resolves.toBe('response-after-rotation');
+  });
+
+  it('completes EOF after a delivered chunk and managed same-account refresh', async () => {
+    const rotatedAccessToken = unsignedJwt({ chatgpt_account_id: 'managed-account-id' });
+    const { provider, vault } = createManagedProvider(
+      vi.fn(async () => successfulManagedRefresh()),
+    );
+    const source = controllableByteStream();
+    const transport = createCodexResponsesTransport({
+      tokenProvider: provider,
+      upstreamFetch: vi.fn(async () => new Response(source.stream)),
+    });
+    const response = await transport(CODEX_RESPONSES_ENDPOINT, {
+      method: 'POST',
+      body: '{}',
+    });
+    const reader = response.body!.getReader();
+
+    source.enqueue(Uint8Array.of(1));
+    await expect(reader.read()).resolves.toMatchObject({
+      done: false,
+      value: Uint8Array.of(1),
+    });
+    await provider.getValidCredentials({ forceRefresh: true });
+    expect(vault.current?.accessToken).toBe(rotatedAccessToken);
+    source.close();
+
+    await expect(reader.read()).resolves.toMatchObject({ done: true });
+    expect(source.cancel).not.toHaveBeenCalled();
   });
 
   it('disposes the first 401 guard before conditional refresh', async () => {
