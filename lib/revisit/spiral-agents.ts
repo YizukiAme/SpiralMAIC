@@ -1,6 +1,9 @@
-import type { PersistedAgentConfig } from '@/lib/types/stage';
+import type { PersistedAgentConfig, Stage } from '@/lib/types/stage';
+import type { RevisitAttemptStatus } from '@/lib/revisit/types';
 import { db } from '@/lib/utils/database';
 import { withStagePersistenceLock } from '@/lib/utils/stage-persistence-lock';
+import { useAgentRegistry } from '@/lib/orchestration/registry/store';
+import { getActionsForRole } from '@/lib/orchestration/registry/types';
 
 export function isValidSpiralAgentRoster(
   agents: readonly PersistedAgentConfig[] | null | undefined,
@@ -24,6 +27,18 @@ export function getSpiralAgentPreparationAction(
   return state === 'pending-reveal' ? 'reveal' : 'continue';
 }
 
+export function resolveAttemptSpiralAgentRoster(
+  stage: Stage,
+  status: RevisitAttemptStatus,
+): PersistedAgentConfig[] | null {
+  if (isValidSpiralAgentRoster(stage.spiralAgentConfigs)) return stage.spiralAgentConfigs;
+  if (status !== 'completed') return null;
+  const legacyCandidates = stage.generatedAgentConfigs?.filter(
+    (agent) => agent.role === 'assistant' || agent.role === 'student',
+  );
+  return isValidSpiralAgentRoster(legacyCandidates) ? legacyCandidates : null;
+}
+
 export async function saveStageSpiralAgents(
   stageId: string,
   agents: readonly PersistedAgentConfig[],
@@ -39,4 +54,27 @@ export async function saveStageSpiralAgents(
     });
     if (updated !== 1) throw new Error(`Could not persist Spiral agents for stage ${stageId}.`);
   });
+}
+
+export function hydrateSpiralAgentRegistry(
+  stageId: string,
+  agents: readonly PersistedAgentConfig[],
+): void {
+  if (!isValidSpiralAgentRoster(agents)) throw new Error('Invalid Spiral agent roster.');
+  const registry = useAgentRegistry.getState();
+  for (const agent of registry.listAgents()) {
+    if (agent.isGenerated) registry.deleteAgent(agent.id);
+  }
+  const now = new Date();
+  for (const agent of agents) {
+    registry.addAgent({
+      ...agent,
+      allowedActions: getActionsForRole(agent.role),
+      createdAt: now,
+      updatedAt: now,
+      isDefault: false,
+      isGenerated: true,
+      boundStageId: stageId,
+    });
+  }
 }
