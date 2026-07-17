@@ -96,13 +96,6 @@ import { createOrGetRevisitAttempt, listRevisitAttempts } from '@/lib/revisit/at
 import { resolveActiveRevisitScope } from '@/lib/revisit/clock';
 import { serializeRevisitScope } from '@/lib/revisit/scope';
 import { RevisitDemoBadge } from '@/components/revisit/demo-badge';
-import { FeaturedDemoCourseCard } from '@/components/demo/featured-demo-course-card';
-import {
-  FEATURED_DEMO_COURSE,
-  findFeaturedDemoStage,
-  openFeaturedDemoCourse,
-  type FeaturedDemoPhase,
-} from '@/lib/demo/featured-course';
 
 const log = createLogger('Home');
 
@@ -219,9 +212,6 @@ function HomePage() {
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [featuredDemoPresent, setFeaturedDemoPresent] = useState<boolean | null>(null);
-  const [featuredDemoPhase, setFeaturedDemoPhase] = useState<FeaturedDemoPhase>('idle');
-  const [featuredDemoError, setFeaturedDemoError] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchButtonRef = useRef<HTMLButtonElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
@@ -272,39 +262,6 @@ function HomePage() {
       log.error('Failed to load classrooms:', err);
     }
   }, [replaceThumbnails]);
-
-  const handleOpenFeaturedDemo = useCallback(async () => {
-    setFeaturedDemoError(null);
-    try {
-      await openFeaturedDemoCourse({ onPhase: setFeaturedDemoPhase });
-      await loadClassrooms();
-      setFeaturedDemoPresent(true);
-      persistRecentOpen(true);
-    } catch (err) {
-      log.error('Failed to open featured demo course:', err);
-      const isQuotaError = err instanceof DOMException && err.name === 'QuotaExceededError';
-      setFeaturedDemoError(
-        isQuotaError ? '浏览器存储空间不足，请清理空间后重试' : '加载失败，点击重试',
-      );
-    } finally {
-      setFeaturedDemoPhase('idle');
-    }
-  }, [loadClassrooms, persistRecentOpen]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void findFeaturedDemoStage()
-      .then((stage) => {
-        if (!cancelled) setFeaturedDemoPresent(Boolean(stage));
-      })
-      .catch((err) => {
-        log.error('Failed to resolve featured demo course:', err);
-        if (!cancelled) setFeaturedDemoPresent(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   useEffect(() => {
     if (
@@ -1138,15 +1095,6 @@ function HomePage() {
           </div>
         )}
       </motion.div>
-
-      {featuredDemoPresent === false && (
-        <FeaturedDemoCourseCard
-          course={FEATURED_DEMO_COURSE}
-          phase={featuredDemoPhase}
-          error={featuredDemoError}
-          onOpen={handleOpenFeaturedDemo}
-        />
-      )}
 
       {/* ═══ Recent classrooms — collapsible ═══ */}
       {classrooms.length > 0 && (
