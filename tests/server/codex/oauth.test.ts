@@ -207,6 +207,46 @@ describe('Codex OAuth authorization helpers', () => {
     });
   });
 
+  it('rejects an oversized successful exchange as an invalid response', async () => {
+    const response = validExchangeResponse();
+    const oversized = new Response(await response.text(), {
+      status: 200,
+      headers: {
+        'content-type': 'application/json',
+        'content-length': String(1024 * 1024 + 1),
+      },
+    });
+
+    await expect(
+      exchangeAuthorizationCode(
+        exchangeOptions({
+          tokenExchangeFetch: async () => oversized,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      code: CODEX_OAUTH_ERROR_CODES.INVALID_RESPONSE,
+      retryable: false,
+    });
+  });
+
+  it('does not acquire a body reader for a non-successful exchange', async () => {
+    const response = new Response('private exchange failure body', { status: 400 });
+    const getReader = vi.spyOn(response.body!, 'getReader');
+
+    await expect(
+      exchangeAuthorizationCode(
+        exchangeOptions({
+          tokenExchangeFetch: async () => response,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      code: CODEX_OAUTH_ERROR_CODES.UPSTREAM_ERROR,
+      retryable: false,
+      upstreamStatus: 400,
+    });
+    expect(getReader).not.toHaveBeenCalled();
+  });
+
   it('forwards a composed signal and cleans the parent listener and timeout', async () => {
     vi.useFakeTimers();
     const parent = new AbortController();
@@ -270,12 +310,14 @@ describe('Codex OAuth authorization helpers', () => {
     );
   });
 
-  it('times out hung response JSON parsing within the same request boundary', async () => {
+  it('times out a stalled response body within the same request boundary', async () => {
     vi.useFakeTimers();
-    const response = validExchangeResponse();
-    Object.defineProperty(response, 'json', {
-      value: () => new Promise<unknown>(() => undefined),
-    });
+    const cancelled = vi.fn();
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        cancel: cancelled,
+      }),
+    );
     const exchange = exchangeAuthorizationCode(
       exchangeOptions({
         timeoutMs: 25,
@@ -289,6 +331,7 @@ describe('Codex OAuth authorization helpers', () => {
 
     await vi.advanceTimersByTimeAsync(25);
     await rejection;
+    expect(cancelled).toHaveBeenCalledTimes(1);
     expect(vi.getTimerCount()).toBe(0);
   });
 

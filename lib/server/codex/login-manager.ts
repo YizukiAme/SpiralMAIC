@@ -6,6 +6,7 @@ import type {
   CodexOAuthLoginMethod,
 } from '@/lib/types/codex-auth';
 
+import { readBoundedJson } from './bounded-json';
 import {
   CODEX_OAUTH_BROWSER_REDIRECT_URI,
   CODEX_OAUTH_DEVICE_REDIRECT_URI,
@@ -379,11 +380,12 @@ export class CodexLoginManager {
         if (response.status === 404 || response.status >= 500) {
           return { response, payload: null, invalidJson: false };
         }
-        try {
-          return { response, payload: await response.json(), invalidJson: false };
-        } catch {
-          return { response, payload: null, invalidJson: true };
-        }
+        const json = await readBoundedJson(response, signal);
+        return {
+          response,
+          payload: json.ok ? json.payload : null,
+          invalidJson: !json.ok,
+        };
       },
       {
         signal: lifecycle.abortController.signal,
@@ -514,11 +516,12 @@ export class CodexLoginManager {
           if (response.status === 403 || response.status === 404) {
             return { response, payload: null, invalidJson: false };
           }
-          try {
-            return { response, payload: await response.json(), invalidJson: false };
-          } catch {
-            return { response, payload: null, invalidJson: true };
-          }
+          const json = await readBoundedJson(response, signal);
+          return {
+            response,
+            payload: json.ok ? json.payload : null,
+            invalidJson: !json.ok,
+          };
         },
         { signal: attempt.abortController.signal, timeoutMs: pollTimeoutMs },
       );
