@@ -1,3 +1,4 @@
+import { readBoundedJson } from './bounded-json';
 import { extractCodexJwtIdentity, parseJwtPayload } from './jwt';
 import { codexCredentialsEqual, withCodexCredentialVaultMutation } from './vault';
 import type { CodexCredentialVault, CodexOAuthCredentials } from './vault';
@@ -850,13 +851,8 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
           if (response.status === 401 || response.status >= 500) {
             return { response, payload: null };
           }
-          let payload: unknown = null;
-          try {
-            payload = await response.json();
-          } catch {
-            // Invalid bodies are classified below without retaining or exposing them.
-          }
-          return { response, payload };
+          const json = await readBoundedJson(response, requestSignal);
+          return { response, payload: json.ok ? json.payload : null };
         },
         { signal, timeoutMs: this.oauthRequestTimeoutMs },
       );

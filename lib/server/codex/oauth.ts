@@ -1,5 +1,6 @@
 import { createHash, randomBytes as secureRandomBytes } from 'node:crypto';
 
+import { readBoundedJson } from './bounded-json';
 import { extractCodexJwtIdentity, parseJwtPayload } from './jwt';
 import {
   CODEX_OAUTH_CLIENT_ID,
@@ -106,12 +107,11 @@ export async function exchangeAuthorizationCode(
           );
         }
 
-        let payload: unknown;
-        try {
-          payload = await response.json();
-        } catch {
+        const json = await readBoundedJson(response, signal);
+        if (!json.ok) {
           throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.INVALID_RESPONSE, false);
         }
+        const payload = json.payload;
         if (!isRecord(payload)) {
           throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.INVALID_RESPONSE, false);
         }

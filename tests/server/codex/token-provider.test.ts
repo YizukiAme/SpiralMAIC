@@ -53,6 +53,16 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+function declaredOversizeJsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      'content-type': 'application/json',
+      'content-length': String(1024 * 1024 + 1),
+    },
+  });
+}
+
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
   let reject!: (reason?: unknown) => void;
@@ -738,23 +748,19 @@ describe('ManagedCodexTokenProvider', () => {
   });
 
   it('treats HTTP 401 as terminal without waiting for a hung response body', async () => {
-    vi.useFakeTimers();
     const vault = new MemoryVault(credentials());
-    const response = new Response(null, { status: 401 });
-    const parseBody = vi.fn(() => new Promise<unknown>(() => undefined));
-    Object.defineProperty(response, 'json', { value: parseBody });
+    const response = new Response(new ReadableStream<Uint8Array>(), { status: 401 });
+    const getReader = vi.spyOn(response.body!, 'getReader');
     const provider = createProvider(vault, vi.fn().mockResolvedValue(response), {
       oauthRequestTimeoutMs: 25,
     });
     const refresh = provider.getValidCredentials({ forceRefresh: true });
 
-    await vi.advanceTimersByTimeAsync(25);
-
     await expect(refresh).rejects.toMatchObject({
       code: CODEX_OAUTH_ERROR_CODES.INVALID_GRANT,
       retryable: false,
     });
-    expect(parseBody).not.toHaveBeenCalled();
+    expect(getReader).not.toHaveBeenCalled();
     expect(vault.current).toBeNull();
   });
 
@@ -883,9 +889,9 @@ describe('ManagedCodexTokenProvider', () => {
   it('keeps credentials on 5xx and never includes the response body in the error', async () => {
     const initial = credentials();
     const vault = new MemoryVault(initial);
-    const tokenExchangeFetch = vi
-      .fn()
-      .mockResolvedValue(new Response('upstream-body access-secret', { status: 503 }));
+    const response = new Response('upstream-body access-secret', { status: 503 });
+    const getReader = vi.spyOn(response.body!, 'getReader');
+    const tokenExchangeFetch = vi.fn().mockResolvedValue(response);
     const provider = createProvider(vault, tokenExchangeFetch);
 
     const error = await captureError(provider.getValidCredentials({ forceRefresh: true }));
@@ -898,6 +904,7 @@ describe('ManagedCodexTokenProvider', () => {
     expect(String(error)).not.toContain('upstream-body');
     expect(JSON.stringify(error)).not.toContain('access-secret');
     expect(vault.current).toBe(initial);
+    expect(getReader).not.toHaveBeenCalled();
   });
 
   it('never treats a nested terminal code inside a 5xx response as a reason to clear credentials', async () => {
@@ -930,6 +937,75 @@ describe('ManagedCodexTokenProvider', () => {
       retryable: false,
       upstreamStatus: 400,
     });
+    expect(vault.current).toEqual(initial);
+    expect(vault.clearCount).toBe(0);
+  });
+
+  it('keeps an oversized non-401 4xx as a rejected refresh without clearing credentials', async () => {
+    const initial = credentials();
+    const vault = new MemoryVault(initial);
+    const provider = createProvider(
+      vault,
+      vi
+        .fn()
+        .mockResolvedValue(declaredOversizeJsonResponse({ error: { code: 'invalid_grant' } }, 400)),
+    );
+
+    await expect(provider.getValidCredentials({ forceRefresh: true })).rejects.toMatchObject({
+      code: CODEX_OAUTH_ERROR_CODES.REFRESH_REJECTED,
+      retryable: false,
+      upstreamStatus: 400,
+    });
+    expect(vault.current).toEqual(initial);
+    expect(vault.clearCount).toBe(0);
+  });
+
+  it('rejects an oversized successful refresh without clearing or replacing credentials', async () => {
+    const initial = credentials();
+    const vault = new MemoryVault(initial);
+    const provider = createProvider(
+      vault,
+      vi.fn().mockResolvedValue(
+        declaredOversizeJsonResponse({
+          access_token: unsignedJwt({ chatgpt_account_id: 'oversized-account' }),
+          refresh_token: 'must-not-save',
+          expires_in: 300,
+        }),
+      ),
+    );
+
+    await expect(provider.getValidCredentials({ forceRefresh: true })).rejects.toMatchObject({
+      code: CODEX_OAUTH_ERROR_CODES.INVALID_RESPONSE,
+      retryable: false,
+    });
+    expect(vault.current).toEqual(initial);
+    expect(vault.saved).toEqual([]);
+    expect(vault.clearCount).toBe(0);
+  });
+
+  it('times out a stalled successful refresh body without clearing credentials', async () => {
+    vi.useFakeTimers();
+    const initial = credentials();
+    const vault = new MemoryVault(initial);
+    const cancelled = vi.fn();
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        cancel: cancelled,
+      }),
+    );
+    const provider = createProvider(vault, vi.fn().mockResolvedValue(response), {
+      oauthRequestTimeoutMs: 25,
+    });
+    const refresh = provider.getValidCredentials({ forceRefresh: true });
+    const rejection = expect(refresh).rejects.toMatchObject({
+      code: CODEX_OAUTH_ERROR_CODES.NETWORK_ERROR,
+      retryable: true,
+    });
+
+    await vi.advanceTimersByTimeAsync(25);
+    await rejection;
+
+    expect(cancelled).toHaveBeenCalledTimes(1);
     expect(vault.current).toEqual(initial);
     expect(vault.clearCount).toBe(0);
   });

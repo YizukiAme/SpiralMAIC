@@ -36,6 +36,16 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+function declaredOversizeJsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      'content-type': 'application/json',
+      'content-length': String(1024 * 1024 + 1),
+    },
+  });
+}
+
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
   let reject!: (reason?: unknown) => void;
@@ -1029,10 +1039,10 @@ describe('CodexLoginManager device flow', () => {
     });
   });
 
-  it('bounds a hung device poll by the remaining attempt deadline', async () => {
+  it('bounds a stalled device-poll body by the remaining attempt deadline', async () => {
     vi.useFakeTimers();
     let now = NOW;
-    const upstream = deferred<Response>();
+    const cancelled = vi.fn();
     let pollSignal: AbortSignal | undefined;
     const manager = new CodexLoginManager({
       vault: new MemoryVault(),
@@ -1047,7 +1057,11 @@ describe('CodexLoginManager device flow', () => {
           });
         }
         pollSignal = init.signal as AbortSignal;
-        return upstream.promise;
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            cancel: cancelled,
+          }),
+        );
       },
     });
     managers.push(manager);
@@ -1066,11 +1080,11 @@ describe('CodexLoginManager device flow', () => {
     await vi.advanceTimersByTimeAsync(1);
     const settledAtDeadline = settled;
     const abortedAtDeadline = pollSignal?.aborted;
-    upstream.resolve(jsonResponse({}, 403));
     const status = await polling;
 
     expect(settledAtDeadline).toBe(true);
     expect(abortedAtDeadline).toBe(true);
+    expect(cancelled).toHaveBeenCalledTimes(1);
     expect(status).toEqual({
       method: 'device',
       status: 'expired',
@@ -1217,9 +1231,11 @@ describe('CodexLoginManager device flow', () => {
   });
 
   it('turns a device-start 5xx into upstream error without parsing its body', async () => {
+    const response = new Response('private 5xx body', { status: 503 });
+    const getReader = vi.spyOn(response.body!, 'getReader');
     const manager = new CodexLoginManager({
       vault: new MemoryVault(),
-      oauthFetch: async () => jsonResponse({ secret: 'private 5xx body' }, 503),
+      oauthFetch: async () => response,
     });
     managers.push(manager);
 
@@ -1231,12 +1247,49 @@ describe('CodexLoginManager device flow', () => {
       errorCode: 'UPSTREAM_ERROR',
     });
     expect(JSON.stringify(attempt)).not.toContain('private 5xx body');
+    expect(getReader).not.toHaveBeenCalled();
+  });
+
+  it('turns a device-start 404 into unavailable without acquiring a body reader', async () => {
+    const response = new Response('private unavailable body', { status: 404 });
+    const getReader = vi.spyOn(response.body!, 'getReader');
+    const manager = new CodexLoginManager({
+      vault: new MemoryVault(),
+      oauthFetch: async () => response,
+    });
+    managers.push(manager);
+
+    await expect(manager.begin('device')).resolves.toEqual({
+      method: 'device',
+      status: 'failed',
+      errorCode: 'DEVICE_UNAVAILABLE',
+    });
+    expect(getReader).not.toHaveBeenCalled();
   });
 
   it('turns invalid device-start JSON into a terminal invalid response', async () => {
     const manager = new CodexLoginManager({
       vault: new MemoryVault(),
       oauthFetch: async () => new Response('raw invalid json', { status: 200 }),
+    });
+    managers.push(manager);
+
+    await expect(manager.begin('device')).resolves.toEqual({
+      method: 'device',
+      status: 'failed',
+      errorCode: 'INVALID_RESPONSE',
+    });
+  });
+
+  it('turns an oversized device-start response into a terminal invalid response', async () => {
+    const manager = new CodexLoginManager({
+      vault: new MemoryVault(),
+      oauthFetch: async () =>
+        declaredOversizeJsonResponse({
+          device_auth_id: 'oversized-device-id',
+          user_code: 'OVERSIZED',
+          interval: 5,
+        }),
     });
     managers.push(manager);
 
@@ -1334,6 +1387,49 @@ describe('CodexLoginManager device flow', () => {
     ]) {
       expect(JSON.stringify(completed)).not.toContain(secret);
     }
+  });
+
+  it('turns an oversized successful device poll into a terminal invalid response', async () => {
+    let now = NOW;
+    const vault = new MemoryVault();
+    const verifier = 'oversized-poll-verifier';
+    const manager = new CodexLoginManager({
+      vault,
+      clock: { now: () => now },
+      oauthFetch: async (input) => {
+        if (input === CODEX_OAUTH_DEVICE_USERCODE_ENDPOINT) {
+          return jsonResponse({
+            device_auth_id: 'oversized-poll-device',
+            user_code: 'OVERSIZED-POLL',
+            interval: 1,
+          });
+        }
+        if (input === CODEX_OAUTH_DEVICE_TOKEN_ENDPOINT) {
+          return declaredOversizeJsonResponse({
+            authorization_code: 'oversized-poll-code',
+            code_verifier: verifier,
+            code_challenge: pkceChallenge(verifier),
+          });
+        }
+        return jsonResponse({
+          access_token: unsignedJwt({ chatgpt_account_id: 'must-not-complete' }),
+          refresh_token: 'must-not-save',
+          expires_in: 300,
+        });
+      },
+    });
+    managers.push(manager);
+
+    await manager.begin('device');
+    now += 1_000;
+
+    await expect(manager.poll()).resolves.toMatchObject({
+      method: 'device',
+      status: 'failed',
+      errorCode: 'INVALID_RESPONSE',
+    });
+    expect(vault.current).toBeNull();
+    expect(vault.saved).toEqual([]);
   });
 
   it('finishes a credential replacement only after the cache lifecycle hook settles', async () => {
@@ -1484,6 +1580,43 @@ describe('CodexLoginManager device flow', () => {
     const [firstStatus, secondStatus] = await Promise.all([first, second]);
     expect(firstStatus).toEqual(secondStatus);
   });
+
+  it.each([403, 404])(
+    'keeps a device poll pending on HTTP %i without acquiring a body reader',
+    async (status) => {
+      let now = NOW;
+      let pendingResponse: Response | undefined;
+      let getReader: ReturnType<typeof vi.spyOn> | undefined;
+      const manager = new CodexLoginManager({
+        vault: new MemoryVault(),
+        clock: { now: () => now },
+        oauthFetch: async (input) => {
+          if (input === CODEX_OAUTH_DEVICE_USERCODE_ENDPOINT) {
+            return jsonResponse({
+              device_auth_id: `pending-device-${status}`,
+              user_code: `PENDING-${status}`,
+              interval: 1,
+            });
+          }
+          pendingResponse = new Response('private pending body', { status });
+          getReader = vi.spyOn(pendingResponse.body!, 'getReader');
+          return pendingResponse;
+        },
+      });
+      managers.push(manager);
+
+      await manager.begin('device');
+      now += 1_000;
+
+      await expect(manager.poll()).resolves.toMatchObject({
+        method: 'device',
+        status: 'pending',
+        userCode: `PENDING-${status}`,
+      });
+      expect(pendingResponse).toBeInstanceOf(Response);
+      expect(getReader).not.toHaveBeenCalled();
+    },
+  );
 
   it('keeps a slow device poll single-flight after additional intervals elapse', async () => {
     let now = NOW;
@@ -1658,6 +1791,8 @@ describe('CodexLoginManager device flow', () => {
 
   it('maps a device poll 5xx to upstream error without exposing its body', async () => {
     let now = NOW;
+    const pollResponse = jsonResponse({ secret: 'private poll 5xx body' }, 502);
+    const getReader = vi.spyOn(pollResponse.body!, 'getReader');
     const manager = new CodexLoginManager({
       vault: new MemoryVault(),
       clock: { now: () => now },
@@ -1669,7 +1804,7 @@ describe('CodexLoginManager device flow', () => {
             interval: 1,
           });
         }
-        return jsonResponse({ secret: 'private poll 5xx body' }, 502);
+        return pollResponse;
       },
     });
     managers.push(manager);
@@ -1684,6 +1819,7 @@ describe('CodexLoginManager device flow', () => {
       errorCode: 'UPSTREAM_ERROR',
     });
     expect(JSON.stringify(status)).not.toContain('private poll 5xx body');
+    expect(getReader).toHaveBeenCalledTimes(1);
   });
 
   it('does not exchange or save a poll result that arrives after cancellation', async () => {
