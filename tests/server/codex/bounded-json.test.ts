@@ -79,6 +79,21 @@ describe('readBoundedJson', () => {
     expect(cancelled).toHaveBeenCalledTimes(1);
   });
 
+  it('settles a declared overflow even if body cancellation never settles', async () => {
+    const cancelled = vi.fn(() => new Promise<void>(() => undefined));
+    const response = responseFromChunks([utf8('{"private":"body"}')], cancelled, {
+      'content-length': '7',
+    });
+    const pending = Symbol('pending');
+    const reading = readBoundedJson(response, new AbortController().signal, 6);
+
+    const result = await Promise.race([reading, Promise.resolve(pending)]);
+
+    expect(result).toEqual({ ok: false, reason: 'too-large' });
+    expect(cancelled).toHaveBeenCalledTimes(1);
+    expect(response.body?.locked).toBe(false);
+  });
+
   it('rejects a chunked body as soon as it exceeds the byte budget', async () => {
     const cancelled = vi.fn();
     const response = responseFromChunks(
@@ -108,6 +123,24 @@ describe('readBoundedJson', () => {
       reason: 'too-large',
     });
     expect(cancelled).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['hexadecimal', '0x7'],
+    ['scientific notation', '1e1'],
+  ])('treats a %s Content-Length as untrusted syntax', async (_name, value) => {
+    const cancelled = vi.fn();
+    const response = responseFromChunks([utf8('{}')], cancelled, {
+      'content-length': value,
+    });
+    const getReader = vi.spyOn(response.body!, 'getReader');
+
+    await expect(readBoundedJson(response, new AbortController().signal, 6)).resolves.toEqual({
+      ok: true,
+      payload: {},
+    });
+    expect(getReader).toHaveBeenCalledTimes(1);
+    expect(cancelled).not.toHaveBeenCalled();
   });
 
   it('returns a safe empty result for a missing or empty body', async () => {
@@ -217,6 +250,32 @@ describe('readBoundedJson', () => {
 
     expect(result).toEqual({ ok: false, reason: 'too-large' });
     expect(JSON.stringify(result)).not.toContain('private cancellation failure');
+    expect(response.body?.locked).toBe(false);
+  });
+
+  it('settles and releases an overflowing reader when cancellation never settles', async () => {
+    const cancelled = vi.fn(() => new Promise<void>(() => undefined));
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(utf8('{"too":"large"}'));
+        },
+        cancel: cancelled,
+      }),
+    );
+    const parent = new AbortController();
+    const removeListener = vi.spyOn(parent.signal, 'removeEventListener');
+    const pending = Symbol('pending');
+    const reading = readBoundedJson(response, parent.signal, 6);
+
+    const result = await Promise.race([
+      reading,
+      new Promise<typeof pending>((resolve) => setTimeout(() => resolve(pending), 0)),
+    ]);
+
+    expect(result).toEqual({ ok: false, reason: 'too-large' });
+    expect(cancelled).toHaveBeenCalledTimes(1);
+    expect(removeListener).toHaveBeenCalledTimes(1);
     expect(response.body?.locked).toBe(false);
   });
 });
