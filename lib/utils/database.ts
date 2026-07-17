@@ -71,6 +71,7 @@ export interface StageRecord {
   interactiveMode?: boolean; // Interactive Mode flag; non-indexed
   taskEngineMode?: boolean; // Vocational Task Engine flag; non-indexed
   generatedAgentConfigs?: GeneratedAgentConfig[]; // Editor-authored agent roster snapshot
+  spiralAgentConfigs?: GeneratedAgentConfig[]; // Course-owned Spiral assistant/student roster
 }
 
 /**
