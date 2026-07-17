@@ -23,15 +23,18 @@ roster, but it also made completed legacy attempts without a roster fail with
 ## Chosen Design
 
 When and only when a completed attempt has neither a valid `spiralAgentConfigs` snapshot nor a
-valid legacy `generatedAgentConfigs` roster, runtime creates an in-memory compatibility roster
-from the four built-in agents above.
+valid legacy `generatedAgentConfigs` roster, runtime derives a compatibility roster from the four
+built-in agents above and hydrates it into the agent registry.
 
 Each compatibility agent receives a stable `legacy-revisit-*` ID while retaining the original
-name, role, persona, avatar, color, priority, actions, and voice metadata. Synthetic IDs keep the
-runtime hydration path from overwriting or deleting the registry's actual `default-*` entries.
+name, role, persona, avatar, color, priority, and voice metadata. Runtime hydration supplies the
+same role-derived actions as the historical defaults. Synthetic IDs keep the runtime hydration
+path from overwriting or deleting the registry's actual `default-*` entries.
 
-The compatibility roster is not persisted to the course, attempt, or generated-agent database.
-It exists only for the lifetime of that historical playback session.
+The compatibility roster is never persisted to the course, attempt, or generated-agent IndexedDB.
+Its runtime registry entries are non-authoritative. Zustand persistence may serialize those
+entries to browser storage, but generated entries are discarded when the registry rehydrates, so
+that serialization does not become a durable roster snapshot.
 
 ## Resolution Order
 
@@ -49,10 +52,11 @@ agent generation. They never receive the compatibility defaults.
 
 ## Runtime Isolation
 
-Compatibility agents use the existing transient Spiral registry hydration path. Hydration may
-clear other generated runtime agents, but it must not mutate the built-in defaults or write normal
-generated-agent records. Leaving Spiral continues to restore the normal classroom roster through
-the existing classroom load flow.
+Compatibility agents use the existing Spiral registry hydration path. Hydration may clear other
+generated runtime agents, but it must not mutate the built-in defaults or write normal
+generated-agent records to IndexedDB. These registry changes remain non-authoritative even when
+Zustand serializes them because generated entries are discarded during rehydration. Leaving Spiral
+continues to restore the normal classroom roster through the existing classroom load flow.
 
 The strict `resolveRevisitAgentIds()` contract remains unchanged: production rosters still reject
 raw `default-*` IDs and still require exactly one assistant plus two or three students. The

@@ -6,11 +6,11 @@ import { useAgentRegistry } from '@/lib/orchestration/registry/store';
 import { getActionsForRole } from '@/lib/orchestration/registry/types';
 import type { AgentConfig } from '@/lib/orchestration/registry/types';
 
-const LEGACY_REVISIT_DEFAULT_AGENT_IDS = [
-  'default-2',
-  'default-4',
-  'default-3',
-  'default-5',
+const LEGACY_REVISIT_DEFAULT_AGENTS = [
+  { id: 'default-2', role: 'assistant' },
+  { id: 'default-4', role: 'student' },
+  { id: 'default-3', role: 'student' },
+  { id: 'default-5', role: 'student' },
 ] as const;
 
 export function isValidSpiralAgentRoster(
@@ -39,21 +39,24 @@ export function buildLegacyRevisitAgentRoster(
   candidates: readonly AgentConfig[],
 ): PersistedAgentConfig[] | null {
   const byId = new Map(candidates.map((agent) => [agent.id, agent]));
-  const defaults = LEGACY_REVISIT_DEFAULT_AGENT_IDS.map((id) => byId.get(id));
-  if (defaults.some((agent) => !agent)) return null;
+  const defaults: AgentConfig[] = [];
+  for (const descriptor of LEGACY_REVISIT_DEFAULT_AGENTS) {
+    const agent = byId.get(descriptor.id);
+    if (!agent || agent.isDefault !== true || agent.role !== descriptor.role) return null;
+    defaults.push(agent);
+  }
 
   const roster = defaults.map((agent) => {
-    const resolved = agent!;
     return {
-      id: `legacy-revisit-${resolved.id}`,
-      name: resolved.name,
-      role: resolved.role,
-      persona: resolved.persona,
-      avatar: resolved.avatar,
-      color: resolved.color,
-      priority: resolved.priority,
-      ...(resolved.voiceConfig ? { voiceConfig: structuredClone(resolved.voiceConfig) } : {}),
-      ...(resolved.voiceDesign ? { voiceDesign: structuredClone(resolved.voiceDesign) } : {}),
+      id: `legacy-revisit-${agent.id}`,
+      name: agent.name,
+      role: agent.role,
+      persona: agent.persona,
+      avatar: agent.avatar,
+      color: agent.color,
+      priority: agent.priority,
+      ...(agent.voiceConfig ? { voiceConfig: structuredClone(agent.voiceConfig) } : {}),
+      ...(agent.voiceDesign ? { voiceDesign: structuredClone(agent.voiceDesign) } : {}),
     };
   });
   return isValidSpiralAgentRoster(roster) ? roster : null;
