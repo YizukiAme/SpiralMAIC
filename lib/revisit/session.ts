@@ -612,3 +612,29 @@ export function getRevisitCueUserLabelKey(
 ): 'revisit.challenge.teachThisPage' | undefined {
   return prompt === 'teach-page' ? 'revisit.challenge.teachThisPage' : undefined;
 }
+
+export interface RevisitOpeningPlaybackState {
+  active: boolean;
+  audioStarted: boolean;
+}
+
+export type RevisitOpeningPlaybackEvent =
+  | 'activate'
+  | 'audio-started'
+  | 'audio-idle'
+  | 'fallback-elapsed';
+
+export function reduceRevisitOpeningPlayback(
+  state: RevisitOpeningPlaybackState,
+  event: RevisitOpeningPlaybackEvent,
+): RevisitOpeningPlaybackState {
+  if (event === 'activate') return { active: true, audioStarted: false };
+  if (event === 'audio-started') {
+    return state.active ? { ...state, audioStarted: true } : state;
+  }
+  if (event === 'audio-idle' && state.audioStarted) {
+    return { active: false, audioStarted: true };
+  }
+  if (event === 'fallback-elapsed') return { ...state, active: false };
+  return state;
+}
