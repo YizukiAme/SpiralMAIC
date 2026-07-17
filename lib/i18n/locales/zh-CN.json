@@ -73,7 +73,19 @@
     "exportFailed": "导出失败",
     "classroomZip": "导出课堂 ZIP",
     "classroomZipDesc": "课程结构 + 媒体文件",
-    "inlinePartial": "{{count}} 个外部资源未能打包，离线时课程可能无法正常显示。"
+    "inlinePartial": "{{count}} 个外部资源未能打包，离线时课程可能无法正常显示。",
+    "video": "导出视频",
+    "videoDesc": "自包含 Hyperframes 工程（可渲染为 MP4）",
+    "videoNoScenes": "没有可导出的场景。",
+    "videoCompiling": "正在编译视频时间线...",
+    "videoRendering": "正在渲染幻灯片并收集素材...",
+    "videoPackaging": "正在打包视频工程...",
+    "videoSuccess": "视频工程已导出",
+    "videoFailed": "视频导出失败",
+    "videoWarnings": "有 {{assets}} 个素材缺失，导出报告中有 {{diagnostics}} 个问题。",
+    "noSlides": "无可导出的幻灯片",
+    "noSlidesSkipped": "本课程无幻灯片，已跳过 PPTX",
+    "nothingToExport": "没有可导出的内容"
   },
   "import": {
     "classroom": "导入课堂",
@@ -103,6 +115,7 @@
     "unknown": "未知",
     "stopDiscussion": "结束讨论",
     "endQA": "结束问答",
+    "softClosing": "继续讨论",
     "error": {
       "emptyAgentResponses": "智能体连续无响应,讨论已停止。请重新尝试或检查模型配置。",
       "streamInterrupted": "数据流意外中断,讨论未能完成。请重新尝试。"
@@ -540,6 +553,7 @@
     "thinking": "思考中",
     "yourTurn": "轮到你发言了",
     "stopDiscussion": "结束讨论",
+    "softClosing": "继续讨论",
     "autoPlay": "自动播放",
     "autoPlayOff": "关闭自动播放",
     "speed": "倍速",

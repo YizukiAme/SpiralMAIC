@@ -5,10 +5,12 @@ import { describe, expect, it, vi } from 'vitest';
 // established pattern for database-touching code — no Dexie-in-node harness)
 // and run the REAL function to prove it cascades into the runtime layer.
 vi.mock('@/lib/runtime/store', () => ({
-  deleteStageRuntimeSafely: vi.fn().mockResolvedValue(undefined),
+  beginStageRuntimeDeletionSafely: vi.fn(() => ({
+    completion: Promise.resolve(),
+    settlement: Promise.resolve(),
+  })),
 }));
 vi.mock('@/lib/utils/database', () => ({
-  deleteStageWithRelatedData: vi.fn().mockResolvedValue(undefined),
   db: {
     stages: { delete: vi.fn().mockResolvedValue(undefined) },
     scenes: {
@@ -18,6 +20,19 @@ vi.mock('@/lib/utils/database', () => ({
           delete: vi.fn().mockResolvedValue(1),
         }),
       }),
+    },
+    stageOutlines: { delete: vi.fn().mockResolvedValue(undefined) },
+    mediaFiles: {
+      where: () => ({ equals: () => ({ delete: vi.fn().mockResolvedValue(0) }) }),
+    },
+    generatedAgents: {
+      where: () => ({ equals: () => ({ delete: vi.fn().mockResolvedValue(0) }) }),
+    },
+    agentEditSessions: {
+      where: () => ({ equals: () => ({ delete: vi.fn().mockResolvedValue(0) }) }),
+    },
+    overtimeExtensions: {
+      where: () => ({ equals: () => ({ delete: vi.fn().mockResolvedValue(0) }) }),
     },
   },
 }));
@@ -32,13 +47,26 @@ vi.mock('@/lib/utils/playback-storage', () => ({
 vi.mock('@/lib/quiz/persistence', () => ({
   clearAllForScene: vi.fn(),
 }));
+vi.mock('@/lib/pbl/v2/runtime/drain', () => ({
+  clearStageDrainWatermarks: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('@/lib/revisit/db', () => ({
+  deleteRevisitStageData: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('@/lib/utils/chat-storage-lock', () => ({
+  withRuntimeStorageExclusiveLockUntilSettled: vi.fn(
+    async (work: (releaseCaller: (value: unknown) => void) => Promise<unknown>) => work(() => {}),
+  ),
+}));
 
 import { deleteStageData } from '@/lib/utils/stage-storage';
-import { deleteStageRuntimeSafely } from '@/lib/runtime/store';
+import { beginStageRuntimeDeletionSafely } from '@/lib/runtime/store';
+import { withRuntimeStorageExclusiveLockUntilSettled } from '@/lib/utils/chat-storage-lock';
 
 describe('deleteStageData runtime cascade', () => {
   it('cascades into the runtime store with the deleted stageId', async () => {
     await deleteStageData('stage-7');
-    expect(vi.mocked(deleteStageRuntimeSafely)).toHaveBeenCalledExactlyOnceWith('stage-7');
+    expect(vi.mocked(beginStageRuntimeDeletionSafely)).toHaveBeenCalledExactlyOnceWith('stage-7');
+    expect(vi.mocked(withRuntimeStorageExclusiveLockUntilSettled)).toHaveBeenCalledOnce();
   });
 });

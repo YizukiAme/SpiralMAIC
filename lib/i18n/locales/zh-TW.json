@@ -73,7 +73,19 @@
     "exportFailed": "匯出失敗",
     "classroomZip": "匯出課堂 ZIP",
     "classroomZipDesc": "課程結構 + 媒體檔案",
-    "inlinePartial": "{{count}} 個外部資源未能打包，離線時課程可能無法正常顯示。"
+    "inlinePartial": "{{count}} 個外部資源未能打包，離線時課程可能無法正常顯示。",
+    "video": "匯出影片",
+    "videoDesc": "自包含 Hyperframes 專案（可算圖為 MP4）",
+    "videoNoScenes": "沒有可匯出的場景。",
+    "videoCompiling": "正在編譯影片時間軸...",
+    "videoRendering": "正在算圖投影片並收集素材...",
+    "videoPackaging": "正在打包影片專案...",
+    "videoSuccess": "影片專案已匯出",
+    "videoFailed": "影片匯出失敗",
+    "videoWarnings": "有 {{assets}} 個素材缺失，匯出報告中有 {{diagnostics}} 個問題。",
+    "noSlides": "無可匯出的幻燈片",
+    "noSlidesSkipped": "本課程無幻燈片，已跳過 PPTX",
+    "nothingToExport": "沒有可匯出的內容"
   },
   "import": {
     "classroom": "匯入課堂",
@@ -103,6 +115,7 @@
     "unknown": "未知",
     "stopDiscussion": "結束討論",
     "endQA": "結束問答",
+    "softClosing": "繼續討論",
     "error": {
       "emptyAgentResponses": "智能體連續無回應,討論已停止。請重新嘗試或檢查模型設定。",
       "streamInterrupted": "資料串流意外中斷,討論未能完成。請重新嘗試。"
@@ -521,6 +534,7 @@
     "noSpeechDetected": "未偵測到語音，請重試",
     "discussionEnded": "討論已結束",
     "qaEnded": "問答已結束",
+    "softClosing": "繼續討論",
     "thinking": "思考中",
     "yourTurn": "輪到你發言了",
     "stopDiscussion": "結束討論",

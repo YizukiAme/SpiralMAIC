@@ -1,6 +1,7 @@
 import 'fake-indexeddb/auto';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { BrowserRuntimeStore } from '@openmaic/storage';
 
 import {
   checkpointOvertimeExtension,
@@ -59,6 +60,12 @@ const scene = {
   },
 } satisfies Scene;
 
+const learnerKey = 'anon:overtime-store-test';
+const runtimeStore = new BrowserRuntimeStore({
+  indexedDB: globalThis.indexedDB,
+  dbName: 'maic-runtime-overtime-store-test',
+});
+
 async function clearCoreTables() {
   await db.open();
   await db.transaction(
@@ -98,8 +105,8 @@ describe('overtime extension persistence', () => {
 
   afterEach(clearCoreTables);
 
-  it('uses Core Dexie v13 and creates only one unfinished task per course', async () => {
-    expect(db.verno).toBe(13);
+  it('keeps overtime storage through Core Dexie v15 and creates only one unfinished task per course', async () => {
+    expect(db.verno).toBe(15);
     expect(db.tables.map((table) => table.name)).toContain('overtimeExtensions');
 
     const first = await createOrGetOvertimeExtension({
@@ -188,7 +195,7 @@ describe('overtime extension persistence', () => {
       decision,
       now: 10,
     });
-    const backup = await exportDatabase();
+    const backup = await exportDatabase({ store: runtimeStore, learnerKey });
 
     expect(backup.overtimeExtensions).toEqual([
       expect.objectContaining({ id: 'extension-1', stageId: 'stage-1' }),
@@ -197,7 +204,7 @@ describe('overtime extension persistence', () => {
     await deleteStageWithRelatedData('stage-1');
     expect(await db.overtimeExtensions.count()).toBe(0);
 
-    await importDatabase(backup);
+    await importDatabase(backup, { store: runtimeStore, learnerKey });
     expect(await db.overtimeExtensions.get('extension-1')).toMatchObject({
       stageId: 'stage-1',
       userPrompt: 'Teach me approach.',

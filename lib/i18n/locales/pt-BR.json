@@ -73,7 +73,19 @@
     "exportFailed": "Falha na exportação",
     "classroomZip": "Exportar ZIP da Sala",
     "classroomZipDesc": "Estrutura do curso + arquivos de mídia",
-    "inlinePartial": "{{count}} recurso(s) externo(s) não puderam ser empacotados; o curso pode não ser exibido corretamente offline."
+    "inlinePartial": "{{count}} recurso(s) externo(s) não puderam ser empacotados; o curso pode não ser exibido corretamente offline.",
+    "video": "Exportar Vídeo",
+    "videoDesc": "Projeto Hyperframes autossuficiente (renderizável em MP4)",
+    "videoNoScenes": "Nenhuma cena disponível para exportar.",
+    "videoCompiling": "Compilando a linha do tempo do vídeo...",
+    "videoRendering": "Renderizando slides e coletando recursos...",
+    "videoPackaging": "Empacotando o projeto de vídeo...",
+    "videoSuccess": "Projeto de vídeo exportado",
+    "videoFailed": "Falha na exportação do vídeo",
+    "videoWarnings": "{{assets}} recurso(s) ausente(s) e {{diagnostics}} problema(s) no relatório de exportação.",
+    "noSlides": "Não há slides para exportar",
+    "noSlidesSkipped": "Este curso não tem slides — PPTX ignorado",
+    "nothingToExport": "Nada para exportar"
   },
   "import": {
     "classroom": "Importar Sala de Aula",
@@ -103,6 +115,7 @@
     "unknown": "Desconhecido",
     "stopDiscussion": "Encerrar Discussão",
     "endQA": "Encerrar Perguntas",
+    "softClosing": "Continuar discussão",
     "error": {
       "emptyAgentResponses": "Os agentes retornaram respostas vazias; a discussão foi interrompida. Tente novamente ou verifique as configurações do modelo.",
       "streamInterrupted": "O fluxo de dados terminou inesperadamente; a discussão não foi concluída. Por favor, tente novamente."
@@ -537,6 +550,7 @@
     "noSpeechDetected": "Nenhuma fala detectada, tente novamente",
     "discussionEnded": "Discussão encerrada",
     "qaEnded": "Perguntas e respostas encerradas",
+    "softClosing": "Continuar discussão",
     "thinking": "Pensando",
     "yourTurn": "Sua vez",
     "stopDiscussion": "Encerrar Discussão",
