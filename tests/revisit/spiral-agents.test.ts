@@ -3,12 +3,14 @@ import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  buildLegacyRevisitAgentRoster,
   getSpiralAgentPreparationAction,
   hydrateSpiralAgentRegistry,
   isValidSpiralAgentRoster,
   resolveAttemptSpiralAgentRoster,
   saveStageSpiralAgents,
 } from '@/lib/revisit/spiral-agents';
+import { resolveRevisitAgentIds } from '@/lib/revisit/session';
 import { db } from '@/lib/utils/database';
 import { useAgentRegistry } from '@/lib/orchestration/registry/store';
 import { loadStageData } from '@/lib/utils/stage-storage';
@@ -112,6 +114,69 @@ describe('Spiral agent roster persistence', () => {
     expect(resolveAttemptSpiralAgentRoster(legacyStage, 'preparing')).toBeNull();
   });
 
+  it('keeps explicit Spiral and complete generated rosters ahead of compatibility defaults', () => {
+    const generatedRoster = [assistant, ...students];
+    const explicitRoster = [
+      { ...assistant, id: 'explicit-assistant' },
+      { ...students[0], id: 'explicit-student-1' },
+      { ...students[1], id: 'explicit-student-2' },
+    ];
+
+    expect(
+      resolveAttemptSpiralAgentRoster(
+        { ...stage, spiralAgentConfigs: explicitRoster, generatedAgentConfigs: generatedRoster },
+        'completed',
+      ),
+    ).toEqual(explicitRoster);
+    expect(
+      resolveAttemptSpiralAgentRoster(
+        { ...stage, generatedAgentConfigs: generatedRoster },
+        'completed',
+      ),
+    ).toEqual(generatedRoster);
+  });
+
+  it('reconstructs the historical default roster only for completed attempts', () => {
+    const roster = resolveAttemptSpiralAgentRoster(stage, 'completed');
+
+    expect(roster?.map(({ id, name, role }) => ({ id, name, role }))).toEqual([
+      { id: 'legacy-revisit-default-2', name: 'AI助教', role: 'assistant' },
+      { id: 'legacy-revisit-default-4', name: '好奇宝宝', role: 'student' },
+      { id: 'legacy-revisit-default-3', name: '显眼包', role: 'student' },
+      { id: 'legacy-revisit-default-5', name: '笔记员', role: 'student' },
+    ]);
+    expect(resolveRevisitAgentIds(roster ?? [])).toEqual({
+      assistantAgentId: 'legacy-revisit-default-2',
+      studentAgentId: 'legacy-revisit-default-4',
+      studentAgentIds: [
+        'legacy-revisit-default-4',
+        'legacy-revisit-default-3',
+        'legacy-revisit-default-5',
+      ],
+    });
+    expect(resolveAttemptSpiralAgentRoster(stage, 'ready')).toBeNull();
+  });
+
+  it('copies complete runtime metadata and rejects an incomplete built-in set', () => {
+    const defaults = useAgentRegistry.getState().listAgents();
+    const roster = buildLegacyRevisitAgentRoster(defaults);
+    const original = defaults.find((agent) => agent.id === 'default-2');
+
+    expect(roster?.[0]).toMatchObject({
+      name: original?.name,
+      role: original?.role,
+      persona: original?.persona,
+      avatar: original?.avatar,
+      color: original?.color,
+      priority: original?.priority,
+    });
+    expect(roster?.[0]?.voiceConfig).toEqual(original?.voiceConfig);
+    expect(roster?.[0]?.voiceDesign).toEqual(original?.voiceDesign);
+    expect(
+      buildLegacyRevisitAgentRoster(defaults.filter((agent) => agent.id !== 'default-5')),
+    ).toBeNull();
+  });
+
   it('round-trips the roster on the stage without changing normal generated agents', async () => {
     await db.stages.put(stage);
     await db.generatedAgents.put({
@@ -158,5 +223,23 @@ describe('Spiral agent roster persistence', () => {
         .map((agent) => agent.id),
     ).toEqual([assistant.id, ...students.map((student) => student.id)]);
     expect(await db.generatedAgents.get('gen-course-teacher')).toBeDefined();
+  });
+
+  it('hydrates compatibility defaults without mutating built-ins or IndexedDB', async () => {
+    const defaultBefore = useAgentRegistry.getState().getAgent('default-2');
+    const roster = resolveAttemptSpiralAgentRoster(stage, 'completed');
+    expect(roster).not.toBeNull();
+
+    hydrateSpiralAgentRegistry(stage.id, roster!);
+
+    expect(useAgentRegistry.getState().getAgent('default-2')).toEqual(defaultBefore);
+    expect(
+      useAgentRegistry
+        .getState()
+        .listAgents()
+        .filter((agent) => agent.isGenerated)
+        .map((agent) => agent.id),
+    ).toEqual(roster!.map((agent) => agent.id));
+    expect(await db.generatedAgents.toArray()).toEqual([]);
   });
 });
