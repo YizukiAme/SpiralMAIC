@@ -3,18 +3,27 @@ import packageMetadata from '../../../package.json';
 import { CODEX_RESPONSES_ENDPOINT } from '@/lib/ai/codex-model';
 
 import {
+  acquireCodexCredentialLease,
   isCodexCapabilityLeaseCurrent,
+  isCodexCredentialLeaseCurrent,
   isCodexCredentialsChangedError,
   refreshCodexCapabilityLease,
-  refreshCodexCredentialsIfCurrent,
+  refreshCodexCredentialLease,
   type CodexTokenProvider,
   type InternalCodexCapabilityLease,
+  type InternalCodexCredentialLease,
 } from './token-provider';
 import {
   createEphemeralCodexLogicalSession,
   deriveCodexUpstreamSessionId,
   type CodexUpstreamSessionId,
 } from './logical-session';
+import {
+  CODEX_RESPONSE_LIMITS,
+  CodexResponseGuardError,
+  createCodexResponseRequestGuard,
+  type CodexResponseGuardFailure,
+} from './response-guard';
 
 export { CODEX_RESPONSES_ENDPOINT } from '@/lib/ai/codex-model';
 
@@ -170,6 +179,16 @@ function errorForStatus(status: number): CodexResponsesTransportError {
   );
 }
 
+function errorForGuardFailure(failure: CodexResponseGuardFailure): CodexResponsesTransportError {
+  if (failure === 'lifecycle-abort' || failure === 'stale-at-eof') {
+    return errorForStatus(401);
+  }
+  if (failure === 'caller-abort') {
+    return new CodexResponsesTransportError(CODEX_RESPONSES_TRANSPORT_ERROR_CODES.NETWORK_ERROR);
+  }
+  return new CodexResponsesTransportError(CODEX_RESPONSES_TRANSPORT_ERROR_CODES.UPSTREAM_ERROR);
+}
+
 /**
  * Creates the sole network boundary used by the native Codex language model.
  * The endpoint is validated as an exact string before credentials are loaded.
@@ -189,65 +208,122 @@ export function createCodexResponsesTransport(
     }
 
     const body = normalizeBody(init?.body, sessionId);
-    let originalCredentials: { accessToken: string; accountId: string } | null = null;
+    const deadlineAt = Date.now() + CODEX_RESPONSE_LIMITS.totalTimeoutMs;
     let capabilityLease = options.capabilityLease;
-    const request = async (
-      forceRefresh: boolean,
-      expected?: { accessToken: string; accountId: string },
-    ): Promise<Response> => {
-      let credentials: { accessToken: string; accountId: string };
+    let credentialLease: InternalCodexCredentialLease;
+    try {
+      if (capabilityLease) {
+        if (capabilityLease.credentialLease.tokenProvider !== options.tokenProvider) {
+          throw errorForStatus(401);
+        }
+        if (!(await isCodexCapabilityLeaseCurrent(capabilityLease))) {
+          throw errorForStatus(401);
+        }
+        credentialLease = capabilityLease.credentialLease;
+      } else {
+        credentialLease = await acquireCodexCredentialLease(options.tokenProvider);
+      }
+    } catch (error) {
+      if (isCodexCredentialsChangedError(error)) throw errorForStatus(401);
+      throw error;
+    }
+
+    const assertCurrent = async (): Promise<boolean> =>
+      capabilityLease
+        ? capabilityLease.credentialLease.tokenProvider === options.tokenProvider &&
+          (await isCodexCapabilityLeaseCurrent(capabilityLease))
+        : isCodexCredentialLeaseCurrent(credentialLease);
+
+    type AttemptResult =
+      | { readonly kind: 'retry-auth' }
+      | { readonly kind: 'success'; readonly response: Response };
+
+    const request = async (forceRefresh: boolean): Promise<AttemptResult> => {
       try {
-        if (capabilityLease) {
-          if (capabilityLease.credentialLease.tokenProvider !== options.tokenProvider) {
-            throw errorForStatus(401);
-          }
-          if (forceRefresh) {
+        if (forceRefresh) {
+          if (capabilityLease) {
             capabilityLease = await refreshCodexCapabilityLease(capabilityLease);
-          } else if (!(await isCodexCapabilityLeaseCurrent(capabilityLease))) {
-            throw errorForStatus(401);
+            credentialLease = capabilityLease.credentialLease;
+          } else {
+            credentialLease = await refreshCodexCredentialLease(credentialLease);
           }
-          credentials = capabilityLease.credentialLease.credentials;
-        } else if (forceRefresh) {
-          const scopedExpected = expected ?? originalCredentials;
-          if (!scopedExpected) throw errorForStatus(401);
-          credentials = await refreshCodexCredentialsIfCurrent(
-            options.tokenProvider,
-            scopedExpected,
-          );
-        } else {
-          credentials = await options.tokenProvider.getValidCredentials();
-          originalCredentials = credentials;
         }
       } catch (error) {
         if (isCodexCredentialsChangedError(error)) throw errorForStatus(401);
         throw error;
       }
-      if (capabilityLease && !(await isCodexCapabilityLeaseCurrent(capabilityLease))) {
+      if (!(await assertCurrent())) {
         throw errorForStatus(401);
       }
+
+      const credentials = credentialLease.credentials;
+      const guard = createCodexResponseRequestGuard({
+        callerSignal: init?.signal ?? undefined,
+        lifecycleSignal: credentialLease.lifecycleSignal,
+        deadlineAt,
+      });
+      let response: Response;
       try {
-        return await upstreamFetch(CODEX_RESPONSES_ENDPOINT, {
-          ...init,
-          body,
-          headers: createHeaders(init?.headers, credentials, sessionId),
-          redirect: 'manual',
-        });
-      } catch {
+        response = await guard.race(
+          upstreamFetch(CODEX_RESPONSES_ENDPOINT, {
+            ...init,
+            signal: guard.signal,
+            body,
+            headers: createHeaders(init?.headers, credentials, sessionId),
+            redirect: 'manual',
+          }),
+        );
+      } catch (error) {
+        guard.dispose();
+        if (error instanceof CodexResponseGuardError) {
+          throw errorForGuardFailure(error.failure);
+        }
         throw new CodexResponsesTransportError(CODEX_RESPONSES_TRANSPORT_ERROR_CODES.NETWORK_ERROR);
       }
+
+      let current = false;
+      try {
+        current = await guard.race(assertCurrent());
+      } catch (error) {
+        await cancelResponseBody(response);
+        guard.dispose();
+        if (error instanceof CodexResponseGuardError) {
+          throw errorForGuardFailure(error.failure);
+        }
+        throw errorForStatus(401);
+      }
+      if (!current) {
+        await cancelResponseBody(response);
+        guard.dispose();
+        throw errorForStatus(401);
+      }
+
+      if (response.status === 401) {
+        await cancelResponseBody(response);
+        guard.dispose();
+        return { kind: 'retry-auth' };
+      }
+      if (!response.ok) {
+        await cancelResponseBody(response);
+        guard.dispose();
+        throw errorForStatus(response.status);
+      }
+
+      return {
+        kind: 'success',
+        response: guard.bind(response, {
+          assertCurrent,
+          errorForFailure: errorForGuardFailure,
+        }),
+      };
     };
 
-    let response = await request(false);
-    if (response.status === 401) {
-      await cancelResponseBody(response);
-      response = await request(true, originalCredentials ?? undefined);
+    let result = await request(false);
+    if (result.kind === 'retry-auth') {
+      result = await request(true);
+      if (result.kind === 'retry-auth') throw errorForStatus(401);
     }
 
-    if (!response.ok) {
-      await cancelResponseBody(response);
-      throw errorForStatus(response.status);
-    }
-
-    return response;
+    return result.response;
   };
 }
