@@ -35,9 +35,15 @@ import { toast } from 'sonner';
 import { type ProviderId } from '@/lib/ai/providers';
 import { PROVIDERS, MONO_LOGO_PROVIDERS } from '@/lib/ai/providers';
 import { cn } from '@/lib/utils';
-import { createCustomProviderSettings, getProviderTypeLabel, modelInfoFromId } from './utils';
+import {
+  createCustomProviderSettings,
+  getProviderTypeLabel,
+  modelInfoFromId,
+  orderProvidersForSettings,
+} from './utils';
 import { ProviderList } from './provider-list';
 import { ProviderConfigPanel } from './provider-config-panel';
+import { CodexProviderSettings } from './codex-provider-settings';
 import { PDFSettings } from './pdf-settings';
 import { PDF_PROVIDERS } from '@/lib/pdf/constants';
 import type { PDFProviderId } from '@/lib/pdf/types';
@@ -378,9 +384,12 @@ export function SettingsDialog({ open, onOpenChange, initialSection }: SettingsD
         alternateBaseUrls: PROVIDERS[selectedProviderId]?.alternateBaseUrls,
         icon: providersConfig[selectedProviderId].icon,
         requiresApiKey: providersConfig[selectedProviderId].requiresApiKey,
+        credentialMode: providersConfig[selectedProviderId].credentialMode,
         models: providersConfig[selectedProviderId].models,
       }
     : undefined;
+  const isCodexProviderSurface =
+    activeSection === 'providers' && selectedProviderId === 'openai-codex';
 
   // Handle model editing
   const handleEditModel = (pid: ProviderId, modelIndex: number) => {
@@ -542,16 +551,19 @@ export function SettingsDialog({ open, onOpenChange, initialSection }: SettingsD
   };
 
   // Get all providers from providersConfig
-  const allProviders = Object.entries(providersConfig).map(([id, config]) => ({
-    id: id as ProviderId,
-    name: config.name,
-    type: config.type,
-    defaultBaseUrl: config.defaultBaseUrl,
-    icon: config.icon,
-    requiresApiKey: config.requiresApiKey,
-    models: config.models,
-    isServerConfigured: config.isServerConfigured,
-  }));
+  const allProviders = orderProvidersForSettings(
+    Object.entries(providersConfig).map(([id, config]) => ({
+      id: id as ProviderId,
+      name: config.name,
+      type: config.type,
+      defaultBaseUrl: config.defaultBaseUrl,
+      icon: config.icon,
+      requiresApiKey: config.requiresApiKey,
+      credentialMode: config.credentialMode,
+      models: config.models,
+      isServerConfigured: config.isServerConfigured,
+    })),
+  );
 
   // Sections that show a provider list column
   const _hasProviderList = [
@@ -1075,28 +1087,39 @@ export function SettingsDialog({ open, onOpenChange, initialSection }: SettingsD
 
               {activeSection === 'token-plan' && <TokenPlanSettings />}
 
-              {activeSection === 'providers' && selectedProvider && (
-                <ProviderConfigPanel
-                  provider={selectedProvider}
-                  initialApiKey={providersConfig[selectedProviderId]?.apiKey || ''}
-                  initialBaseUrl={providersConfig[selectedProviderId]?.baseUrl || ''}
-                  initialRequiresApiKey={
-                    providersConfig[selectedProviderId]?.requiresApiKey ?? true
-                  }
-                  providersConfig={providersConfig}
-                  onConfigChange={(apiKey, baseUrl, requiresApiKey) =>
-                    handleProviderConfigChange(selectedProviderId, apiKey, baseUrl, requiresApiKey)
-                  }
-                  onSave={handleProviderConfigSave}
-                  onEditModel={(index) => handleEditModel(selectedProviderId, index)}
-                  onDeleteModel={(index) => handleDeleteModel(selectedProviderId, index)}
-                  onAddModel={handleAddModel}
-                  onModelsFetched={(ids) => handleModelsFetched(selectedProviderId, ids)}
-                  modelsUrl={providersConfig[selectedProviderId]?.modelsUrl}
-                  onResetToDefault={() => handleResetProvider(selectedProviderId)}
-                  isBuiltIn={providersConfig[selectedProviderId]?.isBuiltIn ?? true}
-                />
-              )}
+              {activeSection === 'providers' &&
+                selectedProvider &&
+                selectedProviderId === 'openai-codex' && <CodexProviderSettings />}
+
+              {activeSection === 'providers' &&
+                selectedProvider &&
+                selectedProviderId !== 'openai-codex' && (
+                  <ProviderConfigPanel
+                    provider={selectedProvider}
+                    initialApiKey={providersConfig[selectedProviderId]?.apiKey || ''}
+                    initialBaseUrl={providersConfig[selectedProviderId]?.baseUrl || ''}
+                    initialRequiresApiKey={
+                      providersConfig[selectedProviderId]?.requiresApiKey ?? true
+                    }
+                    providersConfig={providersConfig}
+                    onConfigChange={(apiKey, baseUrl, requiresApiKey) =>
+                      handleProviderConfigChange(
+                        selectedProviderId,
+                        apiKey,
+                        baseUrl,
+                        requiresApiKey,
+                      )
+                    }
+                    onSave={handleProviderConfigSave}
+                    onEditModel={(index) => handleEditModel(selectedProviderId, index)}
+                    onDeleteModel={(index) => handleDeleteModel(selectedProviderId, index)}
+                    onAddModel={handleAddModel}
+                    onModelsFetched={(ids) => handleModelsFetched(selectedProviderId, ids)}
+                    modelsUrl={providersConfig[selectedProviderId]?.modelsUrl}
+                    onResetToDefault={() => handleResetProvider(selectedProviderId)}
+                    isBuiltIn={providersConfig[selectedProviderId]?.isBuiltIn ?? true}
+                  />
+                )}
 
               {activeSection === 'pdf' && (
                 <PDFSettings selectedProviderId={selectedPdfProviderId} />
@@ -1116,13 +1139,13 @@ export function SettingsDialog({ open, onOpenChange, initialSection }: SettingsD
 
             {/* Footer */}
             <div className="flex items-center justify-end gap-3 px-5 py-3 border-t bg-muted/30">
-              {saveStatus === 'saved' && (
+              {!isCodexProviderSurface && saveStatus === 'saved' && (
                 <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                   <CheckCircle2 className="h-4 w-4" />
                   <span>{t('settings.saveSuccess')}</span>
                 </div>
               )}
-              {saveStatus === 'error' && (
+              {!isCodexProviderSurface && saveStatus === 'error' && (
                 <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
                   <XCircle className="h-4 w-4" />
                   <span>{t('settings.saveFailed')}</span>
@@ -1131,9 +1154,11 @@ export function SettingsDialog({ open, onOpenChange, initialSection }: SettingsD
               <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
                 {t('settings.close')}
               </Button>
-              <Button size="sm" onClick={handleSave}>
-                {t('settings.save')}
-              </Button>
+              {!isCodexProviderSurface && (
+                <Button size="sm" onClick={handleSave}>
+                  {t('settings.save')}
+                </Button>
+              )}
             </div>
           </div>
         </div>

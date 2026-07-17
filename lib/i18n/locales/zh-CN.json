@@ -1067,7 +1067,8 @@
       "bocha": "博查",
       "brave": "Brave Search",
       "baidu": "百度",
-      "searxng": "SearXNG"
+      "searxng": "SearXNG",
+      "openai-codex": "Codex"
     },
     "providerTypes": {
       "openai": "OpenAI 协议",
@@ -1663,7 +1664,40 @@
     },
     "ttsBrowserNativeTimelineNotice": "浏览器内置 TTS 不支持编辑器时间轴的音频功能（试听、重新生成、全部配音）。切换到托管 TTS 提供方即可逐句生成和管理音频。",
     "alidocmindAccessKeyId": "AccessKey ID",
-    "alidocmindAccessKeySecret": "AccessKey Secret"
+    "alidocmindAccessKeySecret": "AccessKey Secret",
+    "codexOAuth": {
+      "experimental": "实验性第三方 Codex 接入；使用你的 ChatGPT 方案额度。",
+      "unavailableTitle": "Codex 登录当前不可用",
+      "unavailable": {
+        "SERVERLESS_UNSUPPORTED": "Codex OAuth 需要带持久化存储的自托管 Node 服务。",
+        "ACCESS_CODE_REQUIRED": "生产环境使用 Codex OAuth 前必须配置 ACCESS_CODE。",
+        "DATA_DIR_UNWRITABLE": "服务端无法写入数据目录，请检查 /app/data 权限。",
+        "RUNTIME_LOCKED": "另一个 OpenMAIC Node 进程正在使用 Codex 认证数据目录。"
+      },
+      "connectedAs": "已连接为 {email}",
+      "connected": "已连接 ChatGPT",
+      "signInBrowser": "使用 ChatGPT 登录",
+      "signInDevice": "使用设备代码",
+      "waiting": "正在等待授权…",
+      "deviceInstructions": "打开验证页面并输入此一次性代码。",
+      "openVerification": "打开验证页面",
+      "copyCode": "复制代码",
+      "copied": "已复制",
+      "cancel": "取消登录",
+      "signOut": "退出登录",
+      "models": "可用模型",
+      "fastMode": "Fast 模式",
+      "fastModeDescription": "仅对支持的模型生效：速度约为 1.5 倍，但会消耗更多 ChatGPT 方案额度。",
+      "testConnection": "测试连接",
+      "testSuccess": "Codex 连接成功。",
+      "testUnauthorized": "请重新使用 ChatGPT 登录。",
+      "testForbidden": "此 ChatGPT 工作区没有 Codex 权限。",
+      "testRateLimited": "已达到 ChatGPT 方案额度或频率限制。",
+      "testFailed": "Codex 连接失败。",
+      "loginFailed": "登录失败，请重新选择任一登录方式重试。",
+      "loginExpired": "本次登录已过期，请重新开始。"
+    },
+    "connected": "已连接"
   },
   "profile": {
     "title": "个人资料",

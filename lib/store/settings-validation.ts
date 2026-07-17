@@ -10,6 +10,7 @@ export type ProviderCfgLike = {
   apiKey?: string;
   requiresApiKey?: boolean;
   baseUrl?: string;
+  credentialMode?: 'api-key' | 'oauth' | 'none';
   /** Operator force-disabled (server precedence, TTS — #665). Never usable. */
   serverDisabled?: boolean;
 };
@@ -27,6 +28,7 @@ export function isProviderUsable(cfg: ProviderCfgLike | undefined): boolean {
   // Operator force-disable wins over any local credential path so the current
   // selection is re-pointed away from a server-disabled provider (#665).
   if (cfg.serverDisabled) return false;
+  if (cfg.credentialMode === 'oauth') return cfg.isServerConfigured === true;
   if (cfg.isServerConfigured) return true;
   // Keyless providers (e.g. Ollama) need an explicit user-provided baseUrl
   if (cfg.requiresApiKey === false) return !!cfg.baseUrl;
@@ -91,6 +93,7 @@ export interface LLMProviderCfgLike {
   models: Array<{ id: string }>;
   baseUrl?: string;
   defaultBaseUrl?: string;
+  credentialMode?: 'api-key' | 'oauth' | 'none';
 }
 
 /**
@@ -109,6 +112,7 @@ export interface LLMProviderCfgLike {
  */
 export function isLLMProviderConfigured(config: LLMProviderCfgLike): boolean {
   if (!config.models || config.models.length < 1) return false;
+  if (config.credentialMode === 'oauth') return config.isServerConfigured === true;
   if (config.isServerConfigured) return true;
   if (config.requiresApiKey === false) return !!config.baseUrl;
   if (!config.apiKey) return false;

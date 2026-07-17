@@ -13,6 +13,11 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/utils/model-config', () => ({
   getCurrentModelConfig: mocks.getCurrentModelConfig,
+  buildModelRequestHeaders: (config: Record<string, string | undefined>) => ({
+    'x-model': config.modelString || '',
+    'x-api-key': config.apiKey || '',
+    ...(config.serviceTier ? { 'x-service-tier': config.serviceTier } : {}),
+  }),
 }));
 
 vi.mock('@/lib/store/settings', () => ({

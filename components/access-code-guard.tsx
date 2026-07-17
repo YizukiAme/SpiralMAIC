@@ -2,6 +2,8 @@
 
 import { useEffect, useState, ReactNode } from 'react';
 import { AccessCodeModal } from '@/components/access-code-modal';
+import { syncServerProvidersAfterAccessUnlock } from '@/lib/client/codex-oauth';
+import { useSettingsStore } from '@/lib/store/settings';
 
 export function AccessCodeGuard({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<{
@@ -36,14 +38,14 @@ export function AccessCodeGuard({ children }: { children: ReactNode }) {
 
   const needsAuth = !status.loading && status.enabled && !status.authenticated;
 
+  const handleSuccess = () => {
+    setStatus((current) => ({ ...current, authenticated: true }));
+    void syncServerProvidersAfterAccessUnlock(() => useSettingsStore.getState());
+  };
+
   return (
     <>
-      {needsAuth && (
-        <AccessCodeModal
-          open={true}
-          onSuccess={() => setStatus((s) => ({ ...s, authenticated: true }))}
-        />
-      )}
+      {needsAuth && <AccessCodeModal open={true} onSuccess={handleSuccess} />}
       {children}
     </>
   );

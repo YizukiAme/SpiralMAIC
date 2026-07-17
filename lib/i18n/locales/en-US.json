@@ -1067,7 +1067,8 @@
       "bocha": "Bocha",
       "brave": "Brave Search",
       "baidu": "Baidu",
-      "searxng": "SearXNG"
+      "searxng": "SearXNG",
+      "openai-codex": "Codex"
     },
     "providerTypes": {
       "openai": "OpenAI Protocol",
@@ -1663,7 +1664,40 @@
     },
     "ttsBrowserNativeTimelineNotice": "Browser-native TTS doesn't support the editor timeline's audio features (preview, regenerate, and bulk voiceover). Switch to a managed TTS provider to generate and manage per-line audio.",
     "alidocmindAccessKeyId": "AccessKey ID",
-    "alidocmindAccessKeySecret": "AccessKey Secret"
+    "alidocmindAccessKeySecret": "AccessKey Secret",
+    "codexOAuth": {
+      "experimental": "Experimental third-party Codex integration; uses your ChatGPT plan quota.",
+      "unavailableTitle": "Codex sign-in is unavailable",
+      "unavailable": {
+        "SERVERLESS_UNSUPPORTED": "Codex OAuth requires a self-hosted Node server with persistent storage.",
+        "ACCESS_CODE_REQUIRED": "Set ACCESS_CODE to use Codex OAuth in production.",
+        "DATA_DIR_UNWRITABLE": "The server cannot write to its data directory. Check /app/data permissions.",
+        "RUNTIME_LOCKED": "Another OpenMAIC Node process is already using the Codex auth data directory."
+      },
+      "connectedAs": "Connected as {email}",
+      "connected": "Connected with ChatGPT",
+      "signInBrowser": "Sign in with ChatGPT",
+      "signInDevice": "Use device code",
+      "waiting": "Waiting for authorization…",
+      "deviceInstructions": "Open the verification page and enter this one-time code.",
+      "openVerification": "Open verification page",
+      "copyCode": "Copy code",
+      "copied": "Copied",
+      "cancel": "Cancel sign-in",
+      "signOut": "Sign out",
+      "models": "Available models",
+      "fastMode": "Fast mode",
+      "fastModeDescription": "Applies only to supported models: about 1.5x faster, but uses more of your ChatGPT plan quota.",
+      "testConnection": "Test connection",
+      "testSuccess": "Codex connection succeeded.",
+      "testUnauthorized": "Sign in with ChatGPT again.",
+      "testForbidden": "This ChatGPT workspace does not have Codex access.",
+      "testRateLimited": "Your ChatGPT plan quota or rate limit has been reached.",
+      "testFailed": "Codex connection failed.",
+      "loginFailed": "Sign-in failed. Choose either sign-in method to try again.",
+      "loginExpired": "This sign-in attempt expired. Start a new one."
+    },
+    "connected": "Connected"
   },
   "profile": {
     "title": "Profile",

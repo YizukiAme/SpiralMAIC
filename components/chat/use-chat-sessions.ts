@@ -16,7 +16,7 @@ import {
 import type { DiscussionRequest } from '@/components/roundtable';
 import type { Action, SpotlightAction, DiscussionAction } from '@/lib/types/action';
 import type { UIMessage } from 'ai';
-import type { ThinkingConfig } from '@/lib/types/provider';
+import type { ModelServiceTier, ThinkingConfig } from '@/lib/types/provider';
 import { useStageStore } from '@/lib/store';
 import { useCanvasStore } from '@/lib/store/canvas';
 import { useSettingsStore } from '@/lib/store/settings';
@@ -189,6 +189,7 @@ export type ChatRequestTemplate = {
   model?: string;
   providerType?: string;
   thinkingConfig?: ThinkingConfig;
+  serviceTier?: ModelServiceTier;
   directorState?: DirectorState;
   piSessionBoundary?: PiSessionBoundaryContext;
 };
@@ -1191,6 +1192,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
           model: requestTemplate.model,
           providerType: requestTemplate.providerType,
           thinkingConfig: requestTemplate.thinkingConfig,
+          serviceTier: requestTemplate.serviceTier,
         },
         {
           getStoreState: (): AgentLoopStoreState => {
@@ -1608,6 +1610,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
             model: mc.modelString,
             providerType: mc.providerType,
             thinkingConfig: mc.thinkingConfig,
+            serviceTier: mc.serviceTier,
             directorState: session.directorState,
           },
           controller,
@@ -1828,6 +1831,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
             model: mc.modelString,
             providerType: mc.providerType,
             thinkingConfig: mc.thinkingConfig,
+            serviceTier: mc.serviceTier,
             directorState: existingSession?.directorState,
           },
           controller,
@@ -1975,6 +1979,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
             model: mc.modelString,
             providerType: mc.providerType,
             thinkingConfig: mc.thinkingConfig,
+            serviceTier: mc.serviceTier,
           },
           controller,
           'discussion',

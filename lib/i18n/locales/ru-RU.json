@@ -1067,7 +1067,8 @@
       "bocha": "Bocha",
       "brave": "Brave Search",
       "baidu": "Baidu",
-      "searxng": "SearXNG"
+      "searxng": "SearXNG",
+      "openai-codex": "Codex"
     },
     "providerTypes": {
       "openai": "Протокол OpenAI",
@@ -1663,7 +1664,40 @@
     },
     "ttsBrowserNativeTimelineNotice": "Встроенный в браузер TTS не поддерживает функции аудио на таймлайне редактора (прослушивание, повторная генерация и массовая озвучка). Переключитесь на управляемый TTS-провайдер, чтобы генерировать и управлять аудио для каждой строки.",
     "alidocmindAccessKeyId": "AccessKey ID",
-    "alidocmindAccessKeySecret": "AccessKey Secret"
+    "alidocmindAccessKeySecret": "AccessKey Secret",
+    "codexOAuth": {
+      "experimental": "Экспериментальная сторонняя интеграция Codex; использует квоту вашего тарифа ChatGPT.",
+      "unavailableTitle": "Вход в Codex недоступен",
+      "unavailable": {
+        "SERVERLESS_UNSUPPORTED": "Для Codex OAuth нужен самостоятельно размещённый Node-сервер с постоянным хранилищем.",
+        "ACCESS_CODE_REQUIRED": "Для использования Codex OAuth в production настройте ACCESS_CODE.",
+        "DATA_DIR_UNWRITABLE": "Сервер не может записывать в каталог данных. Проверьте права /app/data.",
+        "RUNTIME_LOCKED": "Каталог данных Codex уже используется другим процессом OpenMAIC Node."
+      },
+      "connectedAs": "Подключено как {email}",
+      "connected": "Подключено к ChatGPT",
+      "signInBrowser": "Войти через ChatGPT",
+      "signInDevice": "Использовать код устройства",
+      "waiting": "Ожидание авторизации…",
+      "deviceInstructions": "Откройте страницу проверки и введите этот одноразовый код.",
+      "openVerification": "Открыть страницу проверки",
+      "copyCode": "Копировать код",
+      "copied": "Скопировано",
+      "cancel": "Отменить вход",
+      "signOut": "Выйти",
+      "models": "Доступные модели",
+      "fastMode": "Быстрый режим",
+      "fastModeDescription": "Работает только с поддерживаемыми моделями: примерно в 1,5 раза быстрее, но расходует больше квоты вашего тарифа ChatGPT.",
+      "testConnection": "Проверить подключение",
+      "testSuccess": "Подключение к Codex выполнено.",
+      "testUnauthorized": "Войдите через ChatGPT ещё раз.",
+      "testForbidden": "У этого рабочего пространства ChatGPT нет доступа к Codex.",
+      "testRateLimited": "Достигнута квота или частотный лимит тарифа ChatGPT.",
+      "testFailed": "Не удалось подключиться к Codex.",
+      "loginFailed": "Не удалось войти. Выберите любой способ входа и повторите попытку.",
+      "loginExpired": "Срок этой попытки входа истёк. Начните заново."
+    },
+    "connected": "Подключено"
   },
   "profile": {
     "title": "Профиль",

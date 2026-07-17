@@ -1067,7 +1067,8 @@
       "bocha": "Bocha",
       "brave": "Brave Search",
       "baidu": "Baidu",
-      "searxng": "SearXNG"
+      "searxng": "SearXNG",
+      "openai-codex": "Codex"
     },
     "providerTypes": {
       "openai": "بروتوكول OpenAI",
@@ -1663,7 +1664,40 @@
     },
     "ttsBrowserNativeTimelineNotice": "لا يدعم تحويل النص إلى كلام المدمج في المتصفح ميزات الصوت في الخط الزمني للمحرر (المعاينة وإعادة التوليد والتعليق الصوتي الجماعي). بدّل إلى مزود TTS مُدار لتوليد صوت كل سطر وإدارته.",
     "alidocmindAccessKeyId": "AccessKey ID",
-    "alidocmindAccessKeySecret": "AccessKey Secret"
+    "alidocmindAccessKeySecret": "AccessKey Secret",
+    "codexOAuth": {
+      "experimental": "تكامل تجريبي من جهة خارجية مع Codex؛ يستخدم حصة خطة ChatGPT الخاصة بك.",
+      "unavailableTitle": "تسجيل الدخول إلى Codex غير متاح",
+      "unavailable": {
+        "SERVERLESS_UNSUPPORTED": "يتطلب Codex OAuth خادم Node مستضافاً ذاتياً مع تخزين دائم.",
+        "ACCESS_CODE_REQUIRED": "اضبط ACCESS_CODE لاستخدام Codex OAuth في بيئة الإنتاج.",
+        "DATA_DIR_UNWRITABLE": "لا يستطيع الخادم الكتابة في مجلد البيانات. تحقق من صلاحيات /app/data.",
+        "RUNTIME_LOCKED": "تستخدم عملية OpenMAIC Node أخرى مجلد بيانات مصادقة Codex بالفعل."
+      },
+      "connectedAs": "متصل باسم {email}",
+      "connected": "متصل بـ ChatGPT",
+      "signInBrowser": "تسجيل الدخول باستخدام ChatGPT",
+      "signInDevice": "استخدام رمز الجهاز",
+      "waiting": "بانتظار التفويض…",
+      "deviceInstructions": "افتح صفحة التحقق وأدخل رمز الاستخدام لمرة واحدة.",
+      "openVerification": "فتح صفحة التحقق",
+      "copyCode": "نسخ الرمز",
+      "copied": "تم النسخ",
+      "cancel": "إلغاء تسجيل الدخول",
+      "signOut": "تسجيل الخروج",
+      "models": "النماذج المتاحة",
+      "fastMode": "الوضع السريع",
+      "fastModeDescription": "ينطبق فقط على النماذج المدعومة: أسرع بنحو 1.5 مرة، لكنه يستهلك قدرًا أكبر من حصة خطة ChatGPT.",
+      "testConnection": "اختبار الاتصال",
+      "testSuccess": "تم الاتصال بـ Codex بنجاح.",
+      "testUnauthorized": "سجّل الدخول باستخدام ChatGPT مرة أخرى.",
+      "testForbidden": "مساحة عمل ChatGPT هذه لا تملك صلاحية Codex.",
+      "testRateLimited": "تم بلوغ حصة خطة ChatGPT أو حد معدل الطلبات.",
+      "testFailed": "فشل الاتصال بـ Codex.",
+      "loginFailed": "فشل تسجيل الدخول. اختر إحدى طريقتي تسجيل الدخول للمحاولة مرة أخرى.",
+      "loginExpired": "انتهت صلاحية محاولة تسجيل الدخول. ابدأ محاولة جديدة."
+    },
+    "connected": "متصل"
   },
   "profile": {
     "title": "الملف الشخصي",

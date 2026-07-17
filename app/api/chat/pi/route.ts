@@ -81,6 +81,7 @@ export async function POST(req: NextRequest) {
       // Let resolveModel arbitrate thinking too: a routed chat-adapter's thinking
       // wins, an unrouted one honors this client thinking (see resolve-model.ts).
       thinkingConfig: body.thinkingConfig ?? body.thinking,
+      serviceTier: body.serviceTier,
       logicalSession: parseExternalCodexLogicalSession(body.session),
     });
 

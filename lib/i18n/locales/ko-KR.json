@@ -1067,7 +1067,8 @@
       "bocha": "Bocha",
       "brave": "Brave Search",
       "baidu": "Baidu",
-      "searxng": "SearXNG"
+      "searxng": "SearXNG",
+      "openai-codex": "Codex"
     },
     "providerTypes": {
       "openai": "OpenAI 프로토콜",
@@ -1663,7 +1664,40 @@
     },
     "ttsBrowserNativeTimelineNotice": "브라우저 내장 TTS는 편집기 타임라인의 오디오 기능(미리듣기·다시 생성·전체 음성 생성)을 지원하지 않습니다. 관리형 TTS 공급자로 전환하면 줄별 오디오를 생성·관리할 수 있습니다.",
     "alidocmindAccessKeyId": "AccessKey ID",
-    "alidocmindAccessKeySecret": "AccessKey Secret"
+    "alidocmindAccessKeySecret": "AccessKey Secret",
+    "codexOAuth": {
+      "experimental": "실험적인 타사 Codex 연동이며 ChatGPT 요금제 한도를 사용합니다.",
+      "unavailableTitle": "Codex 로그인을 사용할 수 없습니다",
+      "unavailable": {
+        "SERVERLESS_UNSUPPORTED": "Codex OAuth에는 영구 저장소가 있는 자체 호스팅 Node 서버가 필요합니다.",
+        "ACCESS_CODE_REQUIRED": "프로덕션에서 Codex OAuth를 사용하려면 ACCESS_CODE를 설정하세요.",
+        "DATA_DIR_UNWRITABLE": "서버가 데이터 디렉터리에 쓸 수 없습니다. /app/data 권한을 확인하세요.",
+        "RUNTIME_LOCKED": "다른 OpenMAIC Node 프로세스가 Codex 인증 데이터 디렉터리를 사용 중입니다."
+      },
+      "connectedAs": "{email}(으)로 연결됨",
+      "connected": "ChatGPT에 연결됨",
+      "signInBrowser": "ChatGPT로 로그인",
+      "signInDevice": "기기 코드 사용",
+      "waiting": "인증 대기 중…",
+      "deviceInstructions": "확인 페이지를 열고 이 일회용 코드를 입력하세요.",
+      "openVerification": "확인 페이지 열기",
+      "copyCode": "코드 복사",
+      "copied": "복사됨",
+      "cancel": "로그인 취소",
+      "signOut": "로그아웃",
+      "models": "사용 가능한 모델",
+      "fastMode": "Fast 모드",
+      "fastModeDescription": "지원 모델에만 적용됩니다. 약 1.5배 더 빠르지만 ChatGPT 요금제 사용량을 더 많이 소모합니다.",
+      "testConnection": "연결 테스트",
+      "testSuccess": "Codex 연결에 성공했습니다.",
+      "testUnauthorized": "ChatGPT로 다시 로그인하세요.",
+      "testForbidden": "이 ChatGPT 워크스페이스에는 Codex 권한이 없습니다.",
+      "testRateLimited": "ChatGPT 요금제 한도 또는 요청 한도에 도달했습니다.",
+      "testFailed": "Codex 연결에 실패했습니다.",
+      "loginFailed": "로그인에 실패했습니다. 로그인 방법 중 하나를 선택해 다시 시도하세요.",
+      "loginExpired": "로그인 시도가 만료되었습니다. 다시 시작하세요."
+    },
+    "connected": "연결됨"
   },
   "profile": {
     "title": "프로필",
