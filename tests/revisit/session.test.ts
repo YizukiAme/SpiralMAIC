@@ -18,6 +18,7 @@ import {
   getRevisitParticipantStatusBadge,
   isRevisitStudentQuestion,
   REVISIT_PAGE_PROBE_CAP,
+  reduceRevisitOpeningPlayback,
   resolveRevisitAgentIds,
   roleForRevisitAgent,
   type RevisitSessionPageState,
@@ -795,5 +796,23 @@ describe('revisit session helpers', () => {
     expect(reduceRevisitCueUserPrompt('default', 'enter-page')).toBe('teach-page');
     expect(reduceRevisitCueUserPrompt('teach-page', 'teacher-submit')).toBe('default');
     expect(reduceRevisitCueUserPrompt('teach-page', 'agent-cued-user')).toBe('default');
+  });
+
+  test('keeps the opening active until audio finishes or the fallback elapses', () => {
+    const active = { active: true, audioStarted: false };
+
+    expect(reduceRevisitOpeningPlayback(active, 'audio-idle')).toEqual(active);
+
+    const playing = reduceRevisitOpeningPlayback(active, 'audio-started');
+    expect(playing).toEqual({ active: true, audioStarted: true });
+    expect(reduceRevisitOpeningPlayback(playing, 'audio-idle')).toEqual({
+      active: false,
+      audioStarted: true,
+    });
+
+    expect(reduceRevisitOpeningPlayback(active, 'fallback-elapsed')).toEqual({
+      active: false,
+      audioStarted: false,
+    });
   });
 });

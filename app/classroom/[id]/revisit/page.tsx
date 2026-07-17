@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, CheckCircle2, FileChartColumn, GraduationCap, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -40,6 +40,7 @@ import {
   getRevisitParticipantStatusBadge,
   REVISIT_PAGE_PROBE_CAP,
   reduceRevisitCueUserPrompt,
+  reduceRevisitOpeningPlayback,
   revisitMessagesToUiMessages,
   resolveRevisitAgentIds,
   selectPageProbes,
@@ -92,6 +93,7 @@ const EMPTY_REVISIT_AGENT_IDS: RevisitAgentIds = {
   studentAgentIds: [],
   assistantAgentId: '',
 };
+const REVISIT_OPENING_TTS_SAFETY_TIMEOUT_MS = 60_000;
 
 export default function RevisitChallengePage() {
   const params = useParams();
@@ -136,8 +138,12 @@ export default function RevisitChallengePage() {
   const [audioIndicatorState, setAudioIndicatorState] = useState<AudioIndicatorState>('idle');
   const [audioAgentId, setAudioAgentId] = useState<string | null>(null);
   const [activeBubbleId, setActiveBubbleId] = useState<string | null>(null);
-  const [isCueUser, setIsCueUser] = useState(true);
+  const [isCueUser, setIsCueUser] = useState(false);
   const [cueUserPrompt, setCueUserPrompt] = useState<RevisitCueUserPrompt>('teach-page');
+  const [openingPlayback, dispatchOpeningPlayback] = useReducer(reduceRevisitOpeningPlayback, {
+    active: true,
+    audioStarted: false,
+  });
   const [teacherSpeaking, setTeacherSpeaking] = useState(false);
   const [awaitingStudentStatusUpdate, setAwaitingStudentStatusUpdate] = useState(false);
   const [generatedSkeletonScenes, setGeneratedSkeletonScenes] = useState<Scene[]>([]);
@@ -150,6 +156,7 @@ export default function RevisitChallengePage() {
   const turnAbortControllerRef = useRef<AbortController | null>(null);
   const judgeAbortControllerRef = useRef<AbortController | null>(null);
   const openingInjectedRef = useRef(false);
+  const openingMessageRef = useRef<RevisitMessage | null>(null);
   const openingClearTimerRef = useRef<number | null>(null);
   const missingGateFallbackCountsRef = useRef<Record<number, number>>({});
 
@@ -191,6 +198,9 @@ export default function RevisitChallengePage() {
         setDirectorStatesByPage({});
         missingGateFallbackCountsRef.current = {};
         openingInjectedRef.current = false;
+        openingMessageRef.current = null;
+        dispatchOpeningPlayback('activate');
+        setIsCueUser(false);
         if (!attemptId) throw new Error('missing revisit attempt');
         let snapshot =
           (await getRevisitAttempt(attemptId, revisitScope)) ??
@@ -299,8 +309,7 @@ export default function RevisitChallengePage() {
   );
   const revisitAgentIds = useMemo(
     () =>
-      resolveRevisitAgentIds(classroom?.stage.spiralAgentConfigs ?? []) ??
-      EMPTY_REVISIT_AGENT_IDS,
+      resolveRevisitAgentIds(classroom?.stage.spiralAgentConfigs ?? []) ?? EMPTY_REVISIT_AGENT_IDS,
     [classroom?.stage.spiralAgentConfigs],
   );
   const allAgents = useMemo(
@@ -468,6 +477,19 @@ export default function RevisitChallengePage() {
     onAudioStateChange: (agentId, state) => {
       setAudioAgentId(agentId);
       setAudioIndicatorState(state);
+      if (state === 'generating' || state === 'playing') {
+        dispatchOpeningPlayback('audio-started');
+        if (openingMessageRef.current) {
+          if (openingClearTimerRef.current != null) {
+            window.clearTimeout(openingClearTimerRef.current);
+          }
+          openingClearTimerRef.current = window.setTimeout(() => {
+            dispatchOpeningPlayback('fallback-elapsed');
+          }, REVISIT_OPENING_TTS_SAFETY_TIMEOUT_MS);
+        }
+      } else {
+        dispatchOpeningPlayback('audio-idle');
+      }
     },
   });
   const handleExit = useCallback(() => {
@@ -507,6 +529,8 @@ export default function RevisitChallengePage() {
     });
 
     openingInjectedRef.current = true;
+    openingMessageRef.current = openingMessage;
+    dispatchOpeningPlayback('activate');
     setMessages((prev) => {
       const next = prev.length ? prev : [openingMessage];
       transcriptRef.current = next;
@@ -515,23 +539,21 @@ export default function RevisitChallengePage() {
     setActiveBubbleId(openingMessage.id);
     setLiveSpeech(openingMessage.text);
     setSpeakingAgentId(openingMessage.agentId ?? null);
-    setIsCueUser(true);
-    discussionTTS.handleSegmentSealed(
-      openingMessage.id,
-      `${openingMessage.id}:opening`,
-      openingMessage.text,
-      openingMessage.agentId ?? null,
-    );
+    setIsCueUser(false);
 
     const displayMs = Math.min(8000, Math.max(3000, openingMessage.text.length * 110));
     if (openingClearTimerRef.current != null) {
       window.clearTimeout(openingClearTimerRef.current);
     }
     openingClearTimerRef.current = window.setTimeout(() => {
-      setLiveSpeech((current) => (current === openingMessage.text ? null : current));
-      setSpeakingAgentId((current) => (current === openingMessage.agentId ? null : current));
-      setActiveBubbleId((current) => (current === openingMessage.id ? null : current));
+      dispatchOpeningPlayback('fallback-elapsed');
     }, displayMs);
+    discussionTTS.handleSegmentSealed(
+      openingMessage.id,
+      `${openingMessage.id}:opening`,
+      openingMessage.text,
+      openingMessage.agentId ?? null,
+    );
   }, [
     agentsRecord,
     blueprint,
@@ -542,6 +564,20 @@ export default function RevisitChallengePage() {
     revisitAgentIds.assistantAgentId,
     t,
   ]);
+  useEffect(() => {
+    if (openingPlayback.active) return;
+    const openingMessage = openingMessageRef.current;
+    if (!openingMessage) return;
+    if (openingClearTimerRef.current != null) {
+      window.clearTimeout(openingClearTimerRef.current);
+      openingClearTimerRef.current = null;
+    }
+    setLiveSpeech((current) => (current === openingMessage.text ? null : current));
+    setSpeakingAgentId((current) => (current === openingMessage.agentId ? null : current));
+    setActiveBubbleId((current) => (current === openingMessage.id ? null : current));
+    openingMessageRef.current = null;
+    setIsCueUser(true);
+  }, [openingPlayback.active]);
   useEffect(() => {
     return () => {
       turnAbortControllerRef.current?.abort(
@@ -623,8 +659,12 @@ export default function RevisitChallengePage() {
   );
   useEffect(() => {
     if (tailView || report || running || judging || !currentPageState) return;
+    if (openingPlayback.active) {
+      setIsCueUser(false);
+      return;
+    }
     setIsCueUser(!currentPageState.passed);
-  }, [currentPageState, judging, report, running, tailView]);
+  }, [currentPageState, judging, openingPlayback.active, report, running, tailView]);
   useEffect(() => {
     setCueUserPrompt((current) => reduceRevisitCueUserPrompt(current, 'enter-page'));
   }, [pageIndex]);
