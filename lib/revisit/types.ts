@@ -144,6 +144,7 @@ export interface RevisitAttempt {
   completedAt?: number;
   preparationError?: string;
   reportOnly?: boolean;
+  spiralAgentGenerationState?: 'pending-reveal' | 'revealed';
 }
 
 export interface RevisitDemoSession {

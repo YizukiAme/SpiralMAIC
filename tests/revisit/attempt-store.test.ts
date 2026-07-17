@@ -9,6 +9,7 @@ import {
   listRevisitAttempts,
   markRevisitAttemptCompleted,
   saveRevisitAttemptBlueprint,
+  setRevisitAttemptSpiralAgentGenerationState,
   upsertRevisitAttemptScene,
 } from '@/lib/revisit/attempt-store';
 import {
@@ -136,6 +137,27 @@ describe('durable revisit attempt storage', () => {
     const persisted = await getRevisitAttempt('attempt-1');
     expect(persisted?.sourceStage).toEqual(stage);
     expect(persisted?.sourceScenes).toEqual([scene]);
+  });
+
+  it('persists the Spiral agent reveal recovery state', async () => {
+    await createOrGetRevisitAttempt({
+      attemptId: 'attempt-1',
+      stage,
+      sourceScenes: [scene],
+      now: 10,
+    });
+
+    await setRevisitAttemptSpiralAgentGenerationState('attempt-1', 'pending-reveal', 11);
+    expect(await getRevisitAttempt('attempt-1')).toMatchObject({
+      spiralAgentGenerationState: 'pending-reveal',
+      updatedAt: 11,
+    });
+
+    await setRevisitAttemptSpiralAgentGenerationState('attempt-1', 'revealed', 12);
+    expect(await getRevisitAttempt('attempt-1')).toMatchObject({
+      spiralAgentGenerationState: 'revealed',
+      updatedAt: 12,
+    });
   });
 
   it('commits the first report and completed attempt state together', async () => {

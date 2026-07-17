@@ -70,6 +70,7 @@ export async function saveStageData(stageId: string, data: StageStoreData): Prom
             interactiveMode: data.stage.interactiveMode,
             taskEngineMode: data.stage.taskEngineMode,
             generatedAgentConfigs: data.stage.generatedAgentConfigs,
+            spiralAgentConfigs: data.stage.spiralAgentConfigs,
           });
 
           await db.scenes.where('stageId').equals(stageId).delete();

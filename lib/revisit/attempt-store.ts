@@ -99,6 +99,25 @@ export async function saveRevisitAttemptSource(
   });
 }
 
+export async function setRevisitAttemptSpiralAgentGenerationState(
+  attemptId: string,
+  state: NonNullable<RevisitAttempt['spiralAgentGenerationState']>,
+  now = Date.now(),
+  scope: RevisitDataScope = FORMAL_REVISIT_SCOPE,
+): Promise<RevisitAttempt> {
+  const db = getRevisitDatabase(scope);
+  return db.transaction('rw', db.revisitAttempts, async () => {
+    const existing = await requireAttempt(attemptId, scope);
+    const next: RevisitAttempt = {
+      ...existing,
+      spiralAgentGenerationState: state,
+      updatedAt: now,
+    };
+    await db.revisitAttempts.put(next);
+    return next;
+  });
+}
+
 export async function upsertRevisitAttemptScene(args: {
   attemptId: string;
   scene: Scene;
