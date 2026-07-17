@@ -11,14 +11,26 @@ export class BoundedJsonReadError extends Error {
   }
 }
 
+function cancelWithoutWaiting(cancel: () => Promise<unknown>): void {
+  try {
+    void cancel().catch(() => undefined);
+  } catch {
+    // Cancellation is best-effort and must never delay or replace a safe result.
+  }
+}
+
 export async function readBoundedJson(
   response: Response,
   signal: AbortSignal,
   maxBytes = CODEX_OAUTH_JSON_MAX_BYTES,
 ): Promise<BoundedJsonResult> {
-  const declaredLength = Number(response.headers.get('content-length'));
+  const declaredLengthHeader = response.headers.get('content-length');
+  const declaredLength =
+    declaredLengthHeader !== null && /^[0-9]+$/.test(declaredLengthHeader)
+      ? Number(declaredLengthHeader)
+      : Number.NaN;
   if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
-    await response.body?.cancel().catch(() => undefined);
+    if (response.body) cancelWithoutWaiting(() => response.body!.cancel());
     return { ok: false, reason: 'too-large' };
   }
 
@@ -35,7 +47,7 @@ export async function readBoundedJson(
   let totalBytes = 0;
   let listeningForAbort = false;
   const cancelReader = () => {
-    void reader.cancel().catch(() => undefined);
+    cancelWithoutWaiting(() => reader.cancel());
   };
 
   if (signal.aborted) {
@@ -58,7 +70,7 @@ export async function readBoundedJson(
 
       totalBytes += next.value.byteLength;
       if (totalBytes > maxBytes) {
-        await reader.cancel().catch(() => undefined);
+        cancelReader();
         return { ok: false, reason: 'too-large' };
       }
       chunks.push(next.value);
