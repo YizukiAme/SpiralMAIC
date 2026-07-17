@@ -341,7 +341,12 @@ describe('Codex Responses transport failures', () => {
     };
     const upstreamFetch = vi.fn<typeof fetch>(async () => successfulResponse());
     const capabilityLease = {
-      credentialLease: { tokenProvider, credentials: accountA, lifecycleGeneration: 1 },
+      credentialLease: {
+        tokenProvider,
+        credentials: accountA,
+        lifecycleGeneration: 1,
+        lifecycleSignal: null,
+      },
       isCatalogCurrent: () => true,
     };
     const transport = createCodexResponsesTransport({

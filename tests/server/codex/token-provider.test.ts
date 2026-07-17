@@ -11,6 +11,7 @@ import {
   ManagedCodexTokenProvider,
   acquireCodexCredentialLease,
   invalidateCodexCredentialLeases,
+  refreshCodexCredentialLease,
   type CodexTokenProvider,
   type TokenExchangeFetch,
 } from '@/lib/server/codex/token-provider';
@@ -115,17 +116,17 @@ afterEach(() => {
 });
 
 describe('ManagedCodexTokenProvider', () => {
-  it('does not reuse a legacy HMR shared state without a catalog generation', async () => {
-    const legacySymbol = Symbol.for('openmaic.codex.oauth.shared-credential-state.v3');
+  it('normalizes a retained v4 HMR shared state without a lifecycle controller', async () => {
+    const registrySymbol = Symbol.for('openmaic.codex.oauth.shared-credential-state.v4');
     const host = globalThis as unknown as Record<PropertyKey, unknown>;
-    const existingLegacyRegistry = host[legacySymbol] as
+    const existingRegistry = host[registrySymbol] as
       | {
           byCoordinationKey: Map<string, object>;
           byVault: WeakMap<object, object>;
         }
       | undefined;
-    const legacyRegistry =
-      existingLegacyRegistry ??
+    const registry =
+      existingRegistry ??
       ({
         byCoordinationKey: new Map<string, object>(),
         byVault: new WeakMap<object, object>(),
@@ -133,12 +134,13 @@ describe('ManagedCodexTokenProvider', () => {
         byCoordinationKey: Map<string, object>;
         byVault: WeakMap<object, object>;
       });
-    if (!existingLegacyRegistry) {
-      host[legacySymbol] = legacyRegistry;
+    if (!existingRegistry) {
+      host[registrySymbol] = registry;
     }
-    const coordinationKey = `legacy-hmr-${crypto.randomUUID()}`;
-    legacyRegistry.byCoordinationKey.set(coordinationKey, {
+    const coordinationKey = `retained-hmr-${crypto.randomUUID()}`;
+    registry.byCoordinationKey.set(coordinationKey, {
       generation: 0,
+      catalogGeneration: 0,
       operationInFlight: null,
       logoutInFlight: null,
     });
@@ -151,8 +153,59 @@ describe('ManagedCodexTokenProvider', () => {
 
     await expect(acquireCodexCredentialLease(provider)).resolves.toMatchObject({
       lifecycleGeneration: 1,
+      lifecycleSignal: { aborted: false },
       credentials: { accountId: 'current-account', accessToken: 'current-access' },
     });
+  });
+
+  it('uses no lifecycle signal for an unmanaged provider', async () => {
+    const provider: CodexTokenProvider = {
+      getValidCredentials: vi.fn().mockResolvedValue({
+        accessToken: 'unmanaged-access',
+        accountId: 'unmanaged-account',
+      }),
+    };
+
+    await expect(acquireCodexCredentialLease(provider)).resolves.toMatchObject({
+      lifecycleGeneration: null,
+      lifecycleSignal: null,
+    });
+  });
+
+  it('aborts the old lease synchronously when logout starts', async () => {
+    const vault = new MemoryVault(credentials({ expiresAt: NOW + 60_001 }));
+    const provider = createProvider(
+      vault,
+      vi.fn().mockResolvedValue(new Response(null, { status: 200 })),
+    );
+    const lease = await acquireCodexCredentialLease(provider);
+
+    const logout = provider.logout();
+
+    expect(lease.lifecycleSignal?.aborted).toBe(true);
+    await logout;
+  });
+
+  it('aborts old leases on interactive replacement but not normal refresh rotation', async () => {
+    const vault = new MemoryVault(credentials({ expiresAt: NOW + 60_001 }));
+    const provider = createProvider(
+      vault,
+      vi.fn().mockResolvedValue(
+        jsonResponse({
+          access_token: unsignedJwt({ chatgpt_account_id: 'current-account' }),
+          expires_in: 300,
+        }),
+      ),
+    );
+    const stale = await acquireCodexCredentialLease(provider);
+
+    invalidateCodexCredentialLeases(provider);
+    expect(stale.lifecycleSignal?.aborted).toBe(true);
+
+    const current = await acquireCodexCredentialLease(provider);
+    const refreshed = await refreshCodexCredentialLease(current);
+    expect(refreshed.lifecycleSignal).toBe(current.lifecycleSignal);
+    expect(current.lifecycleSignal?.aborted).toBe(false);
   });
 
   it('implements the exact credential provider contract without refreshing a fresh token', async () => {
@@ -589,6 +642,7 @@ describe('ManagedCodexTokenProvider', () => {
       ),
     );
     const provider = createProvider(vault, tokenExchangeFetch);
+    const lease = await acquireCodexCredentialLease(provider);
 
     const error = await captureError(provider.getValidCredentials({ forceRefresh: true }));
 
@@ -600,6 +654,7 @@ describe('ManagedCodexTokenProvider', () => {
     expect(JSON.stringify(error)).not.toContain('current-refresh');
     expect(vault.current).toBeNull();
     expect(vault.clearCount).toBe(1);
+    expect(lease.lifecycleSignal?.aborted).toBe(true);
   });
 
   it.each([
