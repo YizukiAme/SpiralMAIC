@@ -1,6 +1,7 @@
 import type {
   AcceptanceOptions,
   AcceptanceOutcome,
+  CodexImageFailureSource,
   SafeErrorCategory,
   SafeReport,
 } from './codex-acceptance-types';
@@ -25,6 +26,13 @@ const SAFE_ERROR_CATEGORIES = new Set<SafeErrorCategory>([
   'application-state-unknown',
   'storage',
   'unexpected',
+]);
+
+const SAFE_IMAGE_FAILURE_SOURCES = new Set<CodexImageFailureSource>([
+  'upstream-http',
+  'network',
+  'invalid-response',
+  'timeout',
 ]);
 
 const SAFE_BOOLEAN_FIELDS = [
@@ -61,14 +69,21 @@ export class SafeAcceptanceError extends Error {
   constructor(
     readonly category: SafeErrorCategory,
     readonly httpStatus?: number,
+    readonly failureSource?: CodexImageFailureSource,
+    readonly upstreamStatus?: number,
   ) {
     super(category);
     this.name = 'SafeAcceptanceError';
   }
 }
 
-export function fail(category: SafeErrorCategory, httpStatus?: number): never {
-  throw new SafeAcceptanceError(category, httpStatus);
+export function fail(
+  category: SafeErrorCategory,
+  httpStatus?: number,
+  failureSource?: CodexImageFailureSource,
+  upstreamStatus?: number,
+): never {
+  throw new SafeAcceptanceError(category, httpStatus, failureSource, upstreamStatus);
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -129,6 +144,7 @@ export function normalizePublicBaseUrl(raw: string | undefined): string {
 export function parseAcceptanceArgs(argv: readonly string[]): AcceptanceOptions {
   let baseUrl: string | undefined;
   let expectSignedOut = false;
+  let includeImage = false;
   let editorMode: AcceptanceOptions['editorMode'] = 'enabled';
   let editorModeSet = false;
   const startIndex = argv[0] === '--' ? 1 : 0;
@@ -146,12 +162,16 @@ export function parseAcceptanceArgs(argv: readonly string[]): AcceptanceOptions 
       if (value !== 'enabled' && value !== 'disabled') fail('argument');
       editorMode = value;
       editorModeSet = true;
+    } else if (argument === '--include-image') {
+      if (includeImage) fail('argument');
+      includeImage = true;
     } else {
       fail('argument');
     }
   }
   if (!baseUrl) fail('argument');
-  return { baseUrl, expectSignedOut, editorMode };
+  if (expectSignedOut && includeImage) fail('argument');
+  return { baseUrl, expectSignedOut, editorMode, includeImage };
 }
 
 function safeStage(value: unknown): string {
@@ -165,9 +185,41 @@ export function safeModelId(value: unknown): string | undefined {
 export function formatSafeReport(report: SafeReport): string {
   const outcome: AcceptanceOutcome =
     report.outcome === 'PASS' || report.outcome === 'SKIP' ? report.outcome : 'FAIL';
-  const fields = [outcome, `stage=${safeStage(report.stage)}`];
+  const stage = safeStage(report.stage);
+  const fields = [outcome, `stage=${stage}`];
   const modelId = safeModelId(report.modelId);
   if (modelId) fields.push(`model=${modelId}`);
+  if (stage === 'image-generation') {
+    if (
+      Number.isInteger(report.httpStatus) &&
+      (report.httpStatus as number) >= 100 &&
+      (report.httpStatus as number) <= 599
+    ) {
+      fields.push(`http=${report.httpStatus}`);
+    }
+    if (report.mimeType === 'image/png') fields.push('mime=image/png');
+    for (const key of ['width', 'height'] as const) {
+      const value = report[key];
+      if (typeof value === 'number' && Number.isSafeInteger(value) && value > 0) {
+        fields.push(`${key}=${value}`);
+      }
+    }
+    if (report.failureSource && SAFE_IMAGE_FAILURE_SOURCES.has(report.failureSource)) {
+      fields.push(`source=${report.failureSource}`);
+    }
+    if (
+      report.failureSource === 'upstream-http' &&
+      Number.isInteger(report.upstreamStatus) &&
+      (report.upstreamStatus as number) >= 100 &&
+      (report.upstreamStatus as number) <= 599
+    ) {
+      fields.push(`upstream=${report.upstreamStatus}`);
+    }
+    if (report.errorCategory && SAFE_ERROR_CATEGORIES.has(report.errorCategory)) {
+      fields.push(`error=${report.errorCategory}`);
+    }
+    return fields.join(' ');
+  }
   if (
     Number.isInteger(report.httpStatus) &&
     (report.httpStatus as number) >= 100 &&
@@ -211,6 +263,15 @@ export function safeFailure(stage: string, error: unknown, modelId?: string): Sa
     stage,
     ...(safeModelId(modelId) ? { modelId } : {}),
     ...(safe.httpStatus ? { httpStatus: safe.httpStatus } : {}),
+    ...(safe.failureSource && SAFE_IMAGE_FAILURE_SOURCES.has(safe.failureSource)
+      ? { failureSource: safe.failureSource }
+      : {}),
+    ...(safe.failureSource === 'upstream-http' &&
+    Number.isInteger(safe.upstreamStatus) &&
+    (safe.upstreamStatus as number) >= 100 &&
+    (safe.upstreamStatus as number) <= 599
+      ? { upstreamStatus: safe.upstreamStatus }
+      : {}),
     errorCategory: safe.category,
   };
 }

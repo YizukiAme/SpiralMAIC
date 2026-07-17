@@ -7,6 +7,8 @@ import {
   parseJsonSse,
   runCodexAcceptance,
   validateCodexCatalog,
+  validateCodexImageCapability,
+  validateCodexImageJson,
   validateEditorEvents,
   validateOutlineEvents,
   validateSceneJson,
@@ -16,12 +18,14 @@ import {
 import type { GeneratedSlideContent } from '@/lib/types/generation';
 import {
   ACCEPTANCE_JSON_MAX_BYTES,
+  ACCEPTANCE_IMAGE_JSON_MAX_BYTES,
   ACCEPTANCE_SSE_MAX_BYTES,
   ACCEPTANCE_SSE_MAX_DATA_LINES,
   ACCEPTANCE_SSE_MAX_EVENTS,
   ACCEPTANCE_SSE_MAX_FRAME_BYTES,
   ACCEPTANCE_SSE_MAX_FRAMES,
   requireJson,
+  requireCodexImageJson,
   responseEvents,
   safeFetch,
 } from '@/scripts/codex-acceptance-http';
@@ -37,7 +41,7 @@ function sse(events: unknown[], status = 200): Response {
   });
 }
 
-function catalog(priority: boolean) {
+function catalog(priority: boolean, imageAvailable = false) {
   const capabilities = {
     streaming: true,
     tools: true,
@@ -59,7 +63,19 @@ function catalog(priority: boolean) {
         ],
       },
     },
+    image: imageAvailable ? { 'codex-image': { models: ['gpt-image-2'] } } : {},
   };
+}
+
+function pngBase64(width = 1536, height = 864): string {
+  const bytes = new Uint8Array(33);
+  bytes.set([137, 80, 78, 71, 13, 10, 26, 10]);
+  bytes.set([73, 72, 68, 82], 12);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(8, 13);
+  view.setUint32(16, width);
+  view.setUint32(20, height);
+  return Buffer.from(bytes).toString('base64');
 }
 
 const outlineEvents = [
@@ -141,7 +157,7 @@ const canonicalSlideContent = {
   remark: 'A short arithmetic slide.',
 } satisfies GeneratedSlideContent;
 
-function connectedFetch(priority: boolean, editorEnabled = true) {
+function connectedFetch(priority: boolean, editorEnabled = true, imageResponse?: () => Response) {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input));
     if (url.pathname === '/api/access-code/status') {
@@ -156,7 +172,10 @@ function connectedFetch(priority: boolean, editorEnabled = true) {
         email: 'must-not-print@example.test',
       });
     }
-    if (url.pathname === '/api/server-providers') return json(catalog(priority));
+    if (url.pathname === '/api/server-providers') {
+      return json(catalog(priority, imageResponse !== undefined));
+    }
+    if (url.pathname === '/api/generate/image' && imageResponse) return imageResponse();
     if (url.pathname === '/api/verify-model') {
       return json({
         success: true,
@@ -194,11 +213,13 @@ describe('Codex acceptance argument parsing', () => {
       baseUrl: 'https://example.test:3443',
       expectSignedOut: true,
       editorMode: 'enabled',
+      includeImage: false,
     });
     expect(parseAcceptanceArgs(['--', '--base-url', 'http://localhost:3000'])).toEqual({
       baseUrl: 'http://localhost:3000',
       expectSignedOut: false,
       editorMode: 'enabled',
+      includeImage: false,
     });
     expect(
       parseAcceptanceArgs(['--base-url', 'http://localhost:3000', '--editor-mode', 'disabled']),
@@ -206,7 +227,16 @@ describe('Codex acceptance argument parsing', () => {
       baseUrl: 'http://localhost:3000',
       expectSignedOut: false,
       editorMode: 'disabled',
+      includeImage: false,
     });
+    expect(parseAcceptanceArgs(['--base-url', 'http://localhost:3000', '--include-image'])).toEqual(
+      {
+        baseUrl: 'http://localhost:3000',
+        expectSignedOut: false,
+        editorMode: 'enabled',
+        includeImage: true,
+      },
+    );
   });
 
   it.each([
@@ -248,6 +278,8 @@ describe('Codex acceptance argument parsing', () => {
       ],
     ],
     [['--base-url', 'https://one.test', '--base-url', 'https://two.test']],
+    [['--base-url', 'https://example.test', '--include-image', '--include-image']],
+    [['--base-url', 'https://example.test', '--expect-signed-out', '--include-image']],
   ])('rejects invalid or ambiguous arguments: %j', (argv) => {
     expect(() => parseAcceptanceArgs(argv)).toThrowError('argument');
   });
@@ -295,6 +327,27 @@ describe('safe acceptance reports', () => {
       ]),
     ).toBe(1);
   });
+
+  it('prints only the allowlisted image metadata and drops payload-like fields', () => {
+    const report = {
+      outcome: 'PASS',
+      stage: 'image-generation',
+      modelId: 'gpt-image-2',
+      httpStatus: 200,
+      providerPresent: true,
+      generated: true,
+      mimeType: 'image/png',
+      width: 1536,
+      height: 864,
+      base64: 'private-image-payload',
+      prompt: 'private-image-prompt',
+    } as SafeReport & Record<string, unknown>;
+
+    expect(formatSafeReport(report)).toBe(
+      'PASS stage=image-generation model=gpt-image-2 http=200 mime=image/png width=1536 height=864',
+    );
+    expect(formatSafeReport(report)).not.toMatch(/private-image-payload|private-image-prompt/);
+  });
 });
 
 describe('SSE and JSON validation', () => {
@@ -321,6 +374,21 @@ describe('SSE and JSON validation', () => {
     const error = (await requireJson(response).catch((caught) => caught)) as Error;
     expect(error.message).toBe('invalid-json');
     expect(error.message).not.toContain(sentinel);
+  });
+
+  it('uses a separate bounded budget for one opt-in image response', async () => {
+    const largerThanGeneric = JSON.stringify({ padding: 'x'.repeat(ACCEPTANCE_JSON_MAX_BYTES) });
+    await expect(requireJson(new Response(largerThanGeneric))).rejects.toThrowError('invalid-json');
+    await expect(requireCodexImageJson(new Response(largerThanGeneric))).resolves.toMatchObject({
+      padding: expect.any(String),
+    });
+
+    const cancel = vi.fn();
+    const oversized = new Response(new ReadableStream<Uint8Array>({ cancel }), {
+      headers: { 'content-length': String(ACCEPTANCE_IMAGE_JSON_MAX_BYTES + 1) },
+    });
+    await expect(requireCodexImageJson(oversized)).rejects.toThrowError('invalid-json');
+    expect(cancel).toHaveBeenCalledTimes(1);
   });
 
   it('prechecks declared JSON length and cancels the unread response body', async () => {
@@ -678,6 +746,60 @@ describe('SSE and JSON validation', () => {
       }),
     ).toThrowError('invalid-shape');
   });
+
+  it('accepts only the fixed Codex image capability and canonical PNG metadata', () => {
+    expect(validateCodexImageCapability(catalog(false, false))).toEqual({ available: false });
+    expect(validateCodexImageCapability(catalog(false, true))).toEqual({ available: true });
+    expect(
+      validateCodexImageJson({
+        success: true,
+        result: { base64: pngBase64(), width: 1536, height: 864 },
+      }),
+    ).toEqual({ mimeType: 'image/png', width: 1536, height: 864 });
+
+    const leakedCapability = catalog(false, true);
+    const leakedImageProvider = leakedCapability.image['codex-image'];
+    expect(leakedImageProvider).toBeDefined();
+    Object.assign(leakedImageProvider!, { accountId: 'private-account' });
+    expect(() => validateCodexImageCapability(leakedCapability)).toThrowError('invalid-shape');
+    expect(() =>
+      validateCodexImageJson({
+        success: true,
+        result: { base64: `${pngBase64()}\n`, width: 1536, height: 864 },
+      }),
+    ).toThrowError('invalid-shape');
+    expect(() =>
+      validateCodexImageJson({
+        success: true,
+        result: { base64: pngBase64(), width: 1024, height: 1024 },
+      }),
+    ).toThrowError('invalid-shape');
+    expect(() =>
+      validateCodexImageJson({
+        success: true,
+        result: { base64: pngBase64(), width: 1536, height: 864 },
+        prompt: 'must-not-cross-route',
+      }),
+    ).toThrowError('invalid-shape');
+  });
+
+  it('accepts a safe 1254x1254 Codex PNG and returns its actual dimensions', () => {
+    expect(
+      validateCodexImageJson({
+        success: true,
+        result: { base64: pngBase64(1254, 1254), width: 1254, height: 1254 },
+      }),
+    ).toEqual({ mimeType: 'image/png', width: 1254, height: 1254 });
+  });
+
+  it('rejects a Codex image when DTO dimensions do not match PNG IHDR', () => {
+    expect(() =>
+      validateCodexImageJson({
+        success: true,
+        result: { base64: pngBase64(1254, 1254), width: 1024, height: 1024 },
+      }),
+    ).toThrowError('invalid-shape');
+  });
 });
 
 describe('black-box acceptance flow', () => {
@@ -690,6 +812,7 @@ describe('black-box acceptance flow', () => {
         baseUrl: 'http://remote.example',
         expectSignedOut: false,
         editorMode: 'enabled',
+        includeImage: false,
         accessCode,
       },
       { fetcher },
@@ -705,7 +828,7 @@ describe('black-box acceptance flow', () => {
     async (baseUrl) => {
       const fetcher = connectedFetch(false, false);
       const reports = await runCodexAcceptance(
-        { baseUrl, expectSignedOut: false, editorMode: 'disabled' },
+        { baseUrl, expectSignedOut: false, editorMode: 'disabled', includeImage: false },
         { fetcher },
       );
 
@@ -723,10 +846,59 @@ describe('black-box acceptance flow', () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
+  it('classifies a local image API connection failure as a network source', async () => {
+    const fetcher = vi.fn(async () => {
+      throw new Error('private-local-network-detail');
+    });
+
+    const caught = await safeFetch(
+      fetcher,
+      'http://localhost:3000/api/generate/image',
+      { method: 'POST' },
+      1_000,
+    ).catch((error: unknown) => error);
+
+    expect(caught).toMatchObject({
+      category: 'network',
+      failureSource: 'network',
+    });
+    expect(String(caught)).not.toContain('private-local-network-detail');
+  });
+
+  it('classifies the local image API deadline as a timeout source', async () => {
+    const fetcher = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal;
+          if (!signal) return;
+          const rejectForAbort = () => reject(signal.reason);
+          if (signal.aborted) rejectForAbort();
+          else signal.addEventListener('abort', rejectForAbort, { once: true });
+        }),
+    );
+
+    const caught = await safeFetch(
+      fetcher,
+      'http://localhost:3000/api/generate/image',
+      { method: 'POST' },
+      5,
+    ).catch((error: unknown) => error);
+
+    expect(caught).toMatchObject({
+      category: 'network',
+      failureSource: 'timeout',
+    });
+  });
+
   it('requires Fast when advertised, uses priority on the same model, and accepts editor ordering', async () => {
     const fetcher = connectedFetch(true);
     const reports = await runCodexAcceptance(
-      { baseUrl: 'http://localhost:3000', expectSignedOut: false, editorMode: 'enabled' },
+      {
+        baseUrl: 'http://localhost:3000',
+        expectSignedOut: false,
+        editorMode: 'enabled',
+        includeImage: false,
+      },
       { fetcher },
     );
 
@@ -782,7 +954,12 @@ describe('black-box acceptance flow', () => {
   it('emits an explicit non-failing Fast SKIP and omits priority when unadvertised', async () => {
     const fetcher = connectedFetch(false, false);
     const reports = await runCodexAcceptance(
-      { baseUrl: 'http://localhost:3000', expectSignedOut: false, editorMode: 'disabled' },
+      {
+        baseUrl: 'http://localhost:3000',
+        expectSignedOut: false,
+        editorMode: 'disabled',
+        includeImage: false,
+      },
       { fetcher },
     );
 
@@ -806,9 +983,300 @@ describe('black-box acceptance flow', () => {
     expect(JSON.parse(String(streamCall?.[1]?.body))).not.toHaveProperty('serviceTier');
   });
 
+  it('never calls image generation without the explicit opt-in flag even when advertised', async () => {
+    const fetcher = connectedFetch(false, false, () =>
+      json({
+        success: true,
+        result: { base64: pngBase64(), width: 1536, height: 864 },
+      }),
+    );
+    const reports = await runCodexAcceptance(
+      {
+        baseUrl: 'http://localhost:3000',
+        expectSignedOut: false,
+        editorMode: 'disabled',
+        includeImage: false,
+      },
+      { fetcher },
+    );
+
+    expect(
+      fetcher.mock.calls.filter(
+        ([input]) => new URL(String(input)).pathname === '/api/generate/image',
+      ),
+    ).toHaveLength(0);
+    expect(reports.some((report) => report.stage === 'image-generation')).toBe(false);
+  });
+
+  it('reports an explicit image SKIP without generation when capability is absent', async () => {
+    const fetcher = connectedFetch(false, false);
+    const reports = await runCodexAcceptance(
+      {
+        baseUrl: 'http://localhost:3000',
+        expectSignedOut: false,
+        editorMode: 'disabled',
+        includeImage: true,
+      },
+      { fetcher },
+    );
+
+    expect(reports.find((report) => report.stage === 'image-generation')).toEqual({
+      outcome: 'SKIP',
+      stage: 'image-generation',
+      modelId: 'gpt-image-2',
+      errorCategory: 'unavailable',
+    });
+    expect(
+      fetcher.mock.calls.filter(
+        ([input]) => new URL(String(input)).pathname === '/api/generate/image',
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('makes exactly one fixed 16:9 image request and reports actual PNG metadata only', async () => {
+    const fetcher = connectedFetch(false, false, () =>
+      json({
+        success: true,
+        result: { base64: pngBase64(1254, 1254), width: 1254, height: 1254 },
+      }),
+    );
+    const reports = await runCodexAcceptance(
+      {
+        baseUrl: 'http://localhost:3000',
+        expectSignedOut: false,
+        editorMode: 'disabled',
+        includeImage: true,
+      },
+      { fetcher },
+    );
+
+    const imageCalls = fetcher.mock.calls.filter(
+      ([input]) => new URL(String(input)).pathname === '/api/generate/image',
+    );
+    expect(imageCalls).toHaveLength(1);
+    const [, init] = imageCalls[0]!;
+    expect(new Headers(init?.headers).get('x-image-provider')).toBe('codex-image');
+    expect(new Headers(init?.headers).get('x-image-model')).toBe('gpt-image-2');
+    expect(JSON.parse(String(init?.body))).toMatchObject({ aspectRatio: '16:9' });
+    expect(JSON.parse(String(init?.body)).prompt).toEqual(expect.any(String));
+    expect(reports.find((report) => report.stage === 'image-generation')).toEqual({
+      outcome: 'PASS',
+      stage: 'image-generation',
+      modelId: 'gpt-image-2',
+      httpStatus: 200,
+      mimeType: 'image/png',
+      width: 1254,
+      height: 1254,
+    });
+    const output = reports.map(formatSafeReport).join('\n');
+    expect(output).toContain(
+      'PASS stage=image-generation model=gpt-image-2 http=200 mime=image/png width=1254 height=1254',
+    );
+    expect(output).not.toContain(pngBase64(1254, 1254));
+  });
+
+  it('keeps image acceptance independent when the text catalog is unavailable', async () => {
+    const fallback = connectedFetch(false, false, () =>
+      json({
+        success: true,
+        result: { base64: pngBase64(), width: 1536, height: 864 },
+      }),
+    );
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (new URL(String(input)).pathname === '/api/server-providers') {
+        return json({
+          success: true,
+          providers: {},
+          image: { 'codex-image': { models: ['gpt-image-2'] } },
+        });
+      }
+      return fallback(input, init);
+    });
+
+    const reports = await runCodexAcceptance(
+      {
+        baseUrl: 'http://localhost:3000',
+        expectSignedOut: false,
+        editorMode: 'disabled',
+        includeImage: true,
+      },
+      { fetcher },
+    );
+
+    expect(reports.find((report) => report.stage === 'catalog')).toMatchObject({
+      outcome: 'FAIL',
+      errorCategory: 'invalid-shape',
+    });
+    expect(reports.find((report) => report.stage === 'image-generation')).toMatchObject({
+      outcome: 'PASS',
+      modelId: 'gpt-image-2',
+      mimeType: 'image/png',
+      width: 1536,
+      height: 864,
+    });
+    expect(
+      fetcher.mock.calls.filter(
+        ([input]) => new URL(String(input)).pathname === '/api/generate/image',
+      ),
+    ).toHaveLength(1);
+  });
+
+  it.each([
+    [401, 'auth'],
+    [403, 'forbidden'],
+    [404, 'unavailable'],
+    [429, 'rate-limited'],
+    [502, 'upstream'],
+  ] as const)(
+    'fails one advertised image request safely for HTTP %i',
+    async (status, errorCategory) => {
+      const privateBody = 'private-image-upstream-body';
+      const fetcher = connectedFetch(false, false, () =>
+        json({ success: false, error: privateBody, base64: 'private-image-base64' }, status),
+      );
+      const reports = await runCodexAcceptance(
+        {
+          baseUrl: 'http://localhost:3000',
+          expectSignedOut: false,
+          editorMode: 'disabled',
+          includeImage: true,
+        },
+        { fetcher },
+      );
+
+      expect(
+        fetcher.mock.calls.filter(
+          ([input]) => new URL(String(input)).pathname === '/api/generate/image',
+        ),
+      ).toHaveLength(1);
+      expect(reports.find((report) => report.stage === 'image-generation')).toMatchObject({
+        outcome: 'FAIL',
+        stage: 'image-generation',
+        modelId: 'gpt-image-2',
+        httpStatus: status,
+        errorCategory,
+      });
+      expect(reports.map(formatSafeReport).join('\n')).not.toMatch(
+        /private-image-upstream-body|private-image-base64/,
+      );
+    },
+  );
+
+  it('reports safe image API and upstream HTTP diagnostics without reading the body', async () => {
+    const privateBody = 'private-image-upstream-body';
+    const fetcher = connectedFetch(false, false, () =>
+      json({ success: false, error: privateBody }, 502, {
+        'x-openmaic-codex-image-error-source': 'upstream-http',
+        'x-openmaic-codex-image-upstream-status': '503',
+      }),
+    );
+    const reports = await runCodexAcceptance(
+      {
+        baseUrl: 'http://localhost:3000',
+        expectSignedOut: false,
+        editorMode: 'disabled',
+        includeImage: true,
+      },
+      { fetcher },
+    );
+
+    const report = reports.find((candidate) => candidate.stage === 'image-generation');
+    expect(report).toMatchObject({
+      outcome: 'FAIL',
+      httpStatus: 502,
+      failureSource: 'upstream-http',
+      upstreamStatus: 503,
+      errorCategory: 'upstream',
+    });
+    expect(formatSafeReport(report!)).toBe(
+      'FAIL stage=image-generation model=gpt-image-2 http=502 source=upstream-http upstream=503 error=upstream',
+    );
+    expect(formatSafeReport(report!)).not.toContain(privateBody);
+  });
+
+  it.each([
+    ['network', 'network'],
+    ['invalid-response', 'invalid-response'],
+    ['timeout', 'timeout'],
+  ] as const)('prints a safe %s image failure source', async (source, expected) => {
+    const fetcher = connectedFetch(false, false, () =>
+      json({ success: false, error: 'private failure body' }, source === 'timeout' ? 504 : 502, {
+        'x-openmaic-codex-image-error-source': source,
+      }),
+    );
+    const reports = await runCodexAcceptance(
+      {
+        baseUrl: 'http://localhost:3000',
+        expectSignedOut: false,
+        editorMode: 'disabled',
+        includeImage: true,
+      },
+      { fetcher },
+    );
+
+    const output = formatSafeReport(
+      reports.find((candidate) => candidate.stage === 'image-generation')!,
+    );
+    expect(output).toContain(`source=${expected}`);
+    expect(output).not.toContain('private failure body');
+  });
+
+  it.each([
+    [
+      'network',
+      () => {
+        throw new Error('private-image-network-detail');
+      },
+      'network',
+    ],
+    ['invalid JSON', () => new Response('{private-image-invalid-json'), 'invalid-json'],
+    [
+      'invalid PNG',
+      () =>
+        json({
+          success: true,
+          result: { base64: 'QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB', width: 1536, height: 864 },
+        }),
+      'invalid-shape',
+    ],
+  ] as const)(
+    'fails one advertised image request safely for %s',
+    async (_label, imageResponse, errorCategory) => {
+      const fetcher = connectedFetch(false, false, imageResponse);
+      const reports = await runCodexAcceptance(
+        {
+          baseUrl: 'http://localhost:3000',
+          expectSignedOut: false,
+          editorMode: 'disabled',
+          includeImage: true,
+        },
+        { fetcher },
+      );
+
+      expect(
+        fetcher.mock.calls.filter(
+          ([input]) => new URL(String(input)).pathname === '/api/generate/image',
+        ),
+      ).toHaveLength(1);
+      expect(reports.find((report) => report.stage === 'image-generation')).toMatchObject({
+        outcome: 'FAIL',
+        modelId: 'gpt-image-2',
+        errorCategory,
+      });
+      expect(reports.map(formatSafeReport).join('\n')).not.toMatch(
+        /private-image-network-detail|private-image-invalid-json/,
+      );
+    },
+  );
+
   it('fails a missing editor route by default and skips it only when disabled is explicit', async () => {
     const defaultReports = await runCodexAcceptance(
-      { baseUrl: 'http://localhost:3000', expectSignedOut: false, editorMode: 'enabled' },
+      {
+        baseUrl: 'http://localhost:3000',
+        expectSignedOut: false,
+        editorMode: 'enabled',
+        includeImage: false,
+      },
       { fetcher: connectedFetch(false, false) },
     );
     expect(defaultReports.find((report) => report.stage === 'editor-tools')).toMatchObject({
@@ -819,7 +1287,12 @@ describe('black-box acceptance flow', () => {
     });
 
     const unexpectedEnabledReports = await runCodexAcceptance(
-      { baseUrl: 'http://localhost:3000', expectSignedOut: false, editorMode: 'disabled' },
+      {
+        baseUrl: 'http://localhost:3000',
+        expectSignedOut: false,
+        editorMode: 'disabled',
+        includeImage: false,
+      },
       { fetcher: connectedFetch(false, true) },
     );
     expect(
@@ -846,13 +1319,22 @@ describe('black-box acceptance flow', () => {
         });
       }
       if (path === '/api/server-providers') {
-        return json({ success: true, providers: { openai: { models: ['gpt-other'] } } });
+        return json({
+          success: true,
+          providers: { openai: { models: ['gpt-other'] } },
+          image: {},
+        });
       }
       throw new Error('generation must not run in signed-out mode');
     });
 
     const reports = await runCodexAcceptance(
-      { baseUrl: 'http://localhost:3000', expectSignedOut: true, editorMode: 'enabled' },
+      {
+        baseUrl: 'http://localhost:3000',
+        expectSignedOut: true,
+        editorMode: 'enabled',
+        includeImage: false,
+      },
       { fetcher },
     );
 
@@ -880,6 +1362,49 @@ describe('black-box acceptance flow', () => {
     expect(fetcher).toHaveBeenCalledTimes(3);
   });
 
+  it('fails signed-out mode while the Codex image capability is still published', async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname;
+      if (path === '/api/access-code/status') {
+        return json({ success: true, enabled: false, authenticated: false });
+      }
+      if (path === '/api/codex/auth') {
+        return json({
+          available: true,
+          reason: 'AVAILABLE',
+          methods: ['browser', 'device'],
+          connected: false,
+        });
+      }
+      if (path === '/api/server-providers') {
+        return json({
+          success: true,
+          providers: {},
+          image: { 'codex-image': { models: ['gpt-image-2'] } },
+        });
+      }
+      throw new Error('generation must not run in signed-out mode');
+    });
+
+    const reports = await runCodexAcceptance(
+      {
+        baseUrl: 'http://localhost:3000',
+        expectSignedOut: true,
+        editorMode: 'enabled',
+        includeImage: false,
+      },
+      { fetcher },
+    );
+
+    expect(reports.at(-1)).toEqual({
+      outcome: 'FAIL',
+      stage: 'signed-out-provider',
+      httpStatus: 200,
+      errorCategory: 'invalid-shape',
+    });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
   it('rejects a signed-out auth shape that still exposes account identity', async () => {
     const fetcher = vi.fn(async (input: RequestInfo | URL) => {
       const path = new URL(String(input)).pathname;
@@ -899,7 +1424,12 @@ describe('black-box acceptance flow', () => {
     });
 
     const reports = await runCodexAcceptance(
-      { baseUrl: 'http://localhost:3000', expectSignedOut: true, editorMode: 'enabled' },
+      {
+        baseUrl: 'http://localhost:3000',
+        expectSignedOut: true,
+        editorMode: 'enabled',
+        includeImage: false,
+      },
       { fetcher },
     );
 
@@ -947,6 +1477,7 @@ describe('black-box acceptance flow', () => {
         baseUrl: 'http://localhost:3000',
         expectSignedOut: false,
         editorMode: 'enabled',
+        includeImage: false,
         accessCode,
       },
       { fetcher },
