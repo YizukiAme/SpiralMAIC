@@ -79,6 +79,36 @@ describe('readBoundedJson', () => {
     expect(cancelled).toHaveBeenCalledTimes(1);
   });
 
+  it('rejects an unrepresentably large decimal length without acquiring a reader', async () => {
+    const cancelled = vi.fn();
+    const response = responseFromChunks([utf8('{}')], cancelled, {
+      'content-length': '9'.repeat(400),
+    });
+    const getReader = vi.spyOn(response.body!, 'getReader');
+
+    await expect(readBoundedJson(response, new AbortController().signal)).resolves.toEqual({
+      ok: false,
+      reason: 'too-large',
+    });
+    expect(getReader).not.toHaveBeenCalled();
+    expect(cancelled).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats a leading-zero decimal length as authoritative', async () => {
+    const cancelled = vi.fn();
+    const response = responseFromChunks([utf8('{}')], cancelled, {
+      'content-length': '0000007',
+    });
+    const getReader = vi.spyOn(response.body!, 'getReader');
+
+    await expect(readBoundedJson(response, new AbortController().signal, 6)).resolves.toEqual({
+      ok: false,
+      reason: 'too-large',
+    });
+    expect(getReader).not.toHaveBeenCalled();
+    expect(cancelled).toHaveBeenCalledTimes(1);
+  });
+
   it('settles a declared overflow even if body cancellation never settles', async () => {
     const cancelled = vi.fn(() => new Promise<void>(() => undefined));
     const response = responseFromChunks([utf8('{"private":"body"}')], cancelled, {
