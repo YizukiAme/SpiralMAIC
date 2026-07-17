@@ -214,7 +214,10 @@ export interface CodexResponseRequestGuard {
   race<T>(operation: Promise<T>): Promise<T>;
   bind(
     response: Response,
-    assertCurrent: () => Promise<boolean>,
+    options: {
+      assertCurrent: () => Promise<boolean>;
+      errorForFailure: (failure: CodexResponseGuardFailure) => Error;
+    },
   ): Response;
   dispose(): void;
 }
@@ -222,6 +225,7 @@ export interface CodexResponseRequestGuard {
 export function createCodexResponseRequestGuard(options: {
   callerSignal?: AbortSignal;
   lifecycleSignal?: AbortSignal | null;
+  deadlineAt: number;
   limits?: Partial<typeof CODEX_RESPONSE_LIMITS>;
 }): CodexResponseRequestGuard;
 ```
@@ -241,9 +245,13 @@ it('stops before the next chunk after lifecycle invalidation', async () => {
   const source = controllableByteStream();
   const guard = createCodexResponseRequestGuard({
     lifecycleSignal: lifecycle.signal,
+    deadlineAt: Date.now() + 1_000,
     limits: { totalTimeoutMs: 1_000, idleTimeoutMs: 500, maxBytes: 32 },
   });
-  const guarded = guard.bind(new Response(source.stream), async () => true);
+  const guarded = guard.bind(new Response(source.stream), {
+    assertCurrent: async () => true,
+    errorForFailure: (failure) => new CodexResponseGuardError(failure),
+  });
   const reader = guarded.body!.getReader();
 
   source.enqueue(Uint8Array.of(1));
@@ -298,7 +306,7 @@ export class CodexResponseGuardError extends Error {
 1. create one internal `AbortController`;
 2. synchronously classify already-aborted caller/lifecycle signals;
 3. subscribe once to each parent signal;
-4. start the absolute timeout when the guard is created;
+4. schedule the absolute timeout from the caller-supplied `deadlineAt`;
 5. expose `race()` so an injected fetch that ignores abort still settles;
 6. wrap `response.body.getReader()` in a new `ReadableStream<Uint8Array>`;
 7. reset the idle timer only after an actual non-empty upstream byte chunk;
@@ -316,6 +324,10 @@ return new Response(guardedBody, {
   headers: response.headers,
 });
 ```
+
+The body wrapper must call `errorForFailure(failure)` immediately before
+`controller.error(...)`. Body failures happen after the fetch function has
+returned, so an outer `try/catch` cannot classify them.
 
 - [ ] **Step 4: Integrate the guard into transport with failing race tests**
 
@@ -362,12 +374,15 @@ Expected: FAIL because transport still returns the original response.
 
 For calls without a capability lease, acquire an internal credential lease
 instead of calling `getValidCredentials()` directly. For calls with a
-capability lease, retain its credential lease. Each attempt:
+capability lease, retain its credential lease. Compute one `deadlineAt` before
+the first attempt so a 401 replay cannot reset the 15-minute budget. Each
+attempt:
 
 ```ts
 const guard = createCodexResponseRequestGuard({
   callerSignal: init?.signal ?? undefined,
   lifecycleSignal: credentialLease.lifecycleSignal,
+  deadlineAt,
 });
 
 const response = await guard.race(
@@ -384,7 +399,19 @@ const response = await guard.race(
 After headers, revalidate the credential/capability lease. If stale, cancel the
 response, dispose the guard, and throw the existing safe 401 error. On 401 and
 other non-success statuses, cancel and dispose before refresh/classification.
-On success, return `guard.bind(response, assertCurrent)`.
+On success, return:
+
+```ts
+guard.bind(response, {
+  assertCurrent,
+  errorForFailure: (failure) =>
+    failure === 'lifecycle-abort' || failure === 'stale-at-eof'
+      ? errorForStatus(401)
+      : new CodexResponsesTransportError(
+          CODEX_RESPONSES_TRANSPORT_ERROR_CODES.UPSTREAM_ERROR,
+        ),
+});
+```
 
 Map `lifecycle-abort` and `stale-at-eof` to `AUTH_REQUIRED`; map caller abort to
 the existing safe network cancellation path; map time, idle, size, and read
