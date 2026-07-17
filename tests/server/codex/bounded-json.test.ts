@@ -109,6 +109,71 @@ describe('readBoundedJson', () => {
     expect(response.body?.locked).toBe(false);
   });
 
+  it('lets a parent timer abort a high-churn zero-length stream', async () => {
+    const zeroChunk = new Uint8Array(0);
+    const totalZeroChunks = 25_000;
+    const cancelled = vi.fn();
+    let pullCount = 0;
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        pull(controller) {
+          pullCount += 1;
+          if (pullCount <= totalZeroChunks) {
+            controller.enqueue(zeroChunk);
+            return;
+          }
+          controller.enqueue(utf8('{}'));
+          controller.close();
+        },
+        cancel: cancelled,
+      }),
+    );
+    const parent = new AbortController();
+    const abortFired = new Promise<void>((resolve) => {
+      setTimeout(() => {
+        parent.abort();
+        resolve();
+      }, 1);
+    });
+
+    const result = await readBoundedJson(response, parent.signal);
+    const abortedBeforeSettlement = parent.signal.aborted;
+    await abortFired;
+
+    expect(abortedBeforeSettlement).toBe(true);
+    expect(result).toEqual({ ok: false, reason: 'empty' });
+    expect(pullCount).toBeLessThan(totalZeroChunks);
+    expect(cancelled).toHaveBeenCalledTimes(1);
+    expect(response.body?.locked).toBe(false);
+  });
+
+  it('snapshots non-empty chunk bytes before the producer can reuse them', async () => {
+    const chunk = utf8('{}');
+    const mutated = utf8('[]');
+    let sent = false;
+    const response = new Response(
+      new ReadableStream<Uint8Array>(
+        {
+          pull(controller) {
+            if (sent) return;
+            sent = true;
+            controller.enqueue(chunk);
+            queueMicrotask(() => {
+              chunk.set(mutated);
+              controller.close();
+            });
+          },
+        },
+        { highWaterMark: 0 },
+      ),
+    );
+
+    await expect(readBoundedJson(response, new AbortController().signal)).resolves.toEqual({
+      ok: true,
+      payload: {},
+    });
+  });
+
   it.each([
     ['malformed', 'not-a-length'],
     ['negative', '-1'],
