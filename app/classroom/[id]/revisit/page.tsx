@@ -297,10 +297,11 @@ export default function RevisitChallengePage() {
     ],
     [allPagesPassed, judging, report, reportAvailable, t],
   );
-  const spiralAgentConfigs = classroom?.stage.spiralAgentConfigs ?? [];
   const revisitAgentIds = useMemo(
-    () => resolveRevisitAgentIds(spiralAgentConfigs) ?? EMPTY_REVISIT_AGENT_IDS,
-    [spiralAgentConfigs],
+    () =>
+      resolveRevisitAgentIds(classroom?.stage.spiralAgentConfigs ?? []) ??
+      EMPTY_REVISIT_AGENT_IDS,
+    [classroom?.stage.spiralAgentConfigs],
   );
   const allAgents = useMemo(
     () =>
