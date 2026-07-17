@@ -208,7 +208,8 @@ describe('Codex provider and OpenAI SDK integration', () => {
     expect(error).not.toHaveProperty('cause');
     expect(Object.keys(error as object)).toEqual([]);
 
-    expect(tokenProvider.getValidCredentials).toHaveBeenCalledTimes(1);
+    // Unmanaged providers are checked at acquire, immediately before send, and after headers.
+    expect(tokenProvider.getValidCredentials).toHaveBeenCalledTimes(3);
     expect(upstreamFetch).toHaveBeenCalledTimes(1);
     const [url, init] = upstreamFetch.mock.calls[0]!;
     expect(url).toBe(CODEX_RESPONSES_ENDPOINT);
