@@ -4,6 +4,14 @@ import { db } from '@/lib/utils/database';
 import { withStagePersistenceLock } from '@/lib/utils/stage-persistence-lock';
 import { useAgentRegistry } from '@/lib/orchestration/registry/store';
 import { getActionsForRole } from '@/lib/orchestration/registry/types';
+import type { AgentConfig } from '@/lib/orchestration/registry/types';
+
+const LEGACY_REVISIT_DEFAULT_AGENT_IDS = [
+  'default-2',
+  'default-4',
+  'default-3',
+  'default-5',
+] as const;
 
 export function isValidSpiralAgentRoster(
   agents: readonly PersistedAgentConfig[] | null | undefined,
@@ -27,6 +35,30 @@ export function getSpiralAgentPreparationAction(
   return state === 'pending-reveal' ? 'reveal' : 'continue';
 }
 
+export function buildLegacyRevisitAgentRoster(
+  candidates: readonly AgentConfig[],
+): PersistedAgentConfig[] | null {
+  const byId = new Map(candidates.map((agent) => [agent.id, agent]));
+  const defaults = LEGACY_REVISIT_DEFAULT_AGENT_IDS.map((id) => byId.get(id));
+  if (defaults.some((agent) => !agent)) return null;
+
+  const roster = defaults.map((agent) => {
+    const resolved = agent!;
+    return {
+      id: `legacy-revisit-${resolved.id}`,
+      name: resolved.name,
+      role: resolved.role,
+      persona: resolved.persona,
+      avatar: resolved.avatar,
+      color: resolved.color,
+      priority: resolved.priority,
+      ...(resolved.voiceConfig ? { voiceConfig: structuredClone(resolved.voiceConfig) } : {}),
+      ...(resolved.voiceDesign ? { voiceDesign: structuredClone(resolved.voiceDesign) } : {}),
+    };
+  });
+  return isValidSpiralAgentRoster(roster) ? roster : null;
+}
+
 export function resolveAttemptSpiralAgentRoster(
   stage: Stage,
   status: RevisitAttemptStatus,
@@ -36,7 +68,8 @@ export function resolveAttemptSpiralAgentRoster(
   const legacyCandidates = stage.generatedAgentConfigs?.filter(
     (agent) => agent.role === 'assistant' || agent.role === 'student',
   );
-  return isValidSpiralAgentRoster(legacyCandidates) ? legacyCandidates : null;
+  if (isValidSpiralAgentRoster(legacyCandidates)) return legacyCandidates;
+  return buildLegacyRevisitAgentRoster(useAgentRegistry.getState().listAgents());
 }
 
 export async function saveStageSpiralAgents(
