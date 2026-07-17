@@ -55,7 +55,15 @@ export function getCodexLanguageModelThinking(model: unknown): ThinkingCapabilit
 export const CODEX_RESPONSES_BASE_URL = 'https://chatgpt.com/backend-api/codex';
 export const CODEX_RESPONSES_ENDPOINT = `${CODEX_RESPONSES_BASE_URL}/responses`;
 export const CODEX_STREAM_ERROR_MESSAGE = 'Codex response stream could not be processed';
+export const CODEX_DECODED_STREAM_LIMITS = {
+  maxParts: 250_000,
+  maxContentItems: 4_096,
+  maxToolInputBytes: 4 * 1024 * 1024,
+} as const;
 type SafeCodexStatusCode = 401 | 403 | 429;
+type CodexDecodedStreamLimits = {
+  [Key in keyof typeof CODEX_DECODED_STREAM_LIMITS]: number;
+};
 
 function isAuthenticationRequiredCode(value: unknown): boolean {
   return (
@@ -207,8 +215,20 @@ interface ToolInputState {
   completed: boolean;
 }
 
-function sanitizeCodexStream(result: CodexStreamResult): CodexStreamResult {
+export function guardCodexStream(
+  result: CodexStreamResult,
+  overrides: Partial<CodexDecodedStreamLimits> = {},
+): CodexStreamResult {
+  const limits = { ...CODEX_DECODED_STREAM_LIMITS, ...overrides };
   const reader = result.stream.getReader();
+  const encoder = new TextEncoder();
+  const toolInputs = new Map<string, { bytes: number; streamed: boolean }>();
+  // A delta boundary can split one surrogate pair. Hold only the trailing high
+  // surrogate so byte accounting matches encoding the concatenated input.
+  const pendingToolInputHighSurrogates = new Map<string, string>();
+  const startedToolInputs = new Set<string>();
+  let partCount = 0;
+  let contentItemCount = 0;
   let released = false;
 
   const release = () => {
@@ -232,13 +252,107 @@ function sanitizeCodexStream(result: CodexStreamResult): CodexStreamResult {
     }
   };
 
+  const flushPendingHighSurrogate = (
+    id: string,
+    state: { bytes: number; streamed: boolean },
+  ): boolean => {
+    const pending = pendingToolInputHighSurrogates.get(id);
+    if (!pending) return true;
+    pendingToolInputHighSurrogates.delete(id);
+    state.bytes += encoder.encode(pending).byteLength;
+    return state.bytes <= limits.maxToolInputBytes;
+  };
+
+  const withinBudget = (part: CodexStreamPart): boolean => {
+    partCount += 1;
+    if (partCount > limits.maxParts) return false;
+
+    switch (part.type) {
+      case 'text-start':
+      case 'reasoning-start':
+      case 'tool-approval-request':
+      case 'tool-result':
+      case 'file':
+      case 'source':
+        contentItemCount += 1;
+        return contentItemCount <= limits.maxContentItems;
+
+      case 'tool-input-start':
+        contentItemCount += 1;
+        if (contentItemCount > limits.maxContentItems) return false;
+        startedToolInputs.add(part.id);
+        if (!toolInputs.has(part.id)) {
+          toolInputs.set(part.id, { bytes: 0, streamed: false });
+        }
+        return true;
+
+      case 'tool-input-delta': {
+        const state = toolInputs.get(part.id);
+        if (!state || !startedToolInputs.has(part.id)) return false;
+        const pending = pendingToolInputHighSurrogates.get(part.id) ?? '';
+        let input = pending + part.delta;
+        pendingToolInputHighSurrogates.delete(part.id);
+        const finalCodeUnit = input.charCodeAt(input.length - 1);
+        if (finalCodeUnit >= 0xd800 && finalCodeUnit <= 0xdbff) {
+          pendingToolInputHighSurrogates.set(part.id, input.slice(-1));
+          input = input.slice(0, -1);
+        }
+        state.bytes += encoder.encode(input).byteLength;
+        state.streamed = true;
+        return state.bytes <= limits.maxToolInputBytes;
+      }
+
+      case 'tool-input-end': {
+        const state = toolInputs.get(part.id);
+        return state ? flushPendingHighSurrogate(part.id, state) : true;
+      }
+
+      case 'tool-call': {
+        if (!startedToolInputs.has(part.toolCallId)) {
+          contentItemCount += 1;
+          if (contentItemCount > limits.maxContentItems) return false;
+          return encoder.encode(part.input).byteLength <= limits.maxToolInputBytes;
+        }
+        const state = toolInputs.get(part.toolCallId);
+        if (!state || !flushPendingHighSurrogate(part.toolCallId, state)) return false;
+        // Do not add the final replay of streamed input, but bound it independently
+        // so an empty or mismatched delta sequence cannot hide an oversized value.
+        const finalInputBytes = encoder.encode(part.input).byteLength;
+        if (finalInputBytes > limits.maxToolInputBytes) return false;
+        if (!state.streamed || state.bytes === 0) {
+          state.bytes = finalInputBytes;
+        }
+        return state.bytes <= limits.maxToolInputBytes;
+      }
+
+      default:
+        return true;
+    }
+  };
+
   const stream = new ReadableStream<CodexStreamPart>({
     async pull(controller) {
       try {
         const { done, value } = await reader.read();
         if (done) {
+          for (const [id, pending] of pendingToolInputHighSurrogates) {
+            const state = toolInputs.get(id);
+            if (!state) continue;
+            pendingToolInputHighSurrogates.delete(id);
+            state.bytes += encoder.encode(pending).byteLength;
+            if (state.bytes > limits.maxToolInputBytes) {
+              await cancel();
+              controller.error(createCodexStreamError());
+              return;
+            }
+          }
           release();
           controller.close();
+          return;
+        }
+        if (!withinBudget(value)) {
+          await cancel();
+          controller.error(createCodexStreamError());
           return;
         }
         controller.enqueue(
@@ -491,14 +605,14 @@ function createCodexLanguageModelMiddleware(
     },
     wrapGenerate: async ({ doStream }) => {
       try {
-        return await aggregateCodexStream(await doStream());
+        return await aggregateCodexStream(guardCodexStream(await doStream()));
       } catch (error) {
         throw createCodexStreamError(error);
       }
     },
     wrapStream: async ({ doStream }) => {
       try {
-        return sanitizeCodexStream(await doStream());
+        return guardCodexStream(await doStream());
       } catch (error) {
         throw createCodexStreamError(error);
       }
