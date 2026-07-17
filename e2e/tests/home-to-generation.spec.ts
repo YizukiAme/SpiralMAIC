@@ -49,8 +49,11 @@ test.describe('Home → Generation', () => {
     const home = new HomePage(page);
     await home.goto();
 
-    // Core elements visible
     await expect(home.logo).toBeVisible();
+    await page.waitForTimeout(500);
+    await expect(page.getByRole('region', { name: '演示课程' })).toHaveCount(0);
+
+    // Core elements visible
     await expect(home.textarea).toBeVisible();
     await expect(home.enterButton).toBeDisabled();
 
