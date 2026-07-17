@@ -17,6 +17,8 @@ export {
 export {
   parseJsonSse,
   validateCodexCatalog,
+  validateCodexImageCapability,
+  validateCodexImageJson,
   validateEditorEvents,
   validateOutlineEvents,
   validateSceneJson,

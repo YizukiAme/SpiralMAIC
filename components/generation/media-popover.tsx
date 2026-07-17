@@ -25,7 +25,8 @@ import { Switch } from '@/components/ui/switch';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { useSettingsStore } from '@/lib/store/settings';
-import { IMAGE_PROVIDERS } from '@/lib/media/image-providers';
+import { IMAGE_PROVIDERS, getImageProviderCredentialMode } from '@/lib/media/image-providers';
+import { isImageProviderAvailable } from '@/lib/media/image-provider-availability';
 import { VIDEO_PROVIDERS } from '@/lib/media/video-providers';
 import { CUSTOM_ASR_DEFAULT_LANGUAGES } from '@/lib/audio/constants';
 import { ASR_PROVIDERS, getASRSupportedLanguages } from '@/lib/audio/constants';
@@ -41,6 +42,7 @@ interface MediaPopoverProps {
 // ─── Provider icon maps ───
 const IMAGE_PROVIDER_ICONS: Record<string, string> = {
   seedream: '/logos/doubao.svg',
+  'codex-image': '/logos/openai.svg',
   'openai-image': '/logos/openai.svg',
   'qwen-image': '/logos/bailian.svg',
   'nano-banana': '/logos/gemini.svg',
@@ -143,12 +145,15 @@ export function MediaPopover({ onSettingsOpen }: MediaPopoverProps) {
   const imageGroups = useMemo(
     () =>
       Object.values(IMAGE_PROVIDERS)
-        .filter((p) => cfgOk(imageProvidersConfig, p.id, p.requiresApiKey))
+        .filter((p) => isImageProviderAvailable(p, imageProvidersConfig[p.id]))
         .map((p) => {
+          const credentialMode = getImageProviderCredentialMode(p);
           const items =
             p.id === 'comfyui-image'
               ? comfyWorkflows
-              : providerModels(p.models, imageProvidersConfig[p.id]);
+              : credentialMode === 'oauth'
+                ? p.models
+                : providerModels(p.models, imageProvidersConfig[p.id]);
 
           return {
             groupId: p.id,
@@ -162,7 +167,7 @@ export function MediaPopover({ onSettingsOpen }: MediaPopoverProps) {
             })),
           };
         }),
-    [cfgOk, imageProvidersConfig, comfyWorkflows],
+    [imageProvidersConfig, comfyWorkflows],
   );
 
   const videoGroups = useMemo(

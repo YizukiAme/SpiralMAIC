@@ -51,7 +51,7 @@ describe('Codex acceptance package and documentation contracts', () => {
           }),
         );
       } else if (request.url === '/api/server-providers') {
-        response.end(JSON.stringify({ success: true, providers: {} }));
+        response.end(JSON.stringify({ success: true, providers: {}, image: {} }));
       } else {
         response.statusCode = 404;
         response.end('{}');
@@ -122,9 +122,53 @@ describe('Codex acceptance package and documentation contracts', () => {
     expect(deployment).toMatch(/no shared-volume horizontal scaling/i);
     expect(deployment).toMatch(/priority service tier/i);
     expect(deployment).toMatch(/entitlement-dependent/i);
-    for (const exclusion of ['Images', 'WebSocket', 'multi-account', 'thread-id']) {
+    for (const exclusion of ['WebSocket', 'multi-account', 'multi-instance', 'thread-id']) {
       expect(deployment).toContain(exclusion);
     }
+    expect(deployment).toContain('gpt-image-2');
+    for (const size of ['1536x864', '1024x768', '1024x1024', '864x1536']) {
+      expect(deployment).toContain(size);
+    }
+    expect(deployment).toMatch(/3–5x faster/i);
+    expect(deployment).toMatch(/fails closed/i);
+    for (const exclusion of [
+      'reference-image',
+      'multi-image',
+      'transparent background',
+      '2K/4K UI',
+      'image-model discovery',
+      'Responses API fallback',
+      'CLIProxyAPI',
+    ]) {
+      expect(deployment).toContain(exclusion);
+    }
+  });
+
+  it('documents safe actual image dimensions without promoting backend drift to a contract', async () => {
+    const deployment = await readFile(resolve('docs/codex-oauth-deployment.md'), 'utf8');
+    const runbook = await readFile(resolve('docs/codex-real-account-acceptance.md'), 'utf8');
+
+    expect(deployment).toMatch(/requested size hints/i);
+    expect(deployment).toMatch(/request\/response\/ratio\s+drift is soft/i);
+    expect(deployment).toMatch(/PNG IHDR[\s\S]*actual (?:image )?dimensions/i);
+    expect(deployment).toMatch(/20 MiB/);
+    expect(deployment).toMatch(/8,192 pixels/);
+    expect(deployment).toMatch(/16,777,216 pixels/);
+    expect(deployment).toMatch(/exact aspect ratio[\s\S]*post-success[\s\S]*(?:crop|resize)/i);
+    expect(deployment).toMatch(/rather than[\s\S]*502`?\s+rejection/i);
+
+    const observation =
+      runbook.match(
+        /### Single non-contractual manual incident observation[\s\S]*?(?=\n## |\n### |$)/i,
+      )?.[0] ?? '';
+    expect(observation).toContain('observed_at: `2026-07-16`');
+    expect(observation).toContain('request_size: `1024x1024`');
+    expect(observation).toContain('HTTP: `200`');
+    expect(observation).toContain('response_size: `1254x1254`');
+    expect(observation).toContain('PNG IHDR: `1254x1254`');
+    expect(observation).toContain('quality: `low`');
+    expect(observation).toMatch(/raw response was not retained/i);
+    expect(observation).not.toMatch(/\b(?:prompt|base64|account|request[_ -]?id)\s*:/i);
   });
 
   it('documents every manual real-account acceptance phase and says it is not CI', async () => {
@@ -140,6 +184,19 @@ describe('Codex acceptance package and documentation contracts', () => {
     );
     expect(runbook).toContain('--expect-signed-out');
     expect(runbook).toContain('--confirm-app-stopped');
+    expect(runbook).toContain(
+      'pnpm --silent accept:codex -- --base-url http://localhost:3000 --include-image',
+    );
+    expect(runbook).toMatch(/exactly one[\s\S]*existing failed-image[\s\S]*Retry/i);
+    expect(runbook).toMatch(/do not[\s\S]*--include-image[\s\S]*same cycle/i);
+    expect(runbook).toMatch(/never[\s\S]*direct upstream probe/i);
+    expect(runbook).toMatch(/one local `\/api\/generate\/image` request/i);
+    expect(runbook).toMatch(/second upstream POST only after[\s\S]*401[\s\S]*refresh/i);
+    expect(runbook).toMatch(
+      /no[\s\S]*429[\s\S]*5xx[\s\S]*network[\s\S]*timeout[\s\S]*retr(?:y|ies)/i,
+    );
+    expect(runbook).toMatch(/model ID, MIME type, and dimensions/i);
+    expect(runbook).toMatch(/never\s+prints the prompt, image\/base64 payload/i);
     expect(runbook).toMatch(/stop.*app/i);
     expect(runbook).toMatch(/two vault writers/i);
     expect(runbook).toMatch(/restart/i);

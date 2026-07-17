@@ -6,7 +6,16 @@ code review before starting it.
 
 The HTTP harness is black-box: it uses only public OpenMAIC routes. It never reads the OAuth vault
 and never prints the instance access code, cookie, email, account ID, token, device authorization
-ID, full generated text, raw SSE, request headers, or upstream response body.
+ID, full generated text or image, image prompt, base64, raw SSE, request headers, or upstream
+response body.
+
+Codex image acceptance uses the existing ChatGPT/Codex login and the fixed `gpt-image-2` model. The
+experimental third-party subscription-backend route fails closed when login, entitlement, route
+availability, or the response contract cannot be verified. It does not test reference-image
+editing, multi-image requests, output format or quality controls, transparent background, 2K/4K UI,
+image-model discovery, a Responses API fallback, CLIProxyAPI, multi-account, or multi-instance
+operation. The aspect-ratio request size hints and actual-dimension rules are documented in the
+[deployment guide](codex-oauth-deployment.md#codex-image-generation).
 
 ## 1. Prepare one local process
 
@@ -55,6 +64,53 @@ Every line must begin with `PASS`, `FAIL`, or `SKIP`. Expect connected auth, a s
 normal verification, outline streaming, one simple slide JSON response, and (when enabled) an
 editor tool call followed by tool completion and later assistant output. Fast must be `PASS` when
 the selected catalog model advertises priority; it must be an explicit `SKIP` otherwise.
+
+The default command above never requests an image. The real image acceptance in this cycle uses
+exactly one existing failed-image **Retry** in the course UI:
+
+1. Open a course that already contains one failed Codex image task. If none exists, record this
+   image step as `SKIP`; do not manufacture a failure.
+2. Confirm Codex remains the selected image provider, then press that task's **Retry** once.
+3. Confirm the result becomes a non-empty, page-ready image after the local API response is converted
+   to a Blob, stored in IndexedDB, and exposed through an object URL.
+
+That single Retry makes one local `/api/generate/image` request. The native transport sends one
+upstream POST, with a second upstream POST only after the first returns `401` and a credential
+refresh succeeds. No `429`, `5xx`, network, or timeout failures trigger retries. Do not use the
+CLI `--include-image` flag in the same cycle, and never substitute a direct upstream probe. The CLI
+flag remains an explicit black-box option for a separate, operator-approved cycle; combining it
+with this UI check would consume another image turn.
+
+For that separate approved black-box cycle, use:
+
+```bash
+pnpm --silent accept:codex -- --base-url http://localhost:3000 --include-image
+```
+
+### Single non-contractual manual incident observation
+
+This one-time record describes one incident only; it is not a backend size, quality, or ratio
+contract.
+
+- observed_at: `2026-07-16`
+- request_size: `1024x1024`
+- HTTP: `200`
+- response_size: `1254x1254`
+- PNG IHDR: `1254x1254`
+- quality: `low`
+
+The raw response was not retained. No prompt, base64, account detail, or request ID was retained in
+this record.
+
+Image generation uses the account's general ChatGPT/Codex plan limits, and
+[official usage guidance](https://learn.chatgpt.com/docs/image-generation) estimates that image turns
+consume included limits about 3–5x faster than similar turns without image generation, depending on
+quality and size. When the CLI option is run in a separate cycle, success output contains only PASS
+metadata: local HTTP status plus model ID, MIME type, and dimensions. A missing capability or failed
+selected capability produces a classified `SKIP` or `FAIL` with the local HTTP status, a safe source
+category, and the numeric upstream HTTP status when the server supplied one. The harness never
+prints the prompt, image/base64 payload, account details, credentials, cookies, or upstream response
+body.
 
 ## 3. Logout and device-code login
 
