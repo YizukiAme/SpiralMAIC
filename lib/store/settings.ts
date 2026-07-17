@@ -227,8 +227,8 @@ export interface SettingsState {
   // SpiralMAIC revisit settings
   reverseChallengeEnabled: boolean;
   stableSuccessesRequired: number;
-  activeRevisitDemoSessionId: string | null;
-  revisitVirtualClockOffsetHours: number;
+  activeRevisitDemoSessionByStage: Record<string, string>;
+  revisitVirtualClockOffsetHoursByStage: Record<string, number>;
   demoGateSkipEnabled: boolean;
 
   // Web Search settings
@@ -413,8 +413,8 @@ export interface SettingsState {
   // SpiralMAIC revisit actions
   setReverseChallengeEnabled: (enabled: boolean) => void;
   setStableSuccessesRequired: (count: number) => void;
-  setActiveRevisitDemoSession: (sessionId: string | null) => void;
-  setRevisitVirtualClockOffsetHours: (hours: number) => void;
+  setActiveRevisitDemoSession: (stageId: string, sessionId: string | null) => void;
+  setRevisitVirtualClockOffsetHours: (stageId: string, hours: number) => void;
   setDemoGateSkipEnabled: (enabled: boolean) => void;
 
   // Web Search actions
@@ -1174,8 +1174,8 @@ export const useSettingsStore = create<SettingsState>()(
         // SpiralMAIC revisit defaults
         reverseChallengeEnabled: false,
         stableSuccessesRequired: 2,
-        activeRevisitDemoSessionId: null,
-        revisitVirtualClockOffsetHours: 0,
+        activeRevisitDemoSessionByStage: {},
+        revisitVirtualClockOffsetHoursByStage: {},
         demoGateSkipEnabled: false,
 
         // TTS is OFF by default; auto-enabled on first server-sync when a TTS
@@ -1546,18 +1546,32 @@ export const useSettingsStore = create<SettingsState>()(
         setReverseChallengeEnabled: (enabled) => set({ reverseChallengeEnabled: enabled }),
         setStableSuccessesRequired: (count) =>
           set({ stableSuccessesRequired: Math.max(1, Math.min(12, Math.round(count))) }),
-        setActiveRevisitDemoSession: (sessionId) =>
-          set({
-            activeRevisitDemoSessionId: sessionId,
-            revisitVirtualClockOffsetHours: sessionId ? get().revisitVirtualClockOffsetHours : 0,
+        setActiveRevisitDemoSession: (stageId, sessionId) =>
+          set((state) => {
+            const activeRevisitDemoSessionByStage = {
+              ...state.activeRevisitDemoSessionByStage,
+            };
+            const revisitVirtualClockOffsetHoursByStage = {
+              ...state.revisitVirtualClockOffsetHoursByStage,
+            };
+            if (sessionId) {
+              activeRevisitDemoSessionByStage[stageId] = sessionId;
+            } else {
+              delete activeRevisitDemoSessionByStage[stageId];
+              delete revisitVirtualClockOffsetHoursByStage[stageId];
+            }
+            return {
+              activeRevisitDemoSessionByStage,
+              revisitVirtualClockOffsetHoursByStage,
+            };
           }),
-        setRevisitVirtualClockOffsetHours: (hours) =>
-          set({
-            revisitVirtualClockOffsetHours: Math.max(
-              0,
-              Math.min(168, Number.isFinite(hours) ? Math.round(hours) : 0),
-            ),
-          }),
+        setRevisitVirtualClockOffsetHours: (stageId, hours) =>
+          set((state) => ({
+            revisitVirtualClockOffsetHoursByStage: {
+              ...state.revisitVirtualClockOffsetHoursByStage,
+              [stageId]: Math.max(0, Math.min(168, Number.isFinite(hours) ? Math.round(hours) : 0)),
+            },
+          })),
         setDemoGateSkipEnabled: (enabled) => set({ demoGateSkipEnabled: enabled }),
         setTTSEnabled: (enabled) => set({ ttsEnabled: enabled }),
         setASREnabled: (enabled) => set({ asrEnabled: enabled }),
@@ -2387,7 +2401,7 @@ export const useSettingsStore = create<SettingsState>()(
     },
     {
       name: 'settings-storage',
-      version: 6,
+      version: 7,
       // A rich Codex catalog is account-scoped server truth. Keep it in live
       // UI state, but persist only the audited bundled snapshot so browser
       // storage can never become a second last-known-good cache.
@@ -2534,12 +2548,24 @@ export const useSettingsStore = create<SettingsState>()(
         }
         delete (state as Record<string, unknown>).forgettingSpeedMultiplier;
         delete (state as Record<string, unknown>).demoAcceleratedClockEnabled;
-        if ((state as Record<string, unknown>).activeRevisitDemoSessionId === undefined) {
-          (state as Record<string, unknown>).activeRevisitDemoSessionId = null;
+        const revisitState = state as Record<string, unknown>;
+        if (
+          !revisitState.activeRevisitDemoSessionByStage ||
+          typeof revisitState.activeRevisitDemoSessionByStage !== 'object' ||
+          Array.isArray(revisitState.activeRevisitDemoSessionByStage)
+        ) {
+          revisitState.activeRevisitDemoSessionByStage = {};
         }
-        if ((state as Record<string, unknown>).revisitVirtualClockOffsetHours === undefined) {
-          (state as Record<string, unknown>).revisitVirtualClockOffsetHours = 0;
+        if (
+          !revisitState.revisitVirtualClockOffsetHoursByStage ||
+          typeof revisitState.revisitVirtualClockOffsetHoursByStage !== 'object' ||
+          Array.isArray(revisitState.revisitVirtualClockOffsetHoursByStage)
+        ) {
+          revisitState.revisitVirtualClockOffsetHoursByStage = {};
         }
+        // Legacy demo sessions were global and cannot be assigned to a course safely.
+        delete revisitState.activeRevisitDemoSessionId;
+        delete revisitState.revisitVirtualClockOffsetHours;
         if ((state as Record<string, unknown>).demoGateSkipEnabled === undefined) {
           (state as Record<string, unknown>).demoGateSkipEnabled = false;
         }

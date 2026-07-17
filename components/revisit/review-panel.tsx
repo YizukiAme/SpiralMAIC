@@ -1,16 +1,18 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   BrainCircuit,
   CalendarCheck,
   CheckCircle2,
   Clock,
+  Clock3,
   FlaskConical,
   Library,
   Loader2,
   RefreshCw,
+  RotateCcw,
   Trash2,
 } from 'lucide-react';
 
@@ -31,10 +33,15 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/compone
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import {
-  clearAllRevisitDemoData,
+  clearRevisitDemoData,
   listRevisitDemoSessionContents,
   type RevisitDemoSessionContents,
 } from '@/lib/revisit/db';
+import {
+  advanceRevisitDemoClock,
+  restoreRealRevisitClock,
+  startRevisitDemoClock,
+} from '@/lib/revisit/clock';
 import {
   getRevisitAttemptCardSummary,
   getRevisitAttemptAction,
@@ -51,6 +58,9 @@ import type { StageListItem } from '@/lib/utils/stage-storage';
 import { cn } from '@/lib/utils';
 import { RevisitDemoBadge } from '@/components/revisit/demo-badge';
 import { useArtifactGenerationStore } from '@/lib/store/artifact-generation';
+import { useSettingsStore } from '@/lib/store/settings';
+
+const REVISIT_CLOCK_STEPS = [1, 6, 24, 72, 168] as const;
 
 interface RevisitReviewPanelProps {
   open: boolean;
@@ -238,6 +248,7 @@ export function RevisitReviewPanel({
             <TabsContent value="demo" className="min-h-0 overflow-y-auto p-4 sm:p-6">
               <DemoBox
                 active={activeSection === 'demo'}
+                classroom={classroom}
                 onOpenAttempt={onOpenAttempt}
                 onOpenArtifact={(artifact, scope) => onOpenArtifact(artifact, scope, 'demo')}
                 onClear={onClearDemoData}
@@ -664,12 +675,14 @@ function PageReportList({ report }: { report: RevisitJudgeReport }) {
 
 function DemoBox({
   active,
+  classroom,
   onOpenAttempt,
   onOpenArtifact,
   onClear,
   formatDateTime,
 }: {
   active: boolean;
+  classroom: StageListItem | null;
   onOpenAttempt: (attempt: RevisitAttempt, scope: RevisitDataScope) => void;
   onOpenArtifact: (artifact: StudyArtifact, scope: RevisitDataScope) => void;
   onClear: () => void;
@@ -679,24 +692,132 @@ function DemoBox({
   const [contents, setContents] = useState<RevisitDemoSessionContents[]>([]);
   const [loading, setLoading] = useState(false);
   const [clearOpen, setClearOpen] = useState(false);
+  const [clockBusy, setClockBusy] = useState(false);
+  const [clockError, setClockError] = useState<string | null>(null);
   const artifactJobs = useArtifactGenerationStore((state) => state.jobs);
   const cancelArtifactJob = useArtifactGenerationStore((state) => state.cancel);
+  const activeDemoSessionByStage = useSettingsStore(
+    (state) => state.activeRevisitDemoSessionByStage,
+  );
+  const offsetHoursByStage = useSettingsStore(
+    (state) => state.revisitVirtualClockOffsetHoursByStage,
+  );
+  const setActiveDemoSession = useSettingsStore((state) => state.setActiveRevisitDemoSession);
+  const setOffsetHours = useSettingsStore((state) => state.setRevisitVirtualClockOffsetHours);
+  const stageId = classroom?.id;
+  const activeDemoSessionId = stageId ? activeDemoSessionByStage[stageId] : undefined;
+  const offsetHours = stageId ? (offsetHoursByStage[stageId] ?? 0) : 0;
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
+    if (!stageId) {
+      setContents([]);
+      return;
+    }
     setLoading(true);
     try {
-      setContents(await listRevisitDemoSessionContents());
+      setContents(await listRevisitDemoSessionContents(stageId));
     } finally {
       setLoading(false);
     }
-  };
+  }, [stageId]);
 
   useEffect(() => {
     if (active) void refresh();
-  }, [active]);
+  }, [active, refresh]);
+
+  const advanceClock = async (hours: number) => {
+    if (!stageId) return;
+    setClockBusy(true);
+    setClockError(null);
+    try {
+      const session = activeDemoSessionId
+        ? await advanceRevisitDemoClock(activeDemoSessionId, hours)
+        : await startRevisitDemoClock({ stageId });
+      const advanced = activeDemoSessionId
+        ? session
+        : await advanceRevisitDemoClock(session.id, hours);
+      setActiveDemoSession(stageId, advanced.id);
+      setOffsetHours(stageId, advanced.offsetHours);
+      await refresh();
+    } catch (error) {
+      setClockError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setClockBusy(false);
+    }
+  };
+
+  const restoreClock = async () => {
+    if (!stageId || !activeDemoSessionId) return;
+    setClockBusy(true);
+    setClockError(null);
+    try {
+      await restoreRealRevisitClock(activeDemoSessionId);
+      setActiveDemoSession(stageId, null);
+      await refresh();
+    } catch (error) {
+      setClockError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setClockBusy(false);
+    }
+  };
+
+  const simulatedAt = new Date(Date.now() + offsetHours * 60 * 60 * 1000);
 
   return (
     <div className="space-y-4">
+      <section className="space-y-4 rounded-lg border bg-muted/15 p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <Clock3 className="size-4" />
+              {t('settings.revisit.virtualClock')}
+            </div>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              {t('settings.revisit.virtualClockDetail')}
+            </p>
+          </div>
+          {clockBusy ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
+        </div>
+        <div className="rounded-md bg-muted/45 px-3 py-2">
+          <p className="text-xs text-muted-foreground">{t('settings.revisit.simulatedTime')}</p>
+          <p className="mt-1 text-sm font-medium tabular-nums">
+            {activeDemoSessionId ? simulatedAt.toLocaleString() : t('settings.revisit.realTime')}
+          </p>
+          {activeDemoSessionId ? (
+            <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+              {t('settings.revisit.demoOffset', { hours: offsetHours })}
+            </p>
+          ) : null}
+        </div>
+        <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+          {REVISIT_CLOCK_STEPS.map((hours) => (
+            <Button
+              key={hours}
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={!stageId || clockBusy || offsetHours >= 168}
+              onClick={() => void advanceClock(hours)}
+            >
+              +{hours < 24 ? `${hours}h` : `${hours / 24}d`}
+            </Button>
+          ))}
+        </div>
+        {activeDemoSessionId ? (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={clockBusy}
+            onClick={() => void restoreClock()}
+          >
+            <RotateCcw />
+            {t('settings.revisit.restoreRealTime')}
+          </Button>
+        ) : null}
+        {clockError ? <p className="text-xs text-destructive">{clockError}</p> : null}
+      </section>
+
       <div className="flex items-center justify-between gap-3 border-b pb-4">
         <div>
           <h3 className="text-sm font-semibold">{t('revisit.demo.batches')}</h3>
@@ -870,15 +991,20 @@ function DemoBox({
             <Button
               variant="destructive"
               onClick={() => {
+                if (!stageId) return;
+                const sessionScopes = new Set(
+                  contents.map((content) => `demo:${content.session.id}`),
+                );
                 for (const job of artifactJobs) {
                   if (
-                    job.scope?.startsWith('demo:') &&
+                    job.scope &&
+                    sessionScopes.has(job.scope) &&
                     (job.status === 'queued' || job.status === 'generating')
                   ) {
                     cancelArtifactJob(job.id);
                   }
                 }
-                void clearAllRevisitDemoData().then(() => {
+                void clearRevisitDemoData(stageId).then(() => {
                   setClearOpen(false);
                   setContents([]);
                   onClear();

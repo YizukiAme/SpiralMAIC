@@ -1715,7 +1715,7 @@
       "acceleratedClock": "加速時計",
       "gateSkip": "ページ判定をスキップ",
       "virtualClock": "仮想時計",
-      "virtualClockDetail": "最初の時間移動で Spiral データを複製し、正式記録は変更しません。",
+      "virtualClockDetail": "最初の時間移動で現在のコースの Spiral データだけを複製し、正式記録は変更しません。",
       "simulatedTime": "現在時刻",
       "realTime": "実際のシステム時刻",
       "demoOffset": "デモ時刻は {{hours}} 時間先です",
@@ -1935,8 +1935,8 @@
       "batchName": "Demo · {{date}}",
       "counts": "Reverse {{attempts}} · レポート {{reports}} · 教材 {{artifacts}} · 練習 {{practice}}",
       "clear": "デモデータを消去",
-      "clearTitle": "すべてのデモデータを消去しますか？",
-      "clearDescription": "すべてのデモ履歴とチャレンジ、レポート、教材、練習記録が完全に削除されます。"
+      "clearTitle": "このコースのデモデータを消去しますか？",
+      "clearDescription": "このコースのすべてのデモ履歴とチャレンジ、レポート、教材、練習記録が完全に削除されます。"
     },
     "studio": {
       "title": "学習素材スタジオ",

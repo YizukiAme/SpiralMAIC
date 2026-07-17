@@ -1715,7 +1715,7 @@
       "acceleratedClock": "가속 시계",
       "gateSkip": "페이지 게이트 건너뛰기",
       "virtualClock": "가상 시계",
-      "virtualClockDetail": "처음 시간을 이동할 때 Spiral 데이터를 복제하며 정식 기록은 변경하지 않습니다.",
+      "virtualClockDetail": "처음 시간을 이동할 때 현재 강좌의 Spiral 데이터만 복제하며 정식 기록은 변경하지 않습니다.",
       "simulatedTime": "현재 시간",
       "realTime": "실제 시스템 시간",
       "demoOffset": "Demo 시간이 {{hours}}시간 앞서 있습니다",
@@ -1935,8 +1935,8 @@
       "batchName": "Demo · {{date}}",
       "counts": "Reverse {{attempts}} · 보고서 {{reports}} · 자료 {{artifacts}} · 연습 {{practice}}",
       "clear": "Demo 데이터 지우기",
-      "clearTitle": "모든 Demo 데이터를 지울까요?",
-      "clearDescription": "모든 데모 배치와 챌린지, 보고서, 자료, 연습 기록이 영구 삭제됩니다."
+      "clearTitle": "이 강좌의 Demo 데이터를 지울까요?",
+      "clearDescription": "이 강좌의 모든 데모 배치와 챌린지, 보고서, 자료, 연습 기록이 영구 삭제됩니다."
     },
     "studio": {
       "title": "학습 자료 스튜디오",
