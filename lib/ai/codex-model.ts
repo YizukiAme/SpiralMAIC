@@ -1,5 +1,5 @@
 import { wrapLanguageModel, type LanguageModelMiddleware } from 'ai';
-import type { ModelServiceTier } from '@/lib/types/provider';
+import type { ModelInfo, ModelServiceTier, ThinkingCapability } from '@/lib/types/provider';
 
 type LanguageModelV3 = Parameters<typeof wrapLanguageModel>[0]['model'];
 type CodexStreamResult = Awaited<ReturnType<LanguageModelV3['doStream']>>;
@@ -9,10 +9,67 @@ type CodexStreamPart =
 type CodexContent = CodexGenerateResult['content'][number];
 type CodexProviderMetadata = NonNullable<CodexGenerateResult['providerMetadata']>;
 
+const codexRuntimeThinking = new WeakMap<object, ThinkingCapability | null>();
+
+function cloneThinkingCapability(thinking: ThinkingCapability): ThinkingCapability {
+  return {
+    ...thinking,
+    ...(thinking.effortValues ? { effortValues: [...thinking.effortValues] } : {}),
+    ...(thinking.levelValues ? { levelValues: [...thinking.levelValues] } : {}),
+    ...(thinking.budgetRange ? { budgetRange: { ...thinking.budgetRange } } : {}),
+    ...(thinking.anthropicThinking
+      ? {
+          anthropicThinking: {
+            ...thinking.anthropicThinking,
+            ...(thinking.anthropicThinking.budgetByEffort
+              ? { budgetByEffort: { ...thinking.anthropicThinking.budgetByEffort } }
+              : {}),
+          },
+        }
+      : {}),
+  };
+}
+
+/** Bind safe discovery metadata to one server-created Codex model instance. */
+export function bindCodexLanguageModelMetadata<T>(model: T, modelInfo: ModelInfo): T {
+  if (!model || typeof model !== 'object') {
+    throw new TypeError('Codex runtime metadata requires a language model object');
+  }
+  const thinking = modelInfo.capabilities?.thinking;
+  codexRuntimeThinking.set(model, thinking ? cloneThinkingCapability(thinking) : null);
+  return model;
+}
+
+/** Distinguish an explicit no-thinking discovery result from an unbound model. */
+export function hasCodexLanguageModelMetadata(model: unknown): boolean {
+  return Boolean(model && typeof model === 'object' && codexRuntimeThinking.has(model));
+}
+
+/** Read only the request capability carried by the resolved Codex model. */
+export function getCodexLanguageModelThinking(model: unknown): ThinkingCapability | undefined {
+  if (!model || typeof model !== 'object') return undefined;
+  const thinking = codexRuntimeThinking.get(model);
+  return thinking ? cloneThinkingCapability(thinking) : undefined;
+}
+
 export const CODEX_RESPONSES_BASE_URL = 'https://chatgpt.com/backend-api/codex';
 export const CODEX_RESPONSES_ENDPOINT = `${CODEX_RESPONSES_BASE_URL}/responses`;
 export const CODEX_STREAM_ERROR_MESSAGE = 'Codex response stream could not be processed';
+export const CODEX_DECODED_STREAM_LIMITS = {
+  maxParts: 250_000,
+  maxContentItems: 4_096,
+  maxToolInputBytes: 4 * 1024 * 1024,
+} as const;
 type SafeCodexStatusCode = 401 | 403 | 429;
+type CodexDecodedStreamLimits = {
+  [Key in keyof typeof CODEX_DECODED_STREAM_LIMITS]: number;
+};
+interface CodexToolInputBudgetState {
+  bytes: number;
+  streamed: boolean;
+  ended: boolean;
+  completed: boolean;
+}
 
 function isAuthenticationRequiredCode(value: unknown): boolean {
   return (
@@ -69,6 +126,14 @@ function createCodexStreamError(source?: unknown): CodexStreamError {
   return new CodexStreamError(extractSafeStatusCode(source));
 }
 
+function cancelReaderWithoutWaiting<T>(reader: ReadableStreamDefaultReader<T>): void {
+  try {
+    void reader.cancel().catch(() => undefined);
+  } catch {
+    // Source cancellation is best-effort and must never delay a safe result.
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -105,6 +170,34 @@ function normalizeProviderOptions(
   >;
 }
 
+function stripDecodedOpenAIItemId(part: unknown): unknown {
+  if (!isRecord(part) || !isRecord(part.providerOptions)) return part;
+  const openai = part.providerOptions.openai;
+  if (!isRecord(openai) || !Object.prototype.hasOwnProperty.call(openai, 'itemId')) return part;
+
+  const { itemId: _itemId, ...safeOpenAI } = openai;
+  const { openai: _openai, ...otherProviderOptions } = part.providerOptions;
+  const safeProviderOptions =
+    Object.keys(safeOpenAI).length > 0
+      ? { ...otherProviderOptions, openai: safeOpenAI }
+      : otherProviderOptions;
+  const { providerOptions: _providerOptions, ...safePart } = part;
+  return Object.keys(safeProviderOptions).length > 0
+    ? { ...safePart, providerOptions: safeProviderOptions }
+    : safePart;
+}
+
+function sanitizeCodexReplayPrompt<T>(prompt: T): T {
+  if (!Array.isArray(prompt)) return prompt;
+  return prompt.map((message) => {
+    if (!isRecord(message) || !Array.isArray(message.content)) return message;
+    return {
+      ...message,
+      content: message.content.map(stripDecodedOpenAIItemId),
+    };
+  }) as T;
+}
+
 function mergeProviderMetadata(...values: Array<unknown>): CodexProviderMetadata | undefined {
   const merged: Record<string, Record<string, unknown>> = {};
   for (const value of values) {
@@ -136,38 +229,153 @@ interface ToolInputState {
   completed: boolean;
 }
 
-function sanitizeCodexStream(result: CodexStreamResult): CodexStreamResult {
+export function guardCodexStream(
+  result: CodexStreamResult,
+  overrides: Partial<CodexDecodedStreamLimits> = {},
+): CodexStreamResult {
+  const limits = { ...CODEX_DECODED_STREAM_LIMITS, ...overrides };
   const reader = result.stream.getReader();
+  const encoder = new TextEncoder();
+  const toolInputs = new Map<string, CodexToolInputBudgetState>();
+  // Count a trailing high surrogate provisionally before forwarding it. The
+  // next delta recomputes that one-code-unit prefix so a matching low surrogate
+  // adjusts replacement-byte accounting to the complete pair.
+  const pendingToolInputHighSurrogates = new Map<string, string>();
+  const startedToolInputs = new Set<string>();
+  let partCount = 0;
+  let contentItemCount = 0;
   let released = false;
+  let terminated = false;
 
   const release = () => {
     if (released) return;
-    released = true;
     try {
       reader.releaseLock();
+      released = true;
     } catch {
       // The safe wrapper owns this reader; there is nothing useful to expose.
     }
   };
 
-  const cancel = async () => {
+  const cancelSource = () => {
     if (released) return;
-    try {
-      await reader.cancel();
-    } catch {
-      // Never expose a source-stream cancellation failure.
-    } finally {
-      release();
+    const closed = reader.closed;
+    cancelReaderWithoutWaiting(reader);
+    release();
+    void closed.then(release, release);
+  };
+
+  const flushPendingHighSurrogate = (id: string, state: CodexToolInputBudgetState): boolean => {
+    pendingToolInputHighSurrogates.delete(id);
+    return state.bytes <= limits.maxToolInputBytes;
+  };
+
+  const withinBudget = (part: CodexStreamPart): boolean => {
+    partCount += 1;
+    if (partCount > limits.maxParts) return false;
+
+    switch (part.type) {
+      case 'text-start':
+      case 'reasoning-start':
+      case 'tool-approval-request':
+      case 'tool-result':
+      case 'file':
+      case 'source':
+        contentItemCount += 1;
+        return contentItemCount <= limits.maxContentItems;
+
+      case 'tool-input-start':
+        contentItemCount += 1;
+        if (contentItemCount > limits.maxContentItems) return false;
+        startedToolInputs.add(part.id);
+        if (!toolInputs.has(part.id)) {
+          toolInputs.set(part.id, {
+            bytes: 0,
+            streamed: false,
+            ended: false,
+            completed: false,
+          });
+        }
+        return true;
+
+      case 'tool-input-delta': {
+        const state = toolInputs.get(part.id);
+        if (!state || !startedToolInputs.has(part.id) || state.ended || state.completed) {
+          return false;
+        }
+        const pending = pendingToolInputHighSurrogates.get(part.id) ?? '';
+        if (pending) state.bytes -= encoder.encode(pending).byteLength;
+        let input = pending + part.delta;
+        pendingToolInputHighSurrogates.delete(part.id);
+        const finalCodeUnit = input.charCodeAt(input.length - 1);
+        if (finalCodeUnit >= 0xd800 && finalCodeUnit <= 0xdbff) {
+          const trailingHighSurrogate = input.slice(-1);
+          pendingToolInputHighSurrogates.set(part.id, trailingHighSurrogate);
+          input = input.slice(0, -1);
+          state.bytes += encoder.encode(trailingHighSurrogate).byteLength;
+        }
+        state.bytes += encoder.encode(input).byteLength;
+        state.streamed = true;
+        return state.bytes <= limits.maxToolInputBytes;
+      }
+
+      case 'tool-input-end': {
+        const state = toolInputs.get(part.id);
+        if (!state || state.ended || state.completed) return false;
+        if (!flushPendingHighSurrogate(part.id, state)) return false;
+        state.ended = true;
+        return true;
+      }
+
+      case 'tool-call': {
+        if (!startedToolInputs.has(part.toolCallId)) {
+          contentItemCount += 1;
+          if (contentItemCount > limits.maxContentItems) return false;
+          return encoder.encode(part.input).byteLength <= limits.maxToolInputBytes;
+        }
+        const state = toolInputs.get(part.toolCallId);
+        if (
+          !state ||
+          !state.ended ||
+          state.completed ||
+          !flushPendingHighSurrogate(part.toolCallId, state)
+        ) {
+          return false;
+        }
+        // Do not add the final replay of streamed input, but bound it independently
+        // so an empty or mismatched delta sequence cannot hide an oversized value.
+        const finalInputBytes = encoder.encode(part.input).byteLength;
+        if (finalInputBytes > limits.maxToolInputBytes) return false;
+        if (!state.streamed || state.bytes === 0) {
+          state.bytes = finalInputBytes;
+        }
+        if (state.bytes > limits.maxToolInputBytes) return false;
+        state.completed = true;
+        return true;
+      }
+
+      default:
+        return true;
     }
   };
 
   const stream = new ReadableStream<CodexStreamPart>({
     async pull(controller) {
+      if (terminated) return;
       try {
         const { done, value } = await reader.read();
+        if (terminated) return;
         if (done) {
+          terminated = true;
+          pendingToolInputHighSurrogates.clear();
           release();
           controller.close();
+          return;
+        }
+        if (!withinBudget(value)) {
+          terminated = true;
+          cancelSource();
+          controller.error(createCodexStreamError());
           return;
         }
         controller.enqueue(
@@ -176,12 +384,16 @@ function sanitizeCodexStream(result: CodexStreamResult): CodexStreamResult {
             : value,
         );
       } catch (error) {
-        await cancel();
+        if (terminated) return;
+        terminated = true;
+        cancelSource();
         controller.error(createCodexStreamError(error));
       }
     },
-    async cancel() {
-      await cancel();
+    cancel() {
+      if (terminated) return;
+      terminated = true;
+      cancelSource();
     },
   });
 
@@ -389,7 +601,7 @@ export async function aggregateCodexStream(
       ...(providerMetadata ? { providerMetadata } : {}),
     };
   } catch (error) {
-    await reader.cancel().catch(() => undefined);
+    cancelReaderWithoutWaiting(reader);
     throw createCodexStreamError(error);
   } finally {
     try {
@@ -407,6 +619,7 @@ function createCodexLanguageModelMiddleware(
     specificationVersion: 'v3',
     transformParams: async ({ params }) => {
       const normalized = { ...params };
+      normalized.prompt = sanitizeCodexReplayPrompt(params.prompt);
       delete normalized.maxOutputTokens;
       delete normalized.temperature;
       delete normalized.topP;
@@ -419,14 +632,14 @@ function createCodexLanguageModelMiddleware(
     },
     wrapGenerate: async ({ doStream }) => {
       try {
-        return await aggregateCodexStream(await doStream());
+        return await aggregateCodexStream(guardCodexStream(await doStream()));
       } catch (error) {
         throw createCodexStreamError(error);
       }
     },
     wrapStream: async ({ doStream }) => {
       try {
-        return sanitizeCodexStream(await doStream());
+        return guardCodexStream(await doStream());
       } catch (error) {
         throw createCodexStreamError(error);
       }
@@ -436,10 +649,14 @@ function createCodexLanguageModelMiddleware(
 
 export function wrapCodexLanguageModel(
   model: LanguageModelV3,
-  options: { serviceTier?: ModelServiceTier } = {},
+  options: { serviceTier?: ModelServiceTier; modelInfo?: ModelInfo } = {},
 ): LanguageModelV3 {
-  return wrapLanguageModel({
+  const wrapped = wrapLanguageModel({
     model,
     middleware: createCodexLanguageModelMiddleware(options.serviceTier),
+    // Preserve the product/provider identity across the native OpenAI SDK
+    // wrapper. Request metadata must never resolve this model as public OpenAI.
+    providerId: 'openai-codex',
   });
+  return options.modelInfo ? bindCodexLanguageModelMetadata(wrapped, options.modelInfo) : wrapped;
 }

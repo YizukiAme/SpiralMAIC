@@ -46,6 +46,7 @@ import {
   migrateLegacyThread,
   rememberActiveSession,
   recallActiveSession,
+  prepareStageSessionRequest,
 } from './agent-thread-store';
 import { deriveSessionTitle, type AgentEditSessionRecord } from './agent-edit-session-types';
 import { serializeThread, deserializeThread, type SerializedMessage } from './serialize-thread';
@@ -122,6 +123,8 @@ export function useAgentRuntime(opts: UseAgentRuntimeOptions) {
   // the second is deduped, and a quick switch-away-and-back still reloads.
   const startedStageRef = useRef<string | undefined>(undefined);
   const activeSessionIdRef = useRef<string | undefined>(undefined);
+  const activeSessionStageIdRef = useRef<string | undefined>(undefined);
+  const messagesStageIdRef = useRef<string | undefined>(undefined);
   const [sessions, setSessions] = useState<AgentEditSessionRecord[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>(undefined);
 
@@ -140,23 +143,33 @@ export function useAgentRuntime(opts: UseAgentRuntimeOptions) {
     // Switch = this effect previously started for a DIFFERENT stage, so any live
     // thread on screen belongs to that old stage and must be dropped — even if its
     // load never committed (e.g. a quick A→B→A before B settled).
-    const isSwitch = startedStageRef.current !== undefined;
+    const previousStageId = startedStageRef.current;
+    const isSwitch = previousStageId !== undefined;
     startedStageRef.current = stageId;
     if (isSwitch) {
-      // Drop the previous stage's thread synchronously BEFORE the async load, so
-      // the old conversation can't be POSTed as history or archived under the new
-      // stage, and the popover can't act on a foreign-stage session.
-      abortRef.current?.abort();
-      abortRef.current = null;
-      phaseRef.current = 'complete';
-      setIsRunning(false);
-      messagesRef.current = [];
-      setMessages([]);
-      activeSessionIdRef.current = undefined;
-      setActiveSessionId(undefined);
+      // Drop only state still owned by the previous stage. A send can observe the
+      // new stage through getState() before this passive effect runs and establish
+      // a new controller/thread/session; clearing those here would cancel that run.
+      if (runStageIdRef.current === previousStageId) {
+        abortRef.current?.abort();
+        abortRef.current = null;
+        runStageIdRef.current = undefined;
+        phaseRef.current = 'complete';
+        setIsRunning(false);
+      }
+      if (messagesStageIdRef.current === previousStageId) {
+        messagesRef.current = [];
+        messagesStageIdRef.current = undefined;
+        setMessages([]);
+        useRegenSnapshots.getState().clearAll();
+        useThinkingTimers.getState().clear();
+      }
+      if (activeSessionStageIdRef.current === previousStageId) {
+        activeSessionIdRef.current = undefined;
+        activeSessionStageIdRef.current = undefined;
+        setActiveSessionId(undefined);
+      }
       setSessions([]);
-      useRegenSnapshots.getState().clearAll();
-      useThinkingTimers.getState().clear();
     }
     void (async () => {
       // One-time import of the old single-thread localStorage entry.
@@ -176,8 +189,13 @@ export function useAgentRuntime(opts: UseAgentRuntimeOptions) {
         // Reuse an id the settle-save effect may already have created/saved during
         // this load window; only mint a new one if none exists. Otherwise we'd
         // remember an unsaved id and strand the actually-saved conversation.
-        const sid = activeSessionIdRef.current ?? createSession(stageId).id;
+        const sid =
+          activeSessionStageIdRef.current === stageId
+            ? (activeSessionIdRef.current ?? createSession(stageId).id)
+            : createSession(stageId).id;
         activeSessionIdRef.current = sid;
+        activeSessionStageIdRef.current = stageId;
+        messagesStageIdRef.current = stageId;
         setActiveSessionId(sid);
         rememberActiveSession(stageId, sid);
         return;
@@ -188,25 +206,39 @@ export function useAgentRuntime(opts: UseAgentRuntimeOptions) {
       const rememberedRec = remembered ? list.find((s) => s.id === remembered) : undefined;
       if (rememberedRec) {
         activeSessionIdRef.current = rememberedRec.id;
+        activeSessionStageIdRef.current = stageId;
         setActiveSessionId(rememberedRec.id);
-        setMessages(deserializeThread(rememberedRec.messages));
+        const restored = deserializeThread(rememberedRec.messages);
+        messagesRef.current = restored;
+        messagesStageIdRef.current = stageId;
+        setMessages(restored);
         reseedReasoningTimers(rememberedRec.messages);
       } else if (remembered) {
         // Remembered an empty/unsaved (or pruned) session → keep the clean slate.
         activeSessionIdRef.current = remembered;
+        activeSessionStageIdRef.current = stageId;
         setActiveSessionId(remembered);
+        messagesRef.current = [];
+        messagesStageIdRef.current = stageId;
         setMessages([]);
       } else {
         const recent = list[0];
         if (recent) {
           activeSessionIdRef.current = recent.id;
+          activeSessionStageIdRef.current = stageId;
           setActiveSessionId(recent.id);
-          setMessages(deserializeThread(recent.messages));
+          const restored = deserializeThread(recent.messages);
+          messagesRef.current = restored;
+          messagesStageIdRef.current = stageId;
+          setMessages(restored);
           reseedReasoningTimers(recent.messages);
         } else {
           const s = createSession(stageId);
           activeSessionIdRef.current = s.id;
+          activeSessionStageIdRef.current = stageId;
           setActiveSessionId(s.id);
+          messagesRef.current = [];
+          messagesStageIdRef.current = stageId;
           setMessages([]);
         }
       }
@@ -221,11 +253,17 @@ export function useAgentRuntime(opts: UseAgentRuntimeOptions) {
     if (isRunning || messages.length === 0) return;
     const sid = useStageStore.getState().stage?.id;
     if (!sid) return;
-    let sessionId = activeSessionIdRef.current;
+    // A stage switch and the previous run's final state update can batch into
+    // the same render. The render then observes stage B with stage A messages;
+    // never mint or persist a B session until the message ownership ref agrees.
+    if (messagesStageIdRef.current !== sid) return;
+    let sessionId =
+      activeSessionStageIdRef.current === sid ? activeSessionIdRef.current : undefined;
     if (!sessionId) {
       const s = createSession(sid);
       sessionId = s.id;
       activeSessionIdRef.current = s.id;
+      activeSessionStageIdRef.current = sid;
       setActiveSessionId(s.id);
     }
     rememberActiveSession(sid, sessionId);
@@ -261,6 +299,7 @@ export function useAgentRuntime(opts: UseAgentRuntimeOptions) {
   // Aborts the in-flight run; closing the fetch body cancels the server stream
   // (the route's ReadableStream.cancel() calls agent.abort()).
   const abortRef = useRef<AbortController | null>(null);
+  const runStageIdRef = useRef<string | undefined>(undefined);
 
   const clearThread = useCallback(() => {
     // Discard any in-flight run first — otherwise its late SSE events still pass
@@ -268,6 +307,7 @@ export function useAgentRuntime(opts: UseAgentRuntimeOptions) {
     // the slide after the user reset.
     abortRef.current?.abort();
     abortRef.current = null;
+    runStageIdRef.current = undefined;
     phaseRef.current = 'complete';
     setIsRunning(false);
     messagesRef.current = [];
@@ -275,12 +315,14 @@ export function useAgentRuntime(opts: UseAgentRuntimeOptions) {
     useRegenSnapshots.getState().clearAll();
     useThinkingTimers.getState().clear();
     const sid = useStageStore.getState().stage?.id;
+    messagesStageIdRef.current = sid;
     if (sid) {
       // Archive-then-new: the prior session stays in Dexie; just start a fresh,
       // empty active session (persisted lazily once it has messages). Remember it
       // so a refresh keeps the clean slate instead of reloading the old chat.
       const s = createSession(sid);
       activeSessionIdRef.current = s.id;
+      activeSessionStageIdRef.current = sid;
       setActiveSessionId(s.id);
       rememberActiveSession(sid, s.id);
     }
@@ -304,11 +346,13 @@ export function useAgentRuntime(opts: UseAgentRuntimeOptions) {
       // Target is valid — now abort the current run and switch to it.
       abortRef.current?.abort();
       abortRef.current = null;
+      runStageIdRef.current = undefined;
       phaseRef.current = 'complete';
       setIsRunning(false);
       useRegenSnapshots.getState().clearAll();
       useThinkingTimers.getState().clear();
       activeSessionIdRef.current = rec.id;
+      activeSessionStageIdRef.current = rec.stageId;
       setActiveSessionId(rec.id);
       rememberActiveSession(rec.stageId, rec.id);
       const restored = deserializeThread(rec.messages);
@@ -316,6 +360,7 @@ export function useAgentRuntime(opts: UseAgentRuntimeOptions) {
       // request's history, and it otherwise lags setMessages by a render — a prompt
       // sent right after switching would carry the OLD conversation as context.
       messagesRef.current = restored;
+      messagesStageIdRef.current = rec.stageId;
       setMessages(restored);
       reseedReasoningTimers(rec.messages);
     },
@@ -488,9 +533,43 @@ export function useAgentRuntime(opts: UseAgentRuntimeOptions) {
       const userText = extractText(message);
       if (!userText) return;
 
-      // Prior conversation (text turns) captured BEFORE this turn's messages are
-      // appended — sent to the server so the agent has multi-turn memory.
-      const history = toHistory(messagesRef.current);
+      // Capture the persisted editor conversation identity before this request.
+      // The async hydration path normally establishes it; a very early first send
+      // mints the same record id that the settle-save effect will persist later.
+      const currentStageId = useStageStore.getState().stage?.id;
+      let editorSessionId: string | undefined;
+      let history: HistoryTurn[] = [];
+      if (currentStageId) {
+        const ownsCurrentMessages = messagesStageIdRef.current === currentStageId;
+        const activeIdentity =
+          activeSessionIdRef.current && activeSessionStageIdRef.current
+            ? {
+                stageId: activeSessionStageIdRef.current,
+                id: activeSessionIdRef.current,
+              }
+            : undefined;
+        // A stage switch can reach this callback before the passive hydration
+        // effect clears refs. Scope both identity and prior text history here so
+        // the first request for the new stage cannot inherit the old stage.
+        const requestContext = prepareStageSessionRequest(
+          activeIdentity,
+          currentStageId,
+          toHistory(ownsCurrentMessages ? messagesRef.current : []),
+        );
+        const { identity } = requestContext;
+        editorSessionId = identity.id;
+        history = requestContext.history;
+        if (identity !== activeIdentity) {
+          activeSessionIdRef.current = identity.id;
+          activeSessionStageIdRef.current = identity.stageId;
+          setActiveSessionId(identity.id);
+          rememberActiveSession(identity.stageId, identity.id);
+        }
+        if (!ownsCurrentMessages) {
+          useRegenSnapshots.getState().clearAll();
+          useThinkingTimers.getState().clear();
+        }
+      }
 
       const turnId = `t-${Date.now()}`;
       const assistantId = `a-${turnId}`;
@@ -499,15 +578,24 @@ export function useAgentRuntime(opts: UseAgentRuntimeOptions) {
       editApplyOutcomeRef.current = { applied: false, failed: false };
       errorRef.current = '';
       phaseRef.current = 'running';
+      if (abortRef.current && runStageIdRef.current !== currentStageId) {
+        abortRef.current.abort();
+      }
       const abort = new AbortController();
       abortRef.current = abort;
+      runStageIdRef.current = currentStageId;
 
       const userMsg: ThreadMessageLike = {
         role: 'user',
         id: `u-${turnId}`,
         content: [{ type: 'text', text: userText }],
       };
-      setMessages((prev) => [...prev, userMsg, buildAssistant(assistantId)]);
+      const priorMessages =
+        messagesStageIdRef.current === currentStageId ? messagesRef.current : [];
+      const nextMessages = [...priorMessages, userMsg, buildAssistant(assistantId)];
+      messagesRef.current = nextMessages;
+      messagesStageIdRef.current = currentStageId;
+      setMessages(nextMessages);
       setIsRunning(true);
 
       // This run is "current" only while it still owns abortRef. Once the user
@@ -563,6 +651,7 @@ export function useAgentRuntime(opts: UseAgentRuntimeOptions) {
             ...buildModelRequestHeaders(cfg),
           },
           body: JSON.stringify({
+            ...(editorSessionId ? { sessionId: editorSessionId } : {}),
             message: userText,
             scene: opts.scene,
             history,
@@ -633,6 +722,7 @@ export function useAgentRuntime(opts: UseAgentRuntimeOptions) {
         const superseded = abortRef.current !== abort;
         if (!superseded) {
           abortRef.current = null;
+          runStageIdRef.current = undefined;
           if (phaseRef.current === 'running') phaseRef.current = 'complete';
           // If the client refused an edit_elements apply, append a correction so
           // the user (and next-turn history) see it even when wrap-up claimed success.

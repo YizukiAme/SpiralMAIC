@@ -610,7 +610,6 @@ export default function RevisitChallengePage() {
             ? 'rescue'
             : 'probe';
         log.warn('[RevisitGate] Missing gate; applying page fallback', {
-          attemptId,
           pageIndex,
           count: fallbackCount,
           fallbackMode,
@@ -630,7 +629,6 @@ export default function RevisitChallengePage() {
       setAwaitingStudentStatusUpdate(false);
     },
     [
-      attemptId,
       blueprint,
       demoGateSkipEnabled,
       pageIndex,
@@ -685,6 +683,7 @@ export default function RevisitChallengePage() {
     try {
       const modelConfig = getCurrentModelConfig();
       const request = createRevisitChatRequest({
+        attemptId,
         stage: classroom.stage,
         scenes: skeletonScenes,
         blueprint,

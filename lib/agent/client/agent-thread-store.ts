@@ -65,6 +65,33 @@ export function createSession(stageId: string): AgentEditSessionRecord {
   return { id: newId(), stageId, title: '', messages: [], createdAt: now, updatedAt: now };
 }
 
+export interface AgentEditSessionIdentity {
+  stageId: string;
+  id: string;
+}
+
+/** Keep an active editor identity scoped to its owning stage, even before effects settle. */
+export function ensureStageSessionIdentity(
+  active: AgentEditSessionIdentity | undefined,
+  stageId: string,
+): AgentEditSessionIdentity {
+  if (active?.stageId === stageId && active.id.length > 0) return active;
+  const session = createSession(stageId);
+  return { stageId: session.stageId, id: session.id };
+}
+
+export function prepareStageSessionRequest<T>(
+  active: AgentEditSessionIdentity | undefined,
+  stageId: string,
+  history: T[],
+): { identity: AgentEditSessionIdentity; history: T[] } {
+  const matchesActiveStage = active?.stageId === stageId && active.id.length > 0;
+  return {
+    identity: ensureStageSessionIdentity(active, stageId),
+    history: matchesActiveStage ? history : [],
+  };
+}
+
 export async function loadSession(id: string): Promise<AgentEditSessionRecord | undefined> {
   return db.agentEditSessions.get(id);
 }

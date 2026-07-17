@@ -7,10 +7,12 @@ import type { Scene, Stage } from '@/lib/types/stage';
 import type { RevisitAdaptiveContext } from '@/lib/revisit/types';
 import { buildBlueprintPrompt, parseBlueprintResponse } from '@/lib/revisit/prompt-builders';
 import { createLogger } from '@/lib/logger';
+import { parseExternalCodexLogicalSession } from '@/lib/server/codex/logical-session';
 
 const log = createLogger('RevisitBlueprintAPI');
 
 interface BlueprintRequest {
+  attemptId?: string;
   stage: Stage;
   scenes: Scene[];
   targetProbeCount?: number;
@@ -24,7 +26,15 @@ export async function POST(req: NextRequest) {
       return apiError('INVALID_REQUEST', 400, 'stage and scenes are required');
     }
 
-    const { model, thinkingConfig } = await resolveModelFromRequest(req, body, 'revisit-blueprint');
+    const { model, thinkingConfig } = await resolveModelFromRequest(
+      req,
+      body,
+      'revisit-blueprint',
+      parseExternalCodexLogicalSession({
+        kind: 'revisit-attempt',
+        id: body.attemptId,
+      }),
+    );
     const prompt = buildBlueprintPrompt({
       stage: body.stage,
       scenes: body.scenes,

@@ -65,6 +65,7 @@ describe('revisit blueprint route', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        attemptId: 'attempt-1',
         stage: { id: 'stage-1', name: 'Fallacies', createdAt: 1, updatedAt: 1 },
         scenes: [],
         targetProbeCount: 4,
@@ -75,6 +76,12 @@ describe('revisit blueprint route', () => {
     const response = await POST(request as NextRequest);
 
     expect(response.ok).toBe(true);
+    expect(mocks.resolveModelFromRequest).toHaveBeenCalledWith(
+      request,
+      expect.any(Object),
+      'revisit-blueprint',
+      { kind: 'revisit-attempt', id: 'attempt-1' },
+    );
     expect(mocks.buildBlueprintPrompt).toHaveBeenCalledWith(
       expect.objectContaining({ adaptiveContext }),
     );

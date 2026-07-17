@@ -1568,6 +1568,14 @@
     "testImageConnectivity": "Testar Conexão",
     "imageConnectivitySuccess": "Serviço de imagem conectado com sucesso",
     "imageConnectivityFailed": "Falha na conexão com o serviço de imagem",
+    "providerCodexImage": "Codex",
+    "codexImageLoginRequired": "Entre no Codex em Provedores de LLM para usar a geração de imagens.",
+    "codexImageConnected": "Codex conectado",
+    "codexImageManageLogin": "Gerenciar login do Codex",
+    "codexImageFixedModel": "Modelo fixo",
+    "codexImageTestHint": "Verifica o login do Codex sem gerar uma imagem nem consumir a cota de imagens.",
+    "codexImagePlanLimits": "Usa o login do Codex e a franquia do plano ChatGPT; imagens podem consumir mais do que texto.",
+    "codexImageLoginValid": "O login do Codex está pronto para gerar imagens",
     "imageTestSuccess": "Teste de geração de imagem bem-sucedido",
     "imageTestFailed": "Falha no teste de geração de imagem",
     "imageTestPromptPlaceholder": "Digite uma descrição de imagem para testar",
@@ -1719,10 +1727,10 @@
       "experimental": "Integração experimental de terceiros com o Codex; usa a cota do seu plano ChatGPT.",
       "unavailableTitle": "O login do Codex não está disponível",
       "unavailable": {
-        "FEATURE_DISABLED": "Ative o Codex OAuth no servidor para usar este provedor.",
         "SERVERLESS_UNSUPPORTED": "O Codex OAuth requer um servidor Node auto-hospedado com armazenamento persistente.",
-        "ACCESS_CODE_REQUIRED": "Configure ACCESS_CODE antes de ativar o Codex OAuth em produção.",
-        "DATA_DIR_UNWRITABLE": "O servidor não consegue gravar no diretório de dados. Verifique as permissões de /app/data."
+        "ACCESS_CODE_REQUIRED": "Configure ACCESS_CODE para usar o Codex OAuth em produção.",
+        "DATA_DIR_UNWRITABLE": "O servidor não consegue gravar no diretório de dados. Verifique as permissões de /app/data.",
+        "RUNTIME_LOCKED": "Outro processo Node do OpenMAIC já está usando o diretório de dados de autenticação do Codex."
       },
       "connectedAs": "Conectado como {email}",
       "connected": "Conectado ao ChatGPT",
@@ -1744,7 +1752,7 @@
       "testForbidden": "Este workspace do ChatGPT não tem acesso ao Codex.",
       "testRateLimited": "A cota ou o limite de requisições do seu plano ChatGPT foi atingido.",
       "testFailed": "Falha na conexão com o Codex.",
-      "loginFailed": "Falha no login. Tente novamente ou use o código do dispositivo.",
+      "loginFailed": "Falha no login. Escolha um dos métodos de login para tentar novamente.",
       "loginExpired": "Esta tentativa de login expirou. Inicie outra."
     },
     "connected": "Conectado"

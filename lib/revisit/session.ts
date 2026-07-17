@@ -236,6 +236,7 @@ export function buildRevisitGateContext(args: {
 }
 
 export function createRevisitChatRequest(args: {
+  attemptId: string;
   stage: Stage;
   scenes: Scene[];
   blueprint: RevisitExamBlueprint;
@@ -263,6 +264,7 @@ export function createRevisitChatRequest(args: {
     : [agentIds.studentAgentId];
 
   return {
+    session: { kind: 'revisit-attempt', id: args.attemptId },
     messages: revisitMessagesToUiMessages(args.messages),
     storeState: {
       stage: args.stage,

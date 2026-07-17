@@ -21,6 +21,10 @@ export type SessionStatus =
   | 'completed'
   | 'error';
 
+export type StatelessChatSessionContext =
+  | { kind: 'chat'; id: string }
+  | { kind: 'revisit-attempt'; id: string };
+
 /**
  * Metadata attached to chat messages
  */
@@ -309,6 +313,8 @@ export interface DirectorState {
  * All state is sent from the client on each request
  */
 export interface StatelessChatRequest {
+  /** Stable local lifecycle identity; the server derives an opaque Codex cache identity. */
+  session?: StatelessChatSessionContext;
   /** Conversation history (client-maintained) */
   messages: UIMessage<ChatMessageMetadata>[];
   /** Current application state */

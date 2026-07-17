@@ -7,6 +7,12 @@ const aiMock = vi.hoisted(() => ({
     usage: undefined as unknown,
   })),
   streamText: vi.fn(),
+  wrapLanguageModel: vi.fn(
+    ({ model, providerId }: { model: Record<string, unknown>; providerId?: string }) => ({
+      ...model,
+      ...(providerId ? { provider: providerId } : {}),
+    }),
+  ),
 }));
 
 const usageMock = vi.hoisted(() => ({
@@ -17,6 +23,7 @@ const usageMock = vi.hoisted(() => ({
 vi.mock('ai', () => ({
   generateText: aiMock.generateText,
   streamText: aiMock.streamText,
+  wrapLanguageModel: aiMock.wrapLanguageModel,
 }));
 
 vi.mock('@/lib/usage/normalize', () => ({
@@ -28,6 +35,8 @@ vi.mock('@/lib/server/usage-storage', () => ({
 }));
 
 import { callLLM } from '@/lib/ai/llm';
+import { wrapCodexLanguageModel } from '@/lib/ai/codex-model';
+import type { ModelInfo } from '@/lib/types/provider';
 
 describe('LLM thinking provider options', () => {
   beforeEach(() => {
@@ -35,6 +44,88 @@ describe('LLM thinking provider options', () => {
     usageMock.normalizeUsage.mockClear();
     usageMock.recordUsage.mockClear();
     aiMock.streamText.mockClear();
+    aiMock.wrapLanguageModel.mockClear();
+  });
+
+  it('keeps Codex identity and uses the discovered Sol effort allowlist', async () => {
+    const discoveredModel: ModelInfo = {
+      id: 'gpt-5.6-sol',
+      name: 'GPT-5.6 Sol',
+      capabilities: {
+        thinking: {
+          control: 'effort',
+          requestAdapter: 'openai',
+          effortValues: ['low'],
+          defaultEffort: 'low',
+        },
+      },
+    };
+    const model = wrapCodexLanguageModel(
+      { provider: 'openai.responses', modelId: discoveredModel.id } as never,
+      { modelInfo: discoveredModel } as never,
+    );
+
+    await callLLM({ model, prompt: 'hi' } as Parameters<typeof callLLM>[0], 'test', undefined, {
+      mode: 'enabled',
+      effort: 'max',
+    });
+
+    expect(model.provider).toBe('openai-codex');
+    expect(aiMock.generateText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerOptions: { openai: { reasoningEffort: 'low' } },
+      }),
+    );
+  });
+
+  it('uses discovered thinking metadata for an otherwise unknown Codex model', async () => {
+    const discoveredModel: ModelInfo = {
+      id: 'gpt-account-exclusive',
+      name: 'GPT Account Exclusive',
+      capabilities: {
+        thinking: {
+          control: 'effort',
+          requestAdapter: 'openai',
+          effortValues: ['medium', 'high'],
+          defaultEffort: 'medium',
+        },
+      },
+    };
+    const model = wrapCodexLanguageModel(
+      { provider: 'openai.responses', modelId: discoveredModel.id } as never,
+      { modelInfo: discoveredModel } as never,
+    );
+
+    await callLLM({ model, prompt: 'hi' } as Parameters<typeof callLLM>[0], 'test', undefined, {
+      mode: 'enabled',
+      effort: 'high',
+    });
+
+    expect(aiMock.generateText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerOptions: { openai: { reasoningEffort: 'high' } },
+      }),
+    );
+  });
+
+  it('does not restore static thinking when discovery explicitly omits it', async () => {
+    const discoveredModel: ModelInfo = {
+      id: 'gpt-5.6-sol',
+      name: 'GPT-5.6 Sol without thinking',
+      capabilities: { streaming: true, tools: true },
+      source: 'probed',
+    };
+    const model = wrapCodexLanguageModel(
+      { provider: 'openai.responses', modelId: discoveredModel.id } as never,
+      { modelInfo: discoveredModel } as never,
+    );
+
+    await callLLM({ model, prompt: 'hi' } as Parameters<typeof callLLM>[0], 'test', undefined, {
+      mode: 'enabled',
+      effort: 'max',
+    });
+
+    expect(aiMock.generateText.mock.calls[0]?.[0]).not.toHaveProperty('providerOptions');
   });
 
   it('sends GPT-5.6 max reasoning effort through OpenAI provider options', async () => {

@@ -1,9 +1,13 @@
+import { readBoundedJson } from './bounded-json';
 import { extractCodexJwtIdentity, parseJwtPayload } from './jwt';
 import { codexCredentialsEqual, withCodexCredentialVaultMutation } from './vault';
 import type { CodexCredentialVault, CodexOAuthCredentials } from './vault';
 
 export const CODEX_OAUTH_TOKEN_ENDPOINT = 'https://auth.openai.com/oauth/token';
+export const CODEX_OAUTH_REVOKE_ENDPOINT = 'https://auth.openai.com/oauth/revoke';
 export const CODEX_OAUTH_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
+export const CODEX_OAUTH_REQUEST_TIMEOUT_MS = 10_000;
+export const CODEX_OAUTH_REVOKE_TIMEOUT_MS = 10_000;
 
 const REFRESH_EARLY_MS = 60_000;
 
@@ -43,6 +47,77 @@ export class CodexOAuthError extends Error {
   }
 }
 
+export interface CodexOAuthRequestOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+const OAUTH_REQUEST_TIMEOUT_MARKER = Symbol.for('openmaic.codex.oauth.request-timeout-error.v1');
+
+class CodexOAuthRequestAbortError extends CodexOAuthError {
+  constructor(timedOut: boolean) {
+    super(CODEX_OAUTH_ERROR_CODES.NETWORK_ERROR, true);
+    this.name = 'CodexOAuthRequestAbortError';
+    if (timedOut) {
+      Object.defineProperty(this, OAUTH_REQUEST_TIMEOUT_MARKER, { value: true });
+    }
+  }
+}
+
+/** Recognize request-deadline expiry without exposing an abort reason. */
+export function isCodexOAuthRequestTimeoutError(error: unknown): boolean {
+  return Boolean(
+    error &&
+    typeof error === 'object' &&
+    (error as Record<PropertyKey, unknown>)[OAUTH_REQUEST_TIMEOUT_MARKER] === true,
+  );
+}
+
+/**
+ * Bound a complete OAuth request operation, including any response parsing.
+ * The explicit race guarantees settlement even for injected fetch functions
+ * that ignore AbortSignal.
+ */
+export async function withCodexOAuthRequestTimeout<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+  options: CodexOAuthRequestOptions = {},
+): Promise<T> {
+  const controller = new AbortController();
+  const timeoutMs = Math.max(0, options.timeoutMs ?? CODEX_OAUTH_REQUEST_TIMEOUT_MS);
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  let parentAbortListener: (() => void) | undefined;
+
+  const aborted = new Promise<never>((_resolve, reject) => {
+    const abort = (timedOut: boolean) => {
+      if (!controller.signal.aborted) controller.abort();
+      reject(new CodexOAuthRequestAbortError(timedOut));
+    };
+
+    if (options.signal) {
+      parentAbortListener = () => abort(false);
+      if (options.signal.aborted) parentAbortListener();
+      else options.signal.addEventListener('abort', parentAbortListener, { once: true });
+    }
+
+    if (!controller.signal.aborted) {
+      timeoutHandle = setTimeout(() => abort(true), timeoutMs);
+    }
+  });
+
+  try {
+    if (controller.signal.aborted) return await aborted;
+    return await Promise.race([
+      Promise.resolve().then(() => operation(controller.signal)),
+      aborted,
+    ]);
+  } finally {
+    if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+    if (options.signal && parentAbortListener) {
+      options.signal.removeEventListener('abort', parentAbortListener);
+    }
+  }
+}
+
 export interface CodexTokenProvider {
   getValidCredentials(options?: {
     forceRefresh?: boolean;
@@ -59,6 +134,9 @@ interface ManagedCodexTokenProviderOptions {
   vault: CodexCredentialVault;
   tokenExchangeFetch?: TokenExchangeFetch;
   clock?: CodexClock;
+  oauthRequestTimeoutMs?: number;
+  revokeTimeoutMs?: number;
+  onCredentialsCleared?: () => void | Promise<void>;
 }
 
 interface TokenResponse {
@@ -70,6 +148,20 @@ interface TokenResponse {
 }
 
 type ValidCredentials = { accessToken: string; accountId: string };
+
+/** @internal Server-only credential snapshot; never expose through API DTOs. */
+export interface InternalCodexCredentialLease {
+  readonly tokenProvider: CodexTokenProvider;
+  readonly credentials: ValidCredentials;
+  readonly lifecycleGeneration: number | null;
+  readonly lifecycleSignal: AbortSignal | null;
+}
+
+/** @internal Binds one resolved catalog capability to its credential lifecycle. */
+export interface InternalCodexCapabilityLease {
+  readonly credentialLease: InternalCodexCredentialLease;
+  readonly isCatalogCurrent: () => boolean | Promise<boolean>;
+}
 
 interface CredentialOperationState {
   forceRequested: boolean;
@@ -91,12 +183,42 @@ interface ConditionalCodexTokenProvider {
 interface ActiveCredentialOperation {
   state: CredentialOperationState;
   promise: Promise<ValidCredentials>;
+  abortController: AbortController;
 }
 
 interface SharedCredentialState {
   generation: number;
+  catalogGeneration: number;
+  lifecycleController: AbortController;
   operationInFlight: ActiveCredentialOperation | null;
   logoutInFlight: Promise<void> | null;
+}
+
+interface CredentialLeaseAuthority {
+  vault: CodexCredentialVault;
+  sharedState: SharedCredentialState;
+}
+
+const coordinatorHost = globalThis as unknown as Record<PropertyKey, unknown>;
+
+// Runtime v6 survives development module reloads, so its retained provider's
+// authority must survive with it for reloaded lease helpers to stay managed.
+const CREDENTIAL_LEASE_AUTHORITIES_KEY = Symbol.for(
+  'openmaic.codex.oauth.credential-lease-authorities.v1',
+);
+const existingCredentialLeaseAuthorities = coordinatorHost[CREDENTIAL_LEASE_AUTHORITIES_KEY];
+const credentialLeaseAuthorities =
+  existingCredentialLeaseAuthorities instanceof WeakMap
+    ? (existingCredentialLeaseAuthorities as WeakMap<CodexTokenProvider, CredentialLeaseAuthority>)
+    : new WeakMap<CodexTokenProvider, CredentialLeaseAuthority>();
+
+if (!(existingCredentialLeaseAuthorities instanceof WeakMap)) {
+  Object.defineProperty(coordinatorHost, CREDENTIAL_LEASE_AUTHORITIES_KEY, {
+    value: credentialLeaseAuthorities,
+    enumerable: false,
+    configurable: false,
+    writable: false,
+  });
 }
 
 interface SharedCredentialStateRegistry {
@@ -110,8 +232,9 @@ function isSharedCredentialStateRegistry(value: unknown): value is SharedCredent
   return candidate.byCoordinationKey instanceof Map && candidate.byVault instanceof WeakMap;
 }
 
-const SHARED_STATE_REGISTRY_KEY = Symbol.for('openmaic.codex.oauth.shared-credential-state.v2');
-const coordinatorHost = globalThis as unknown as Record<PropertyKey, unknown>;
+// v4 is the lifecycle-signal boundary: a v3 registry has no controller that
+// can synchronously tell already-issued leases that their lifecycle ended.
+const SHARED_STATE_REGISTRY_KEY = Symbol.for('openmaic.codex.oauth.shared-credential-state.v4');
 const existingSharedStateRegistry = coordinatorHost[SHARED_STATE_REGISTRY_KEY];
 const sharedStateRegistry = isSharedCredentialStateRegistry(existingSharedStateRegistry)
   ? existingSharedStateRegistry
@@ -133,7 +256,7 @@ function getSharedCredentialState(vault: CodexCredentialVault): SharedCredential
   const coordinationKey = vault.coordinationKey;
   if (typeof coordinationKey === 'string' && coordinationKey.length > 0) {
     const existing = sharedStateRegistry.byCoordinationKey.get(coordinationKey);
-    if (existing) return existing;
+    if (existing) return normalizeSharedCredentialState(existing);
 
     const state = createSharedCredentialState();
     sharedStateRegistry.byCoordinationKey.set(coordinationKey, state);
@@ -141,15 +264,41 @@ function getSharedCredentialState(vault: CodexCredentialVault): SharedCredential
   }
 
   const existing = sharedStateRegistry.byVault.get(vault);
-  if (existing) return existing;
+  if (existing) return normalizeSharedCredentialState(existing);
 
   const state = createSharedCredentialState();
   sharedStateRegistry.byVault.set(vault, state);
   return state;
 }
 
+function normalizeSharedCredentialState(state: SharedCredentialState): SharedCredentialState {
+  // Dev HMR can retain a malformed or partially initialized v4 entry.
+  // Normalize it in place so existing refresh/logout coordination survives
+  // while every retained lifecycle still gains an abortable controller.
+  if (!Number.isSafeInteger(state.catalogGeneration) || state.catalogGeneration < 0) {
+    state.catalogGeneration = 0;
+  }
+  if (!(state.lifecycleController instanceof AbortController)) {
+    state.lifecycleController = new AbortController();
+  }
+  return state;
+}
+
 function createSharedCredentialState(): SharedCredentialState {
-  return { generation: 0, operationInFlight: null, logoutInFlight: null };
+  return {
+    generation: 0,
+    catalogGeneration: 0,
+    lifecycleController: new AbortController(),
+    operationInFlight: null,
+    logoutInFlight: null,
+  };
+}
+
+function advanceCodexCredentialLifecycle(state: SharedCredentialState): void {
+  const staleController = state.lifecycleController;
+  state.catalogGeneration += 1;
+  state.lifecycleController = new AbortController();
+  staleController.abort();
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -159,6 +308,30 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function nonEmptyString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
+
+function normalizedErrorCode(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim().toLowerCase();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function extractRefreshErrorCode(payload: unknown): string | undefined {
+  if (!isRecord(payload)) return undefined;
+  if (isRecord(payload.error)) {
+    const nested = normalizedErrorCode(payload.error.code);
+    if (nested) return nested;
+  }
+  const stringError = normalizedErrorCode(payload.error);
+  if (stringError) return stringError;
+  return normalizedErrorCode(payload.code);
+}
+
+const TERMINAL_REFRESH_ERROR_CODES = new Set([
+  'invalid_grant',
+  'refresh_token_expired',
+  'refresh_token_reused',
+  'refresh_token_invalidated',
+]);
 
 function expiresAtFromJwt(token: string): number | undefined {
   const exp = parseJwtPayload(token)?.exp;
@@ -216,6 +389,199 @@ function credentialsMatch(left: ValidCredentials | null, right: ValidCredentials
   return left?.accountId === right.accountId && left.accessToken === right.accessToken;
 }
 
+async function managedLeaseCredentialsMatch(
+  authority: CredentialLeaseAuthority,
+  credentials: ValidCredentials,
+): Promise<boolean> {
+  try {
+    const current = await withCodexCredentialVaultMutation(authority.vault, () =>
+      authority.vault.load(),
+    );
+    return Boolean(
+      current &&
+      current.accountId === credentials.accountId &&
+      current.accessToken === credentials.accessToken,
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function managedLeaseAccountMatches(
+  authority: CredentialLeaseAuthority,
+  accountId: string,
+): Promise<boolean> {
+  try {
+    const current = await withCodexCredentialVaultMutation(authority.vault, () =>
+      authority.vault.load(),
+    );
+    return current?.accountId === accountId;
+  } catch {
+    return false;
+  }
+}
+
+/** @internal Acquire an account/lifecycle snapshot without changing CodexTokenProvider. */
+export async function acquireCodexCredentialLease(
+  tokenProvider: CodexTokenProvider,
+): Promise<InternalCodexCredentialLease> {
+  const authority = credentialLeaseAuthorities.get(tokenProvider);
+  if (!authority) {
+    const credentials = await tokenProvider.getValidCredentials();
+    return Object.freeze({
+      tokenProvider,
+      credentials: { ...credentials },
+      lifecycleGeneration: null,
+      lifecycleSignal: null,
+    });
+  }
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const lifecycleGeneration = authority.sharedState.catalogGeneration;
+    const lifecycleSignal = authority.sharedState.lifecycleController.signal;
+    const credentials = await tokenProvider.getValidCredentials();
+    if (
+      !lifecycleSignal.aborted &&
+      lifecycleGeneration === authority.sharedState.catalogGeneration &&
+      lifecycleSignal === authority.sharedState.lifecycleController.signal &&
+      (await managedLeaseCredentialsMatch(authority, credentials)) &&
+      !lifecycleSignal.aborted &&
+      lifecycleGeneration === authority.sharedState.catalogGeneration &&
+      lifecycleSignal === authority.sharedState.lifecycleController.signal
+    ) {
+      return Object.freeze({
+        tokenProvider,
+        credentials: { ...credentials },
+        lifecycleGeneration,
+        lifecycleSignal,
+      });
+    }
+  }
+  throw credentialsChangedError();
+}
+
+/** @internal Validate immediately before each account-bound upstream send. */
+export async function isCodexCredentialLeaseCurrent(
+  lease: InternalCodexCredentialLease,
+): Promise<boolean> {
+  const authority = credentialLeaseAuthorities.get(lease.tokenProvider);
+  if (authority) {
+    const lifecycleSignal = lease.lifecycleSignal;
+    return (
+      lease.lifecycleGeneration !== null &&
+      lifecycleSignal !== null &&
+      lifecycleSignal === authority.sharedState.lifecycleController.signal &&
+      !lifecycleSignal.aborted &&
+      lease.lifecycleGeneration === authority.sharedState.catalogGeneration &&
+      (await managedLeaseCredentialsMatch(authority, lease.credentials)) &&
+      lifecycleSignal === authority.sharedState.lifecycleController.signal &&
+      !lifecycleSignal.aborted &&
+      lease.lifecycleGeneration === authority.sharedState.catalogGeneration
+    );
+  }
+
+  try {
+    const current = await lease.tokenProvider.getValidCredentials();
+    return credentialsMatch(current, lease.credentials);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * @internal Validate response publication/completion against the account
+ * lifecycle without rejecting an allowed same-account access-token rotation.
+ */
+export async function isCodexCredentialLifecycleCurrent(
+  lease: InternalCodexCredentialLease,
+): Promise<boolean> {
+  const authority = credentialLeaseAuthorities.get(lease.tokenProvider);
+  if (authority) {
+    const lifecycleSignal = lease.lifecycleSignal;
+    return (
+      lease.lifecycleGeneration !== null &&
+      lifecycleSignal !== null &&
+      lifecycleSignal === authority.sharedState.lifecycleController.signal &&
+      !lifecycleSignal.aborted &&
+      lease.lifecycleGeneration === authority.sharedState.catalogGeneration &&
+      (await managedLeaseAccountMatches(authority, lease.credentials.accountId)) &&
+      lifecycleSignal === authority.sharedState.lifecycleController.signal &&
+      !lifecycleSignal.aborted &&
+      lease.lifecycleGeneration === authority.sharedState.catalogGeneration
+    );
+  }
+
+  try {
+    const current = await lease.tokenProvider.getValidCredentials();
+    return current.accountId === lease.credentials.accountId;
+  } catch {
+    return false;
+  }
+}
+
+/** @internal Rotate one lease only while its account/catalog lifecycle remains current. */
+export async function refreshCodexCredentialLease(
+  lease: InternalCodexCredentialLease,
+): Promise<InternalCodexCredentialLease> {
+  if (!(await isCodexCredentialLeaseCurrent(lease))) throw credentialsChangedError();
+  const credentials = await refreshCodexCredentialsIfCurrent(
+    lease.tokenProvider,
+    lease.credentials,
+  );
+  if (credentials.accountId !== lease.credentials.accountId) throw credentialsChangedError();
+
+  const refreshed = Object.freeze({
+    tokenProvider: lease.tokenProvider,
+    credentials: { ...credentials },
+    lifecycleGeneration: lease.lifecycleGeneration,
+    lifecycleSignal: lease.lifecycleSignal,
+  });
+  if (!(await isCodexCredentialLeaseCurrent(refreshed))) throw credentialsChangedError();
+  return refreshed;
+}
+
+/** @internal Invalidate capabilities before a login replacement becomes visible. */
+export function invalidateCodexCredentialLeases(tokenProvider: CodexTokenProvider): void {
+  const authority = credentialLeaseAuthorities.get(tokenProvider);
+  if (authority) advanceCodexCredentialLifecycle(authority.sharedState);
+}
+
+/** @internal Validate both credential and catalog generations. */
+export async function isCodexCapabilityLeaseCurrent(
+  lease: InternalCodexCapabilityLease,
+): Promise<boolean> {
+  try {
+    if (!(await lease.isCatalogCurrent())) return false;
+    if (!(await isCodexCredentialLeaseCurrent(lease.credentialLease))) return false;
+    return await lease.isCatalogCurrent();
+  } catch {
+    return false;
+  }
+}
+
+/** @internal Validate response lifecycle/account plus the selected catalog capability. */
+export async function isCodexCapabilityLifecycleCurrent(
+  lease: InternalCodexCapabilityLease,
+): Promise<boolean> {
+  try {
+    if (!(await lease.isCatalogCurrent())) return false;
+    if (!(await isCodexCredentialLifecycleCurrent(lease.credentialLease))) return false;
+    return await lease.isCatalogCurrent();
+  } catch {
+    return false;
+  }
+}
+
+/** @internal Preserve the catalog guard across an allowed same-account rotation. */
+export async function refreshCodexCapabilityLease(
+  lease: InternalCodexCapabilityLease,
+): Promise<InternalCodexCapabilityLease> {
+  if (!(await lease.isCatalogCurrent())) throw credentialsChangedError();
+  const credentialLease = await refreshCodexCredentialLease(lease.credentialLease);
+  if (!(await lease.isCatalogCurrent())) throw credentialsChangedError();
+  return Object.freeze({ credentialLease, isCatalogCurrent: lease.isCatalogCurrent });
+}
+
 /** Fail closed unless the provider supports an atomic account/token-scoped refresh. */
 export function refreshCodexCredentialsIfCurrent(
   tokenProvider: CodexTokenProvider,
@@ -233,12 +599,25 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
   private readonly tokenExchangeFetch: TokenExchangeFetch;
   private readonly clock: CodexClock;
   private readonly sharedState: SharedCredentialState;
+  private readonly oauthRequestTimeoutMs: number;
+  private readonly revokeTimeoutMs: number;
+  private readonly onCredentialsCleared?: () => void | Promise<void>;
 
   constructor(options: ManagedCodexTokenProviderOptions) {
     this.vault = options.vault;
     this.tokenExchangeFetch = options.tokenExchangeFetch ?? globalThis.fetch.bind(globalThis);
     this.clock = options.clock ?? { now: Date.now };
     this.sharedState = getSharedCredentialState(options.vault);
+    this.oauthRequestTimeoutMs = Math.max(
+      0,
+      options.oauthRequestTimeoutMs ?? CODEX_OAUTH_REQUEST_TIMEOUT_MS,
+    );
+    this.revokeTimeoutMs = Math.min(
+      CODEX_OAUTH_REVOKE_TIMEOUT_MS,
+      Math.max(0, options.revokeTimeoutMs ?? CODEX_OAUTH_REVOKE_TIMEOUT_MS),
+    );
+    this.onCredentialsCleared = options.onCredentialsCleared;
+    credentialLeaseAuthorities.set(this, { vault: this.vault, sharedState: this.sharedState });
   }
 
   getValidCredentials(options?: { forceRefresh?: boolean }): Promise<ValidCredentials> {
@@ -302,9 +681,11 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
       source: null,
       expected,
     };
+    const abortController = new AbortController();
     const operation: ActiveCredentialOperation = {
       state,
-      promise: this.resolveCredentials(state, requestGeneration),
+      promise: this.resolveCredentials(state, requestGeneration, abortController.signal),
+      abortController,
     };
     this.sharedState.operationInFlight = operation;
     void operation.promise.then(
@@ -326,7 +707,10 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
     if (this.sharedState.logoutInFlight) return this.sharedState.logoutInFlight;
 
     this.sharedState.generation += 1;
-    const staleOperation = this.sharedState.operationInFlight?.promise ?? null;
+    advanceCodexCredentialLifecycle(this.sharedState);
+    const activeOperation = this.sharedState.operationInFlight;
+    const staleOperation = activeOperation?.promise ?? null;
+    activeOperation?.abortController.abort();
     const logout = this.finishLogout(staleOperation);
     this.sharedState.logoutInFlight = logout;
     void logout.then(
@@ -343,6 +727,7 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
   private async resolveCredentials(
     state: CredentialOperationState,
     requestGeneration: number,
+    signal: AbortSignal,
   ): Promise<ValidCredentials> {
     let credentials: CodexOAuthCredentials | null;
 
@@ -370,7 +755,12 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
     }
 
     state.refreshed = true;
-    const result = await this.refreshCredentials(credentials, requestGeneration, state.expected);
+    const result = await this.refreshCredentials(
+      credentials,
+      requestGeneration,
+      state.expected,
+      signal,
+    );
     state.refreshCommitted = result.committed;
     if (
       state.expected &&
@@ -382,15 +772,56 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
   }
 
   private async finishLogout(staleOperation: Promise<ValidCredentials> | null): Promise<void> {
-    await withCodexCredentialVaultMutation(this.vault, () => this.vault.clear()).catch(
-      () => undefined,
-    );
-    await staleOperation?.catch(() => undefined);
-
+    let captured: CodexOAuthCredentials | null;
     try {
-      await withCodexCredentialVaultMutation(this.vault, () => this.vault.clear());
+      captured = await withCodexCredentialVaultMutation(this.vault, async () => {
+        let current: CodexOAuthCredentials | null = null;
+        try {
+          current = await this.vault.load();
+        } catch {
+          // Clearing local credentials remains authoritative even if a corrupt
+          // or unavailable vault cannot provide a revocation snapshot.
+        }
+        await this.vault.clear();
+        return current;
+      });
     } catch {
       throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.STORAGE_ERROR, false);
+    }
+
+    await this.notifyCredentialsCleared();
+    await staleOperation?.catch(() => undefined);
+    if (!captured) return;
+
+    try {
+      await withCodexOAuthRequestTimeout(
+        async (signal) => {
+          await this.tokenExchangeFetch(CODEX_OAUTH_REVOKE_ENDPOINT, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              token: captured.refreshToken,
+              token_type_hint: 'refresh_token',
+              client_id: CODEX_OAUTH_CLIENT_ID,
+            }),
+            redirect: 'error',
+            signal,
+          });
+        },
+        { timeoutMs: this.revokeTimeoutMs },
+      );
+    } catch {
+      // Revocation is best-effort. Local logout already committed and must not
+      // be rolled back or failed by network, timeout, or upstream status.
+    }
+  }
+
+  private async notifyCredentialsCleared(): Promise<void> {
+    try {
+      await this.onCredentialsCleared?.();
+    } catch {
+      // Lifecycle listeners are internal invalidation notifications. They must
+      // never restore credentials or turn a committed local clear into failure.
     }
   }
 
@@ -398,6 +829,7 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
     credentials: CodexOAuthCredentials,
     refreshGeneration: number,
     expected: ValidCredentials | null,
+    signal: AbortSignal,
   ): Promise<RefreshResult> {
     const body = new URLSearchParams({
       grant_type: 'refresh_token',
@@ -405,55 +837,65 @@ export class ManagedCodexTokenProvider implements CodexTokenProvider {
       refresh_token: credentials.refreshToken,
     });
 
-    let response: Response;
+    let requestResult: { response: Response; payload: unknown };
     try {
-      response = await this.tokenExchangeFetch(CODEX_OAUTH_TOKEN_ENDPOINT, {
-        method: 'POST',
-        headers: { 'content-type': 'application/x-www-form-urlencoded' },
-        body,
-      });
+      requestResult = await withCodexOAuthRequestTimeout(
+        async (requestSignal) => {
+          const response = await this.tokenExchangeFetch(CODEX_OAUTH_TOKEN_ENDPOINT, {
+            method: 'POST',
+            headers: { 'content-type': 'application/x-www-form-urlencoded' },
+            body,
+            redirect: 'error',
+            signal: requestSignal,
+          });
+          if (response.status === 401 || response.status >= 500) {
+            return { response, payload: null };
+          }
+          const json = await readBoundedJson(response, requestSignal);
+          return { response, payload: json.ok ? json.payload : null };
+        },
+        { signal, timeoutMs: this.oauthRequestTimeoutMs },
+      );
     } catch {
       if (refreshGeneration !== this.sharedState.generation) throw signedOutError();
       throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.NETWORK_ERROR, true);
     }
 
     if (refreshGeneration !== this.sharedState.generation) throw signedOutError();
-
-    let payload: unknown = null;
-    try {
-      payload = await response.json();
-    } catch {
-      // Invalid bodies are classified below without retaining or exposing them.
-    }
-
-    if (refreshGeneration !== this.sharedState.generation) throw signedOutError();
+    const { response, payload } = requestResult;
 
     if (!response.ok) {
       if (response.status >= 500) {
         throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.UPSTREAM_ERROR, true, response.status);
       }
 
-      const errorCode = isRecord(payload) ? nonEmptyString(payload.error) : undefined;
-      if (errorCode === 'invalid_grant') {
-        let replacement: CodexOAuthCredentials | null;
+      const errorCode = extractRefreshErrorCode(payload);
+      if (response.status === 401 || (errorCode && TERMINAL_REFRESH_ERROR_CODES.has(errorCode))) {
+        let clearResult: { replacement: CodexOAuthCredentials | null; cleared: boolean };
         try {
-          replacement = await withCodexCredentialVaultMutation(this.vault, async () => {
+          clearResult = await withCodexCredentialVaultMutation(this.vault, async () => {
             if (refreshGeneration !== this.sharedState.generation) throw signedOutError();
             const current = await this.vault.load();
-            if (!codexCredentialsEqual(current, credentials)) return current;
+            if (!codexCredentialsEqual(current, credentials)) {
+              return { replacement: current, cleared: false };
+            }
+            advanceCodexCredentialLifecycle(this.sharedState);
             await this.vault.clear();
-            return null;
+            return { replacement: null, cleared: true };
           });
         } catch (error) {
           if (error instanceof CodexOAuthError) throw error;
           throw new CodexOAuthError(CODEX_OAUTH_ERROR_CODES.STORAGE_ERROR, false);
         }
+        if (clearResult.cleared) {
+          await this.notifyCredentialsCleared();
+        }
         if (refreshGeneration !== this.sharedState.generation) throw signedOutError();
-        if (replacement) {
+        if (clearResult.replacement) {
           return {
             credentials: {
-              accessToken: replacement.accessToken,
-              accountId: replacement.accountId,
+              accessToken: clearResult.replacement.accessToken,
+              accountId: clearResult.replacement.accountId,
             },
             committed: false,
           };

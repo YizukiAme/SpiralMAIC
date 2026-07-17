@@ -12,6 +12,7 @@ import {
 import { createLogger } from '@/lib/logger';
 import { apiError, apiSuccess } from '@/lib/server/api-response';
 import { resolveModelFromRequest } from '@/lib/server/resolve-model';
+import { parseCodexLogicalSession } from '@/lib/server/codex/logical-session';
 
 const log = createLogger('RevisitArtifactsAPI');
 
@@ -19,7 +20,15 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const request = validateStudyArtifactRequest(body);
-    const { model, thinkingConfig } = await resolveModelFromRequest(req, body, 'revisit-materials');
+    const { model, thinkingConfig } = await resolveModelFromRequest(
+      req,
+      body,
+      'revisit-materials',
+      parseCodexLogicalSession({
+        kind: 'revisit-artifact',
+        id: (body as { jobId?: unknown }).jobId,
+      }),
+    );
     const prompt = buildStudyArtifactPrompt(request);
     const result = await callLLM(
       {

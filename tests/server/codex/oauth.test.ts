@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   CODEX_OAUTH_AUTHORIZE_ENDPOINT,
@@ -28,6 +28,34 @@ function jsonResponse(body: unknown, status = 200): Response {
     headers: { 'content-type': 'application/json' },
   });
 }
+
+function exchangeOptions(
+  overrides: Partial<Parameters<typeof exchangeAuthorizationCode>[0]> & {
+    signal?: AbortSignal;
+    timeoutMs?: number;
+  } = {},
+): Parameters<typeof exchangeAuthorizationCode>[0] {
+  return {
+    code: 'boundary-code',
+    verifier: 'boundary-verifier',
+    redirectUri: CODEX_OAUTH_BROWSER_REDIRECT_URI,
+    clock: { now: () => NOW },
+    ...overrides,
+  } as Parameters<typeof exchangeAuthorizationCode>[0];
+}
+
+function validExchangeResponse(): Response {
+  return jsonResponse({
+    access_token: unsignedJwt({ chatgpt_account_id: 'boundary-account' }),
+    refresh_token: 'boundary-refresh',
+    expires_in: 3600,
+  });
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 describe('Codex OAuth authorization helpers', () => {
   it('creates PKCE S256 and the exact browser authorization request', () => {
@@ -91,6 +119,7 @@ describe('Codex OAuth authorization helpers', () => {
     expect(requests).toHaveLength(1);
     expect(requests[0].input).toBe(CODEX_OAUTH_TOKEN_ENDPOINT);
     expect(requests[0].init.method).toBe('POST');
+    expect(requests[0].init.redirect).toBe('error');
     expect(requests[0].init.headers).toEqual({
       'content-type': 'application/x-www-form-urlencoded',
     });
@@ -111,6 +140,22 @@ describe('Codex OAuth authorization helpers', () => {
       updatedAt: NOW,
     });
     expect(JSON.stringify(credentials)).not.toContain(idToken);
+  });
+
+  it('rejects a token redirect without invoking its secret-bearing target', async () => {
+    const redirectTarget = vi.fn(() => validExchangeResponse());
+    const tokenExchangeFetch = vi.fn(async (_input: string, init: RequestInit) => {
+      if (init.redirect !== 'error') return redirectTarget();
+      throw new TypeError('redirect rejected');
+    });
+
+    await expect(
+      exchangeAuthorizationCode(exchangeOptions({ tokenExchangeFetch })),
+    ).rejects.toMatchObject({
+      code: CODEX_OAUTH_ERROR_CODES.NETWORK_ERROR,
+      retryable: true,
+    });
+    expect(redirectTarget).not.toHaveBeenCalled();
   });
 
   it('falls back to access-token identity and JWT expiry when expires_in is absent', async () => {
@@ -160,5 +205,170 @@ describe('Codex OAuth authorization helpers', () => {
       code: CODEX_OAUTH_ERROR_CODES.INVALID_RESPONSE,
       retryable: false,
     });
+  });
+
+  it('rejects an oversized successful exchange as an invalid response', async () => {
+    const response = validExchangeResponse();
+    const oversized = new Response(await response.text(), {
+      status: 200,
+      headers: {
+        'content-type': 'application/json',
+        'content-length': String(1024 * 1024 + 1),
+      },
+    });
+
+    await expect(
+      exchangeAuthorizationCode(
+        exchangeOptions({
+          tokenExchangeFetch: async () => oversized,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      code: CODEX_OAUTH_ERROR_CODES.INVALID_RESPONSE,
+      retryable: false,
+    });
+  });
+
+  it('does not acquire a body reader for a non-successful exchange', async () => {
+    const response = new Response('private exchange failure body', { status: 400 });
+    const getReader = vi.spyOn(response.body!, 'getReader');
+
+    await expect(
+      exchangeAuthorizationCode(
+        exchangeOptions({
+          tokenExchangeFetch: async () => response,
+        }),
+      ),
+    ).rejects.toMatchObject({
+      code: CODEX_OAUTH_ERROR_CODES.UPSTREAM_ERROR,
+      retryable: false,
+      upstreamStatus: 400,
+    });
+    expect(getReader).not.toHaveBeenCalled();
+  });
+
+  it('forwards a composed signal and cleans the parent listener and timeout', async () => {
+    vi.useFakeTimers();
+    const parent = new AbortController();
+    const addListener = vi.spyOn(parent.signal, 'addEventListener');
+    const removeListener = vi.spyOn(parent.signal, 'removeEventListener');
+    let forwardedSignal: AbortSignal | undefined;
+
+    await exchangeAuthorizationCode(
+      exchangeOptions({
+        signal: parent.signal,
+        tokenExchangeFetch: async (_input, init) => {
+          forwardedSignal = init.signal as AbortSignal;
+          return validExchangeResponse();
+        },
+      }),
+    );
+
+    expect(forwardedSignal).toBeInstanceOf(AbortSignal);
+    expect(forwardedSignal).not.toBe(parent.signal);
+    expect(forwardedSignal?.aborted).toBe(false);
+    expect(addListener).toHaveBeenCalledTimes(1);
+    expect(removeListener).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('times out a fetch that ignores abort after exactly ten seconds', async () => {
+    vi.useFakeTimers();
+    let forwardedSignal: AbortSignal | undefined;
+    let settled = false;
+    const exchange = exchangeAuthorizationCode(
+      exchangeOptions({
+        tokenExchangeFetch: async (_input, init) => {
+          forwardedSignal = init.signal as AbortSignal;
+          return new Promise<Response>(() => undefined);
+        },
+      }),
+    ).then(
+      () => ({ ok: true as const }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+    void exchange.then(() => {
+      settled = true;
+    });
+
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(settled).toBe(false);
+    expect(forwardedSignal?.aborted).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1);
+    const result = await exchange;
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: CODEX_OAUTH_ERROR_CODES.NETWORK_ERROR,
+        retryable: true,
+      },
+    });
+    expect(forwardedSignal?.aborted).toBe(true);
+    expect(JSON.stringify(result)).not.toMatch(
+      /auth\.openai\.com|boundary-code|boundary-verifier|boundary-refresh/,
+    );
+  });
+
+  it('times out a stalled response body within the same request boundary', async () => {
+    vi.useFakeTimers();
+    const cancelled = vi.fn();
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        cancel: cancelled,
+      }),
+    );
+    const exchange = exchangeAuthorizationCode(
+      exchangeOptions({
+        timeoutMs: 25,
+        tokenExchangeFetch: async () => response,
+      }),
+    );
+    const rejection = expect(exchange).rejects.toMatchObject({
+      code: CODEX_OAUTH_ERROR_CODES.NETWORK_ERROR,
+      retryable: true,
+    });
+
+    await vi.advanceTimersByTimeAsync(25);
+    await rejection;
+    expect(cancelled).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('settles safely on parent abort even when fetch ignores its signal', async () => {
+    const parent = new AbortController();
+    let forwardedSignal: AbortSignal | undefined;
+    const exchange = exchangeAuthorizationCode(
+      exchangeOptions({
+        signal: parent.signal,
+        tokenExchangeFetch: async (_input, init) => {
+          forwardedSignal = init.signal as AbortSignal;
+          return new Promise<Response>(() => undefined);
+        },
+      }),
+    );
+    const rejection = expect(exchange).rejects.toMatchObject({
+      code: CODEX_OAUTH_ERROR_CODES.NETWORK_ERROR,
+      retryable: true,
+    });
+
+    parent.abort();
+
+    await rejection;
+    expect(forwardedSignal?.aborted).toBe(true);
+  });
+
+  it('does not start an OAuth operation when the parent is already aborted', async () => {
+    const parent = new AbortController();
+    parent.abort();
+    const tokenExchangeFetch = vi.fn(async () => validExchangeResponse());
+
+    await expect(
+      exchangeAuthorizationCode(exchangeOptions({ signal: parent.signal, tokenExchangeFetch })),
+    ).rejects.toMatchObject({
+      code: CODEX_OAUTH_ERROR_CODES.NETWORK_ERROR,
+      retryable: true,
+    });
+    expect(tokenExchangeFetch).not.toHaveBeenCalled();
   });
 });

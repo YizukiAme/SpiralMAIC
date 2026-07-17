@@ -1,14 +1,31 @@
-import { randomUUID } from 'node:crypto';
-
 import packageMetadata from '../../../package.json';
 
 import { CODEX_RESPONSES_ENDPOINT } from '@/lib/ai/codex-model';
 
 import {
+  acquireCodexCredentialLease,
+  isCodexCapabilityLifecycleCurrent,
+  isCodexCapabilityLeaseCurrent,
+  isCodexCredentialLeaseCurrent,
+  isCodexCredentialLifecycleCurrent,
   isCodexCredentialsChangedError,
-  refreshCodexCredentialsIfCurrent,
+  refreshCodexCapabilityLease,
+  refreshCodexCredentialLease,
   type CodexTokenProvider,
+  type InternalCodexCapabilityLease,
+  type InternalCodexCredentialLease,
 } from './token-provider';
+import {
+  createEphemeralCodexLogicalSession,
+  deriveCodexUpstreamSessionId,
+  type CodexUpstreamSessionId,
+} from './logical-session';
+import {
+  CODEX_RESPONSE_LIMITS,
+  CodexResponseGuardError,
+  createCodexResponseRequestGuard,
+  type CodexResponseGuardFailure,
+} from './response-guard';
 
 export { CODEX_RESPONSES_ENDPOINT } from '@/lib/ai/codex-model';
 
@@ -48,23 +65,9 @@ export class CodexResponsesTransportError extends Error {
 interface CreateCodexResponsesTransportOptions {
   tokenProvider: CodexTokenProvider;
   upstreamFetch?: typeof globalThis.fetch;
-}
-
-const SESSION_ID_KEY = Symbol.for('openmaic.codex.responses.session-id.v1');
-const sessionHost = globalThis as unknown as Record<PropertyKey, unknown>;
-
-function getProcessSessionId(): string {
-  const existing = sessionHost[SESSION_ID_KEY];
-  if (typeof existing === 'string' && existing.length > 0) return existing;
-
-  const sessionId = randomUUID();
-  Object.defineProperty(sessionHost, SESSION_ID_KEY, {
-    value: sessionId,
-    enumerable: false,
-    configurable: false,
-    writable: false,
-  });
-  return sessionId;
+  sessionId?: CodexUpstreamSessionId;
+  /** @internal Account/catalog capability selected during model resolution. */
+  capabilityLease?: InternalCodexCapabilityLease;
 }
 
 const REMOVED_BODY_FIELDS = [
@@ -86,7 +89,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function normalizeBody(body: BodyInit | null | undefined): string {
+function normalizeBody(body: BodyInit | null | undefined, sessionId: string): string {
   if (body === undefined || body === null || typeof body !== 'string') {
     throw new CodexResponsesTransportError(CODEX_RESPONSES_TRANSPORT_ERROR_CODES.INVALID_REQUEST);
   }
@@ -101,7 +104,11 @@ function normalizeBody(body: BodyInit | null | undefined): string {
     throw new CodexResponsesTransportError(CODEX_RESPONSES_TRANSPORT_ERROR_CODES.INVALID_REQUEST);
   }
 
-  const normalized: Record<string, unknown> = { ...parsed, store: false };
+  const normalized: Record<string, unknown> = {
+    ...parsed,
+    store: false,
+    prompt_cache_key: sessionId,
+  };
   const include = Array.isArray(normalized.include)
     ? normalized.include.filter((value): value is string => typeof value === 'string')
     : [];
@@ -111,11 +118,15 @@ function normalizeBody(body: BodyInit | null | undefined): string {
   normalized.include = include;
 
   if (Array.isArray(normalized.input)) {
-    normalized.input = normalized.input.map((item) =>
-      isRecord(item) && item.role === 'system' ? { ...item, role: 'developer' } : item,
-    );
+    normalized.input = normalized.input.map((item) => {
+      if (!isRecord(item)) return item;
+      const { id: _itemId, ...withoutItemId } = item;
+      return item.role === 'system' ? { ...withoutItemId, role: 'developer' } : withoutItemId;
+    });
   }
 
+  delete normalized.thread_id;
+  delete normalized['thread-id'];
   for (const field of REMOVED_BODY_FIELDS) delete normalized[field];
   return JSON.stringify(normalized);
 }
@@ -141,8 +152,13 @@ function createHeaders(
   return headers;
 }
 
-async function cancelResponseBody(response: Response): Promise<void> {
-  await response.body?.cancel().catch(() => undefined);
+function cancelResponseBody(response: Response): void {
+  if (!response.body) return;
+  try {
+    void response.body.cancel().catch(() => undefined);
+  } catch {
+    // Response cleanup is best-effort and must never delay retry or classification.
+  }
 }
 
 function errorForStatus(status: number): CodexResponsesTransportError {
@@ -170,6 +186,16 @@ function errorForStatus(status: number): CodexResponsesTransportError {
   );
 }
 
+function errorForGuardFailure(failure: CodexResponseGuardFailure): CodexResponsesTransportError {
+  if (failure === 'lifecycle-abort' || failure === 'stale-at-eof') {
+    return errorForStatus(401);
+  }
+  if (failure === 'caller-abort') {
+    return new CodexResponsesTransportError(CODEX_RESPONSES_TRANSPORT_ERROR_CODES.NETWORK_ERROR);
+  }
+  return new CodexResponsesTransportError(CODEX_RESPONSES_TRANSPORT_ERROR_CODES.UPSTREAM_ERROR);
+}
+
 /**
  * Creates the sole network boundary used by the native Codex language model.
  * The endpoint is validated as an exact string before credentials are loaded.
@@ -178,7 +204,8 @@ export function createCodexResponsesTransport(
   options: CreateCodexResponsesTransportOptions,
 ): typeof globalThis.fetch {
   const upstreamFetch = options.upstreamFetch ?? globalThis.fetch.bind(globalThis);
-  const sessionId = getProcessSessionId();
+  const sessionId =
+    options.sessionId ?? deriveCodexUpstreamSessionId(createEphemeralCodexLogicalSession());
 
   return async (input, init) => {
     if (typeof input !== 'string' || input !== CODEX_RESPONSES_ENDPOINT) {
@@ -187,52 +214,188 @@ export function createCodexResponsesTransport(
       );
     }
 
-    const body = normalizeBody(init?.body);
-    let originalCredentials: { accessToken: string; accountId: string } | null = null;
-    const request = async (
-      forceRefresh: boolean,
-      expected?: { accessToken: string; accountId: string },
-    ): Promise<Response> => {
-      let credentials: { accessToken: string; accountId: string };
+    const body = normalizeBody(init?.body, sessionId);
+    const deadlineAt = Date.now() + CODEX_RESPONSE_LIMITS.totalTimeoutMs;
+    let capabilityLease = options.capabilityLease;
+    let credentialLease: InternalCodexCredentialLease;
+    const acquisitionGuard = createCodexResponseRequestGuard({
+      callerSignal: init?.signal ?? undefined,
+      lifecycleSignal: capabilityLease?.credentialLease.lifecycleSignal,
+      deadlineAt,
+    });
+    try {
+      // Fail before starting vault/OAuth work when cancellation or the shared
+      // absolute deadline was already published.
+      await acquisitionGuard.race(Promise.resolve());
+      acquisitionGuard.assertActive();
+      if (capabilityLease) {
+        if (capabilityLease.credentialLease.tokenProvider !== options.tokenProvider) {
+          throw errorForStatus(401);
+        }
+        if (!(await acquisitionGuard.race(isCodexCapabilityLeaseCurrent(capabilityLease)))) {
+          throw errorForStatus(401);
+        }
+        credentialLease = capabilityLease.credentialLease;
+      } else {
+        credentialLease = await acquisitionGuard.race(
+          acquireCodexCredentialLease(options.tokenProvider),
+        );
+      }
+    } catch (error) {
+      if (error instanceof CodexResponseGuardError) {
+        throw errorForGuardFailure(error.failure);
+      }
+      if (isCodexCredentialsChangedError(error)) throw errorForStatus(401);
+      throw error;
+    } finally {
+      acquisitionGuard.dispose();
+    }
+
+    const assertSendCurrent = async (): Promise<boolean> =>
+      capabilityLease
+        ? capabilityLease.credentialLease.tokenProvider === options.tokenProvider &&
+          (await isCodexCapabilityLeaseCurrent(capabilityLease))
+        : isCodexCredentialLeaseCurrent(credentialLease);
+    const assertResponseCurrent = async (): Promise<boolean> =>
+      capabilityLease
+        ? capabilityLease.credentialLease.tokenProvider === options.tokenProvider &&
+          (await isCodexCapabilityLifecycleCurrent(capabilityLease))
+        : isCodexCredentialLifecycleCurrent(credentialLease);
+
+    type AttemptResult =
+      | { readonly kind: 'retry-auth' }
+      | { readonly kind: 'success'; readonly response: Response };
+
+    const request = async (forceRefresh: boolean): Promise<AttemptResult> => {
+      const guard = createCodexResponseRequestGuard({
+        callerSignal: init?.signal ?? undefined,
+        lifecycleSignal: credentialLease.lifecycleSignal,
+        deadlineAt,
+      });
       try {
+        // The 401 cleanup path can synchronously publish caller cancellation.
+        // Observe it before starting a shared refresh for the replay.
+        await guard.race(Promise.resolve());
+        guard.assertActive();
         if (forceRefresh) {
-          const scopedExpected = expected ?? originalCredentials;
-          if (!scopedExpected) throw errorForStatus(401);
-          credentials = await refreshCodexCredentialsIfCurrent(
-            options.tokenProvider,
-            scopedExpected,
-          );
-        } else {
-          credentials = await options.tokenProvider.getValidCredentials();
-          originalCredentials = credentials;
+          if (capabilityLease) {
+            capabilityLease = await guard.race(refreshCodexCapabilityLease(capabilityLease));
+            credentialLease = capabilityLease.credentialLease;
+          } else {
+            credentialLease = await guard.race(refreshCodexCredentialLease(credentialLease));
+          }
         }
       } catch (error) {
+        guard.dispose();
+        if (error instanceof CodexResponseGuardError) {
+          throw errorForGuardFailure(error.failure);
+        }
         if (isCodexCredentialsChangedError(error)) throw errorForStatus(401);
         throw error;
       }
+      let sendCurrent = false;
       try {
-        return await upstreamFetch(CODEX_RESPONSES_ENDPOINT, {
+        guard.assertActive();
+        sendCurrent = await guard.race(assertSendCurrent());
+        guard.assertActive();
+      } catch (error) {
+        guard.dispose();
+        if (error instanceof CodexResponseGuardError) {
+          throw errorForGuardFailure(error.failure);
+        }
+        if (isCodexCredentialsChangedError(error)) throw errorForStatus(401);
+        throw error;
+      }
+      if (!sendCurrent) {
+        guard.dispose();
+        throw errorForStatus(401);
+      }
+
+      const credentials = credentialLease.credentials;
+      let response: Response;
+      try {
+        const requestInit: RequestInit = {
           ...init,
+          signal: guard.signal,
           body,
           headers: createHeaders(init?.headers, credentials, sessionId),
           redirect: 'manual',
-        });
-      } catch {
+        };
+        // RequestInit/HeadersInit may contain user-controlled getters. If one
+        // publishes cancellation, do not invoke the credential-bearing fetch.
+        guard.assertActive();
+        const upstreamRequest = upstreamFetch(CODEX_RESPONSES_ENDPOINT, requestInit);
+        response = await guard.race(upstreamRequest);
+      } catch (error) {
+        guard.dispose();
+        if (error instanceof CodexResponseGuardError) {
+          throw errorForGuardFailure(error.failure);
+        }
         throw new CodexResponsesTransportError(CODEX_RESPONSES_TRANSPORT_ERROR_CODES.NETWORK_ERROR);
       }
+
+      let current = false;
+      try {
+        guard.assertActive();
+        current = await guard.race(assertResponseCurrent());
+        guard.assertActive();
+      } catch (error) {
+        cancelResponseBody(response);
+        guard.dispose();
+        if (error instanceof CodexResponseGuardError) {
+          throw errorForGuardFailure(error.failure);
+        }
+        throw errorForStatus(401);
+      }
+      if (!current) {
+        cancelResponseBody(response);
+        guard.dispose();
+        throw errorForStatus(401);
+      }
+
+      if (response.status === 401) {
+        cancelResponseBody(response);
+        guard.dispose();
+        return { kind: 'retry-auth' };
+      }
+      if (!response.ok) {
+        cancelResponseBody(response);
+        guard.dispose();
+        throw errorForStatus(response.status);
+      }
+
+      if (!response.body) {
+        try {
+          guard.assertActive();
+          current = await guard.race(assertResponseCurrent());
+          guard.assertActive();
+        } catch (error) {
+          guard.dispose();
+          if (error instanceof CodexResponseGuardError) {
+            throw errorForGuardFailure(error.failure);
+          }
+          throw errorForStatus(401);
+        }
+        guard.dispose();
+        if (!current) throw errorForStatus(401);
+        return { kind: 'success', response };
+      }
+
+      return {
+        kind: 'success',
+        response: guard.bind(response, {
+          assertCurrent: assertResponseCurrent,
+          errorForFailure: errorForGuardFailure,
+        }),
+      };
     };
 
-    let response = await request(false);
-    if (response.status === 401) {
-      await cancelResponseBody(response);
-      response = await request(true, originalCredentials ?? undefined);
+    let result = await request(false);
+    if (result.kind === 'retry-auth') {
+      result = await request(true);
+      if (result.kind === 'retry-auth') throw errorForStatus(401);
     }
 
-    if (!response.ok) {
-      await cancelResponseBody(response);
-      throw errorForStatus(response.status);
-    }
-
-    return response;
+    return result.response;
   };
 }

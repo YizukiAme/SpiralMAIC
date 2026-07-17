@@ -1568,6 +1568,14 @@
     "testImageConnectivity": "اختبار الاتصال",
     "imageConnectivitySuccess": "تم الاتصال بخدمة الصور بنجاح",
     "imageConnectivityFailed": "فشل الاتصال بخدمة الصور",
+    "providerCodexImage": "Codex",
+    "codexImageLoginRequired": "سجّل الدخول إلى Codex ضمن موفري LLM لاستخدام إنشاء الصور.",
+    "codexImageConnected": "Codex متصل",
+    "codexImageManageLogin": "إدارة تسجيل دخول Codex",
+    "codexImageFixedModel": "نموذج ثابت",
+    "codexImageTestHint": "يتحقق من تسجيل دخول Codex دون إنشاء صورة أو استهلاك حصة الصور.",
+    "codexImagePlanLimits": "يستخدم تسجيل دخول Codex وحصة خطة ChatGPT؛ قد تستهلك الصور حصة أكبر من النص.",
+    "codexImageLoginValid": "تسجيل دخول Codex جاهز لإنشاء الصور",
     "imageTestSuccess": "نجح اختبار توليد الصور",
     "imageTestFailed": "فشل اختبار توليد الصور",
     "imageTestPromptPlaceholder": "أدخل وصف الصورة للاختبار",
@@ -1719,10 +1727,10 @@
       "experimental": "تكامل تجريبي من جهة خارجية مع Codex؛ يستخدم حصة خطة ChatGPT الخاصة بك.",
       "unavailableTitle": "تسجيل الدخول إلى Codex غير متاح",
       "unavailable": {
-        "FEATURE_DISABLED": "فعّل Codex OAuth على الخادم لاستخدام هذا المزوّد.",
         "SERVERLESS_UNSUPPORTED": "يتطلب Codex OAuth خادم Node مستضافاً ذاتياً مع تخزين دائم.",
-        "ACCESS_CODE_REQUIRED": "اضبط ACCESS_CODE قبل تفعيل Codex OAuth في بيئة الإنتاج.",
-        "DATA_DIR_UNWRITABLE": "لا يستطيع الخادم الكتابة في مجلد البيانات. تحقق من صلاحيات /app/data."
+        "ACCESS_CODE_REQUIRED": "اضبط ACCESS_CODE لاستخدام Codex OAuth في بيئة الإنتاج.",
+        "DATA_DIR_UNWRITABLE": "لا يستطيع الخادم الكتابة في مجلد البيانات. تحقق من صلاحيات /app/data.",
+        "RUNTIME_LOCKED": "تستخدم عملية OpenMAIC Node أخرى مجلد بيانات مصادقة Codex بالفعل."
       },
       "connectedAs": "متصل باسم {email}",
       "connected": "متصل بـ ChatGPT",
@@ -1744,7 +1752,7 @@
       "testForbidden": "مساحة عمل ChatGPT هذه لا تملك صلاحية Codex.",
       "testRateLimited": "تم بلوغ حصة خطة ChatGPT أو حد معدل الطلبات.",
       "testFailed": "فشل الاتصال بـ Codex.",
-      "loginFailed": "فشل تسجيل الدخول. حاول مجدداً أو استخدم رمز الجهاز.",
+      "loginFailed": "فشل تسجيل الدخول. اختر إحدى طريقتي تسجيل الدخول للمحاولة مرة أخرى.",
       "loginExpired": "انتهت صلاحية محاولة تسجيل الدخول. ابدأ محاولة جديدة."
     },
     "connected": "متصل"

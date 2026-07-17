@@ -40,8 +40,7 @@ describe('native Codex provider seam', () => {
         { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra' },
         { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna' },
         { id: 'gpt-5.5', name: 'GPT-5.5' },
-        { id: 'gpt-5.4', name: 'GPT-5.4' },
-        { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini' },
+        { id: 'gpt-5.2', name: 'GPT-5.2' },
       ],
     });
 
@@ -54,48 +53,23 @@ describe('native Codex provider seam', () => {
     ).toThrow(/server transport/i);
   });
 
-  it('clones the OpenAI catalog metadata for every Codex fallback model', () => {
-    for (const modelId of ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini']) {
-      const openai = PROVIDERS.openai.models.find((model) => model.id === modelId);
-      const codex = PROVIDERS['openai-codex'].models.find((model) => model.id === modelId);
-
-      expect(openai).toBeDefined();
-      expect(codex).toMatchObject({
-        id: modelId,
-        contextWindow: openai?.contextWindow,
-        outputWindow: openai?.outputWindow,
-        capabilities: openai?.capabilities,
-        source: 'probed',
-      });
-      expect(codex).not.toBe(openai);
-      expect(codex?.capabilities).not.toBe(openai?.capabilities);
-
-      const openaiThinking = openai?.capabilities?.thinking;
-      const codexThinking = codex?.capabilities?.thinking;
-      expect(codexThinking).toEqual(openaiThinking);
-      expect(codexThinking).not.toBe(openaiThinking);
-      if (openaiThinking?.effortValues) {
-        expect(codexThinking?.effortValues).toEqual(openaiThinking.effortValues);
-        expect(codexThinking?.effortValues).not.toBe(openaiThinking.effortValues);
-      }
-      if (openaiThinking?.levelValues) {
-        expect(codexThinking?.levelValues).toEqual(openaiThinking.levelValues);
-        expect(codexThinking?.levelValues).not.toBe(openaiThinking.levelValues);
-      }
-      if (openaiThinking?.budgetRange) {
-        expect(codexThinking?.budgetRange).toEqual(openaiThinking.budgetRange);
-        expect(codexThinking?.budgetRange).not.toBe(openaiThinking.budgetRange);
-      }
-      if (openaiThinking?.anthropicThinking) {
-        expect(codexThinking?.anthropicThinking).toEqual(openaiThinking.anthropicThinking);
-        expect(codexThinking?.anthropicThinking).not.toBe(openaiThinking.anthropicThinking);
-        if (openaiThinking.anthropicThinking.budgetByEffort) {
-          expect(codexThinking?.anthropicThinking?.budgetByEffort).not.toBe(
-            openaiThinking.anthropicThinking.budgetByEffort,
-          );
-        }
-      }
-    }
+  it('uses only the audited Codex snapshot without overlaying public OpenAI metadata', () => {
+    expect(
+      PROVIDERS['openai-codex'].models.map((model) => [
+        model.id,
+        model.contextWindow,
+        model.outputWindow,
+      ]),
+    ).toEqual([
+      ['gpt-5.6-sol', 372_000, undefined],
+      ['gpt-5.6-terra', 372_000, undefined],
+      ['gpt-5.6-luna', 372_000, undefined],
+      ['gpt-5.5', 272_000, undefined],
+      ['gpt-5.2', 272_000, undefined],
+    ]);
+    expect(PROVIDERS.openai.models.find((model) => model.id === 'gpt-5.5')?.contextWindow).not.toBe(
+      PROVIDERS['openai-codex'].models.find((model) => model.id === 'gpt-5.5')?.contextWindow,
+    );
   });
 
   it('exposes the account-verified reasoning controls for GPT-5.6 Codex models', () => {
@@ -108,7 +82,7 @@ describe('native Codex provider seam', () => {
     for (const [modelId, defaultEffort] of Object.entries(expectations)) {
       expect(PROVIDERS['openai-codex'].models.find((model) => model.id === modelId)).toMatchObject({
         id: modelId,
-        contextWindow: 272_000,
+        contextWindow: 372_000,
         capabilities: {
           streaming: true,
           tools: true,

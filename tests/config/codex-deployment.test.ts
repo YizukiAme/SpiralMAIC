@@ -6,14 +6,35 @@ const root = resolve(__dirname, '../..');
 const read = (name: string) => readFileSync(resolve(root, name), 'utf8');
 
 describe('Codex OAuth deployment contract', () => {
-  it('documents both flags, deployment modes, and production ACCESS_CODE requirement', () => {
+  it('documents always-on browser and device login without feature flags', () => {
     const env = read('.env.example');
+    const deploymentGuide = read('docs/codex-oauth-deployment.md');
+    const acceptanceGuide = read('docs/codex-real-account-acceptance.md');
 
-    expect(env).toContain('OPENMAIC_ENABLE_CODEX_OAUTH=');
-    expect(env).toContain('OPENMAIC_CODEX_BROWSER_LOGIN=');
-    expect(env).toMatch(/local bare-metal/i);
+    for (const content of [env, deploymentGuide, acceptanceGuide]) {
+      expect(content).not.toContain('OPENMAIC_ENABLE_CODEX_OAUTH');
+      expect(content).not.toContain('OPENMAIC_CODEX_BROWSER_LOGIN');
+    }
+    for (const content of [env, deploymentGuide, acceptanceGuide]) {
+      expect(content).not.toMatch(/device[^\n]{0,80}fallback/i);
+      expect(content).not.toMatch(/fallback[^\n]{0,80}device/i);
+    }
+    expect(env).toMatch(/available after installation/i);
+    expect(env).toMatch(/browser.*device/i);
     expect(env).toMatch(/Docker\/VPS.*device/i);
     expect(env).toMatch(/production.*ACCESS_CODE/i);
+    expect(deploymentGuide).toMatch(/available after installation/i);
+    expect(deploymentGuide.indexOf('Sign in with ChatGPT')).toBeGreaterThan(-1);
+    expect(deploymentGuide.indexOf('Use device code')).toBeGreaterThan(
+      deploymentGuide.indexOf('Sign in with ChatGPT'),
+    );
+  });
+
+  it('removes the unreachable feature-disabled reason from runtime contracts', () => {
+    const removedReason = ['FEATURE', 'DISABLED'].join('_');
+
+    expect(read('lib/types/codex-auth.ts')).not.toContain(removedReason);
+    expect(read('lib/client/codex-oauth.ts')).not.toContain(removedReason);
   });
 
   it('creates and owns /app/data before switching to UID 1001', () => {

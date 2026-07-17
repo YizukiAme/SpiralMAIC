@@ -6,6 +6,7 @@ import { resolveModelFromRequest } from '@/lib/server/resolve-model';
 import type { RevisitExamBlueprint } from '@/lib/revisit/types';
 import { buildJudgePrompt, parseJudgeResponse } from '@/lib/revisit/prompt-builders';
 import { createLogger } from '@/lib/logger';
+import { parseExternalCodexLogicalSession } from '@/lib/server/codex/logical-session';
 
 const log = createLogger('RevisitJudgeAPI');
 
@@ -26,7 +27,12 @@ export async function POST(req: NextRequest) {
       return apiError('INVALID_REQUEST', 400, 'attemptId, stageId, and blueprint are required');
     }
 
-    const { model, thinkingConfig } = await resolveModelFromRequest(req, body, 'revisit-judge');
+    const { model, thinkingConfig } = await resolveModelFromRequest(
+      req,
+      body,
+      'revisit-judge',
+      parseExternalCodexLogicalSession({ kind: 'revisit-attempt', id: body.attemptId }),
+    );
     const prompt = buildJudgePrompt({
       blueprint: body.blueprint,
       transcript: body.transcript,

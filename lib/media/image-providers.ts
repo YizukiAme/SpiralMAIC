@@ -45,6 +45,15 @@ export const IMAGE_PROVIDERS: Record<ImageProviderId, ImageProviderConfig> = {
     ],
     supportedAspectRatios: ['16:9', '4:3', '1:1', '9:16'],
   },
+  'codex-image': {
+    id: 'codex-image',
+    name: 'Codex',
+    requiresApiKey: false,
+    credentialMode: 'oauth',
+    icon: '/logos/openai.svg',
+    models: [{ id: 'gpt-image-2', name: 'GPT Image 2' }],
+    supportedAspectRatios: ['16:9', '4:3', '1:1', '9:16'],
+  },
   'openai-image': {
     id: 'openai-image',
     name: 'OpenAI Image',
@@ -160,12 +169,23 @@ export const IMAGE_PROVIDERS: Record<ImageProviderId, ImageProviderConfig> = {
   },
 };
 
+export function getImageProviderCredentialMode(
+  provider: Pick<ImageProviderConfig, 'credentialMode' | 'requiresApiKey'>,
+): NonNullable<ImageProviderConfig['credentialMode']> {
+  return provider.credentialMode ?? (provider.requiresApiKey ? 'api-key' : 'none');
+}
+
 export async function testImageConnectivity(
   config: ImageGenerationConfig,
 ): Promise<{ success: boolean; message: string }> {
   switch (config.providerId) {
     case 'seedream':
       return testSeedreamConnectivity(config);
+    case 'codex-image':
+      return {
+        success: false,
+        message: 'Codex OAuth image connectivity must be checked through the server route',
+      };
     case 'openai-image':
       return testOpenAIImageConnectivity(config);
     case 'qwen-image':
@@ -195,6 +215,8 @@ export async function generateImage(
   switch (config.providerId) {
     case 'seedream':
       return generateWithSeedream(config, options);
+    case 'codex-image':
+      throw new Error('Codex OAuth image generation must be handled by the server route');
     case 'openai-image':
       return generateWithOpenAIImage(config, options);
     case 'qwen-image':

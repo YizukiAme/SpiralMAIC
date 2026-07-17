@@ -30,6 +30,23 @@ describe('Codex settings surface contract', () => {
     expect(source).toContain('bg-red-50 text-red-700 border border-red-200');
   });
 
+  it('keeps browser PKCE primary and device login simultaneously available as an explicit choice', () => {
+    const source = read('components/settings/codex-provider-settings.tsx');
+    const browserButton = source.indexOf('{supportsBrowser && (');
+    const deviceButton = source.indexOf('{supportsDevice && (');
+
+    expect(browserButton).toBeGreaterThan(-1);
+    expect(deviceButton).toBeGreaterThan(browserButton);
+    expect(source.slice(browserButton, deviceButton)).toContain(
+      '<Button type="button" onClick={startBrowser}',
+    );
+    expect(source.slice(deviceButton)).toContain(
+      "variant={supportsBrowser ? 'outline' : 'default'}",
+    );
+    expect(source).toContain('void clientRef.current?.startBrowser()');
+    expect(source).toContain('void clientRef.current?.startDevice()');
+  });
+
   it('branches to the dedicated panel and preserves OAuth credential mode in list data', () => {
     const source = read('components/settings/index.tsx');
 
@@ -43,7 +60,10 @@ describe('Codex settings surface contract', () => {
       /const\s+isCodexProviderSurface\s*=\s*activeSection === 'providers'\s*&&\s*selectedProviderId === 'openai-codex'/,
     );
     expect(source).toMatch(
-      /\{!isCodexProviderSurface\s*&&\s*\(\s*<Button size="sm" onClick=\{handleSave\}>/,
+      /const\s+isManagedSettingsSurface\s*=\s*isCodexProviderSurface \|\| isCodexImageSurface/,
+    );
+    expect(source).toMatch(
+      /\{!isManagedSettingsSurface\s*&&\s*\(\s*<Button size="sm" onClick=\{handleSave\}>/,
     );
   });
 
