@@ -46,6 +46,37 @@ function controllableByteStream() {
   };
 }
 
+function churningByteStream(chunk: Uint8Array, chunkCount: number) {
+  let pulls = 0;
+  const cancel = vi.fn();
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      pulls += 1;
+      if (pulls <= chunkCount) {
+        controller.enqueue(chunk);
+      } else {
+        controller.close();
+      }
+    },
+    cancel,
+  });
+  return {
+    cancel,
+    get pulls() {
+      return pulls;
+    },
+    stream,
+  };
+}
+
+function neverSettlingCancelByteStream() {
+  const cancel = vi.fn(() => new Promise<void>(() => undefined));
+  const stream = new ReadableStream<Uint8Array>({
+    cancel,
+  });
+  return { cancel, stream };
+}
+
 function bindGuard(
   guard: ReturnType<typeof createCodexResponseRequestGuard>,
   response: Response,
@@ -167,6 +198,34 @@ describe('Codex response request guard', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('synchronously observes cancellation published after a completed race', async () => {
+    const caller = new AbortController();
+    const guard = createCodexResponseRequestGuard(
+      testGuardOptions({ callerSignal: caller.signal }),
+    );
+
+    await expect(guard.race(Promise.resolve('complete'))).resolves.toBe('complete');
+    caller.abort('late-secret');
+
+    expect(() => guard.assertActive()).toThrow(
+      expect.objectContaining({ failure: 'caller-abort' }),
+    );
+  });
+
+  it('synchronously enforces the absolute deadline even before its timer callback runs', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const guard = createCodexResponseRequestGuard({
+      deadlineAt: NOW + 100,
+      limits: { totalTimeoutMs: 100, idleTimeoutMs: 50, maxBytes: 32 },
+    });
+
+    vi.setSystemTime(NOW + 100);
+
+    expect(() => guard.assertActive()).toThrow(expect.objectContaining({ failure: 'timeout' }));
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('starts idle time only after a successful response body is bound', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
@@ -228,6 +287,120 @@ describe('Codex response request guard', () => {
     expect(source.cancel).toHaveBeenCalledTimes(1);
   });
 
+  it('yields during zero-byte churn so the idle timeout can run', async () => {
+    const source = churningByteStream(new Uint8Array(), 50_000);
+    const guard = createCodexResponseRequestGuard({
+      deadlineAt: Date.now() + 1_000,
+      limits: { totalTimeoutMs: 1_000, idleTimeoutMs: 1, maxBytes: 32 },
+    });
+    const reader = bindGuard(guard, new Response(source.stream)).body!.getReader();
+
+    await expect(reader.read()).rejects.toMatchObject({ failure: 'idle-timeout' });
+    expect(source.pulls).toBeLessThan(50_000);
+    expect(source.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('yields across non-empty pulls so the absolute deadline can run', async () => {
+    const source = churningByteStream(Uint8Array.of(1), 50_000);
+    const guard = createCodexResponseRequestGuard({
+      deadlineAt: Date.now() + 1,
+      limits: { totalTimeoutMs: 1, idleTimeoutMs: 1_000, maxBytes: 100_000 },
+    });
+    const guarded = bindGuard(guard, new Response(source.stream));
+
+    await expect(guarded.arrayBuffer()).rejects.toMatchObject({ failure: 'timeout' });
+    expect(source.pulls).toBeLessThan(50_000);
+    expect(source.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not forward a first chunk whose source microtasks outlive the total deadline', async () => {
+    const startedAt = Date.now();
+    const deadlineAt = startedAt + 10;
+    const source = new ReadableStream<Uint8Array>(
+      {
+        async pull(controller) {
+          while (Date.now() <= deadlineAt + 5) await Promise.resolve();
+          controller.enqueue(Uint8Array.of(1));
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    const guard = createCodexResponseRequestGuard({
+      deadlineAt,
+      limits: { totalTimeoutMs: 10, idleTimeoutMs: 1_000, maxBytes: 32 },
+    });
+    const reader = bindGuard(guard, new Response(source)).body!.getReader();
+
+    await expect(reader.read()).rejects.toMatchObject({ failure: 'timeout' });
+  });
+
+  it('rechecks the total deadline in the microtask gap after a raw read resolves', async () => {
+    let now = 0;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const source = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          controller.enqueue(Uint8Array.of(1));
+          queueMicrotask(() => queueMicrotask(() => (now = 100)));
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    const guard = createCodexResponseRequestGuard({
+      deadlineAt: 100,
+      limits: { totalTimeoutMs: 100, idleTimeoutMs: 1_000, maxBytes: 32 },
+    });
+    const reader = bindGuard(guard, new Response(source)).body!.getReader();
+
+    await expect(reader.read()).rejects.toMatchObject({ failure: 'timeout' });
+  });
+
+  it('rechecks the total deadline after the fairness macrotask before enqueueing', async () => {
+    let now = 0;
+    let pullCount = 0;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const source = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          pullCount += 1;
+          if (pullCount === 1024) setTimeout(() => (now = 100), 0);
+          controller.enqueue(Uint8Array.of(1));
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    const guard = createCodexResponseRequestGuard({
+      deadlineAt: 100,
+      limits: { totalTimeoutMs: 100, idleTimeoutMs: 1_000, maxBytes: 2_000 },
+    });
+    const reader = bindGuard(guard, new Response(source)).body!.getReader();
+
+    for (let index = 0; index < 1023; index += 1) {
+      await expect(reader.read()).resolves.toMatchObject({ done: false });
+    }
+    await expect(reader.read()).rejects.toMatchObject({ failure: 'timeout' });
+  });
+
+  it('does not forward a first chunk whose source microtasks outlive the idle deadline', async () => {
+    const startedAt = Date.now();
+    const source = new ReadableStream<Uint8Array>(
+      {
+        async pull(controller) {
+          while (Date.now() <= startedAt + 15) await Promise.resolve();
+          controller.enqueue(Uint8Array.of(1));
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    const guard = createCodexResponseRequestGuard({
+      deadlineAt: startedAt + 1_000,
+      limits: { totalTimeoutMs: 1_000, idleTimeoutMs: 10, maxBytes: 32 },
+    });
+    const reader = bindGuard(guard, new Response(source)).body!.getReader();
+
+    await expect(reader.read()).rejects.toMatchObject({ failure: 'idle-timeout' });
+  });
+
   it('accepts exactly maxBytes and validates the credential lifecycle at EOF', async () => {
     const assertCurrent = vi.fn(async () => true);
     const source = controllableByteStream();
@@ -279,6 +452,23 @@ describe('Codex response request guard', () => {
     expect(assertCurrent).toHaveBeenCalledTimes(1);
   });
 
+  it('refuses EOF after currentness microtasks outlive the absolute deadline', async () => {
+    const deadlineAt = Date.now() + 10;
+    const source = controllableByteStream();
+    const guard = createCodexResponseRequestGuard({
+      deadlineAt,
+      limits: { totalTimeoutMs: 10, idleTimeoutMs: 1_000, maxBytes: 32 },
+    });
+    const guarded = bindGuard(guard, new Response(source.stream), async () => {
+      while (Date.now() <= deadlineAt + 5) await Promise.resolve();
+      return true;
+    });
+
+    source.close();
+
+    await expect(guarded.arrayBuffer()).rejects.toMatchObject({ failure: 'timeout' });
+  });
+
   it('forwards consumer cancellation to the upstream source exactly once', async () => {
     const source = controllableByteStream();
     const guard = createCodexResponseRequestGuard(testGuardOptions());
@@ -288,6 +478,21 @@ describe('Codex response request guard', () => {
     await guarded.body!.cancel('consumer secret again');
 
     expect(source.cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('settles consumer cancellation and releases the source when upstream cancel never settles', async () => {
+    const source = neverSettlingCancelByteStream();
+    const guard = createCodexResponseRequestGuard(testGuardOptions());
+    const guarded = bindGuard(guard, new Response(source.stream));
+
+    const outcome = await Promise.race([
+      guarded.body!.cancel().then(() => 'cancelled' as const),
+      new Promise<'timed-out'>((resolve) => setTimeout(() => resolve('timed-out'), 50)),
+    ]);
+
+    expect(outcome).toBe('cancelled');
+    expect(source.cancel).toHaveBeenCalledTimes(1);
+    expect(source.stream.locked).toBe(false);
   });
 
   it('does not start EOF currentness I/O after consumer cancellation wins the microtask race', async () => {
@@ -332,6 +537,7 @@ describe('Codex response request guard', () => {
     expect(callerRemove).toHaveBeenCalledTimes(1);
     expect(lifecycleAdd).toHaveBeenCalledTimes(1);
     expect(lifecycleRemove).toHaveBeenCalledTimes(1);
+    expect(source.stream.locked).toBe(false);
     expect(vi.getTimerCount()).toBe(0);
   });
 

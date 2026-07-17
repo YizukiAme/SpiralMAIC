@@ -126,6 +126,14 @@ function createCodexStreamError(source?: unknown): CodexStreamError {
   return new CodexStreamError(extractSafeStatusCode(source));
 }
 
+function cancelReaderWithoutWaiting<T>(reader: ReadableStreamDefaultReader<T>): void {
+  try {
+    void reader.cancel().catch(() => undefined);
+  } catch {
+    // Source cancellation is best-effort and must never delay a safe result.
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -237,26 +245,24 @@ export function guardCodexStream(
   let partCount = 0;
   let contentItemCount = 0;
   let released = false;
+  let terminated = false;
 
   const release = () => {
     if (released) return;
-    released = true;
     try {
       reader.releaseLock();
+      released = true;
     } catch {
       // The safe wrapper owns this reader; there is nothing useful to expose.
     }
   };
 
-  const cancel = async () => {
+  const cancelSource = () => {
     if (released) return;
-    try {
-      await reader.cancel();
-    } catch {
-      // Never expose a source-stream cancellation failure.
-    } finally {
-      release();
-    }
+    const closed = reader.closed;
+    cancelReaderWithoutWaiting(reader);
+    release();
+    void closed.then(release, release);
   };
 
   const flushPendingHighSurrogate = (id: string, state: CodexToolInputBudgetState): boolean => {
@@ -355,16 +361,20 @@ export function guardCodexStream(
 
   const stream = new ReadableStream<CodexStreamPart>({
     async pull(controller) {
+      if (terminated) return;
       try {
         const { done, value } = await reader.read();
+        if (terminated) return;
         if (done) {
+          terminated = true;
           pendingToolInputHighSurrogates.clear();
           release();
           controller.close();
           return;
         }
         if (!withinBudget(value)) {
-          await cancel();
+          terminated = true;
+          cancelSource();
           controller.error(createCodexStreamError());
           return;
         }
@@ -374,12 +384,16 @@ export function guardCodexStream(
             : value,
         );
       } catch (error) {
-        await cancel();
+        if (terminated) return;
+        terminated = true;
+        cancelSource();
         controller.error(createCodexStreamError(error));
       }
     },
-    async cancel() {
-      await cancel();
+    cancel() {
+      if (terminated) return;
+      terminated = true;
+      cancelSource();
     },
   });
 
@@ -587,7 +601,7 @@ export async function aggregateCodexStream(
       ...(providerMetadata ? { providerMetadata } : {}),
     };
   } catch (error) {
-    await reader.cancel().catch(() => undefined);
+    cancelReaderWithoutWaiting(reader);
     throw createCodexStreamError(error);
   } finally {
     try {

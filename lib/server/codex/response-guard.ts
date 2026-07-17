@@ -8,6 +8,9 @@ export const CODEX_RESPONSE_LIMITS: {
   maxBytes: 32 * 1024 * 1024,
 } as const;
 
+// Scheduler fairness only. Chunk count is not a validity or rejection limit.
+const STREAM_FAIRNESS_CHUNK_INTERVAL = 1024;
+
 export type CodexResponseGuardFailure =
   | 'caller-abort'
   | 'lifecycle-abort'
@@ -26,6 +29,7 @@ export class CodexResponseGuardError extends Error {
 
 export interface CodexResponseRequestGuard {
   readonly signal: AbortSignal;
+  assertActive(): void;
   race<T>(operation: Promise<T>): Promise<T>;
   bind(
     response: Response,
@@ -46,6 +50,18 @@ async function cancelLateResponse(value: unknown): Promise<void> {
   }
 }
 
+function cancelWithoutWaiting(cancel: () => Promise<unknown>): void {
+  try {
+    void cancel().catch(() => undefined);
+  } catch {
+    // Cancellation is best-effort and must never delay a safe terminal result.
+  }
+}
+
+function yieldToMacrotask(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 export function createCodexResponseRequestGuard(options: {
   callerSignal?: AbortSignal;
   lifecycleSignal?: AbortSignal | null;
@@ -59,6 +75,7 @@ export function createCodexResponseRequestGuard(options: {
   let resourcesCleared = false;
   let totalTimer: ReturnType<typeof setTimeout> | null = null;
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  let idleDeadlineAt: number | null = null;
   let boundFailureHandler: ((nextFailure: CodexResponseGuardFailure) => void) | null = null;
   const failureWaiters = new Set<(nextFailure: CodexResponseGuardFailure) => void>();
 
@@ -76,6 +93,7 @@ export function createCodexResponseRequestGuard(options: {
       clearTimeout(idleTimer);
       idleTimer = null;
     }
+    idleDeadlineAt = null;
     options.callerSignal?.removeEventListener('abort', onCallerAbort);
     options.lifecycleSignal?.removeEventListener('abort', onLifecycleAbort);
   }
@@ -101,7 +119,16 @@ export function createCodexResponseRequestGuard(options: {
   function resetIdleTimer(): void {
     if (disposed || failure !== null) return;
     if (idleTimer !== null) clearTimeout(idleTimer);
-    idleTimer = setTimeout(() => fail('idle-timeout'), Math.max(0, limits.idleTimeoutMs));
+    const idleTimeoutMs = Math.max(0, limits.idleTimeoutMs);
+    idleDeadlineAt = Date.now() + idleTimeoutMs;
+    idleTimer = setTimeout(() => fail('idle-timeout'), idleTimeoutMs);
+  }
+
+  function assertActive(): void {
+    if (failure === null && Date.now() >= options.deadlineAt) {
+      fail('timeout');
+    }
+    if (failure !== null) throw new CodexResponseGuardError(failure);
   }
 
   if (options.callerSignal?.aborted) {
@@ -120,6 +147,9 @@ export function createCodexResponseRequestGuard(options: {
   }
 
   function race<T>(operation: Promise<T>): Promise<T> {
+    if (failure === null && Date.now() >= options.deadlineAt) {
+      fail('timeout');
+    }
     if (failure !== null) {
       void operation.then(cancelLateResponse, () => undefined);
       return Promise.reject(new CodexResponseGuardError(failure));
@@ -141,6 +171,13 @@ export function createCodexResponseRequestGuard(options: {
             void cancelLateResponse(value);
             return;
           }
+          if (failure === null && Date.now() >= options.deadlineAt) {
+            fail('timeout');
+          }
+          if (settled) {
+            void cancelLateResponse(value);
+            return;
+          }
           settled = true;
           failureWaiters.delete(onFailure);
           if (failure !== null) {
@@ -151,6 +188,10 @@ export function createCodexResponseRequestGuard(options: {
           resolve(value);
         },
         (error: unknown) => {
+          if (settled) return;
+          if (failure === null && Date.now() >= options.deadlineAt) {
+            fail('timeout');
+          }
           if (settled) return;
           settled = true;
           failureWaiters.delete(onFailure);
@@ -173,31 +214,56 @@ export function createCodexResponseRequestGuard(options: {
       errorForFailure: (nextFailure: CodexResponseGuardFailure) => Error;
     },
   ): Response {
-    const upstreamBody =
-      response.body ??
-      new ReadableStream<Uint8Array>({
-        start(streamController) {
-          streamController.close();
-        },
-      });
+    if (!response.body) {
+      dispose();
+      throw bindOptions.errorForFailure('body-read-failed');
+    }
+    const upstreamBody = response.body;
     const reader = upstreamBody.getReader();
     let bytesRead = 0;
+    let chunksSinceYield = 0;
     let terminated = false;
     let upstreamCancelled = false;
+    let upstreamReleased = false;
     let guardedController!: ReadableStreamDefaultController<Uint8Array>;
 
-    function cancelUpstream(): Promise<void> {
-      if (upstreamCancelled) return Promise.resolve();
+    function releaseUpstream(): void {
+      if (upstreamReleased) return;
+      try {
+        reader.releaseLock();
+        upstreamReleased = true;
+      } catch {
+        // A pending read may still own the lock. Cancellation settles that read,
+        // and every later terminal path retries this idempotent release.
+      }
+    }
+
+    function cancelUpstream(): void {
+      if (upstreamCancelled) {
+        releaseUpstream();
+        return;
+      }
       upstreamCancelled = true;
-      return reader.cancel().catch(() => undefined);
+      const closed = reader.closed;
+      cancelWithoutWaiting(() => reader.cancel());
+      releaseUpstream();
+      // Most runtimes release synchronously after cancel(). If a pending read
+      // temporarily prevents that, retry when the reader observes closure.
+      void closed.then(releaseUpstream, releaseUpstream);
     }
 
     function errorBody(nextFailure: CodexResponseGuardFailure): void {
       if (terminated) return;
       terminated = true;
-      void cancelUpstream();
+      cancelUpstream();
       guardedController.error(bindOptions.errorForFailure(nextFailure));
       dispose();
+    }
+
+    function idleExpired(): boolean {
+      if (idleDeadlineAt === null || Date.now() < idleDeadlineAt) return false;
+      fail('idle-timeout');
+      return true;
     }
 
     async function pull(): Promise<void> {
@@ -215,13 +281,22 @@ export function createCodexResponseRequestGuard(options: {
           return;
         }
         if (terminated) return;
+        try {
+          assertActive();
+        } catch {
+          // assertActive publishes the safe bound-body failure synchronously.
+          return;
+        }
+        if (idleExpired()) return;
 
         if (result.done) {
+          releaseUpstream();
           let isCurrent = false;
           try {
             isCurrent = await race(
               Promise.resolve().then(() => (terminated ? false : bindOptions.assertCurrent())),
             );
+            assertActive();
           } catch (error) {
             if (terminated) return;
             if (error instanceof CodexResponseGuardError) {
@@ -242,6 +317,23 @@ export function createCodexResponseRequestGuard(options: {
           dispose();
           guardedController.close();
           return;
+        }
+
+        chunksSinceYield += 1;
+        if (chunksSinceYield >= STREAM_FAIRNESS_CHUNK_INTERVAL) {
+          chunksSinceYield = 0;
+          await yieldToMacrotask();
+          if (terminated) return;
+          try {
+            assertActive();
+          } catch {
+            return;
+          }
+          if (idleExpired()) return;
+          if (failure !== null || options.lifecycleSignal?.aborted) {
+            fail(failure ?? 'lifecycle-abort');
+            return;
+          }
         }
 
         const chunk = result.value;
@@ -266,12 +358,12 @@ export function createCodexResponseRequestGuard(options: {
         guardedController = streamController;
       },
       pull,
-      async cancel() {
+      cancel() {
         if (terminated) return;
         terminated = true;
         boundFailureHandler = null;
         dispose();
-        await cancelUpstream();
+        cancelUpstream();
       },
     });
 
@@ -290,6 +382,7 @@ export function createCodexResponseRequestGuard(options: {
   }
 
   return {
+    assertActive,
     bind,
     dispose,
     race,
