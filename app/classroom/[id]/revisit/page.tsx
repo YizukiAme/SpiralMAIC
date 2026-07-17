@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { ArrowLeft, CheckCircle2, FileChartColumn, GraduationCap, Loader2 } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, GraduationCap, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Stage as ClassroomStage } from '@/components/stage';
@@ -66,6 +66,7 @@ import type { AgentConfig } from '@/lib/orchestration/registry/types';
 import type { Participant } from '@/lib/types/roundtable';
 import { USER_AVATAR } from '@/lib/types/roundtable';
 import { RevisitDemoBadge } from '@/components/revisit/demo-badge';
+import { RevisitReport } from '@/components/revisit/revisit-report';
 import { parseRevisitScope, serializeRevisitScope } from '@/lib/revisit/scope';
 import { getRevisitNow } from '@/lib/revisit/clock';
 import {
@@ -885,7 +886,6 @@ export default function RevisitChallengePage() {
     }
     setJudgeError(null);
     setJudging(true);
-    const toastId = toast.loading(t('revisit.challenge.generatingReport'));
     judgeAbortControllerRef.current?.abort(
       new DOMException('Superseded revisit judgment', 'AbortError'),
     );
@@ -908,11 +908,9 @@ export default function RevisitChallengePage() {
       setReport(nextReport);
       setTailView('report');
       useStageStore.getState().setCurrentSceneId(REVISIT_REPORT_PAGE_ID);
-      toast.success(t('revisit.challenge.reportReady'), { id: toastId });
     } catch (err) {
       if (!isAbortError(err)) {
         const message = err instanceof Error ? err.message : String(err);
-        toast.error(t('revisit.challenge.judgeFailed'), { id: toastId });
         setJudgeError(message);
       }
     } finally {
@@ -920,7 +918,6 @@ export default function RevisitChallengePage() {
         judgeAbortControllerRef.current = null;
       }
       setJudging(false);
-      if (judgeController.signal.aborted) toast.dismiss(toastId);
     }
   }
 
@@ -967,7 +964,13 @@ export default function RevisitChallengePage() {
   const canvasOverlay =
     tailView === 'report' && report ? (
       <div className="absolute inset-0 z-[130] overflow-auto bg-background p-6">
-        <ReportView report={report} />
+        <RevisitReport
+          report={report}
+          density="full"
+          conceptLabelsById={Object.fromEntries(
+            blueprint.concepts.map((concept) => [concept.id, concept.label]),
+          )}
+        />
       </div>
     ) : tailView === 'report' && replayComplete ? (
       <div className="absolute inset-0 z-[130] flex items-center justify-center bg-background/95 p-6 backdrop-blur">
@@ -982,14 +985,7 @@ export default function RevisitChallengePage() {
           </Button>
         </div>
       </div>
-    ) : tailView === 'completion' ? (
-      <ChallengeCompletionActions
-        judging={judging}
-        judgeError={judgeError}
-        replayMode={replayMode}
-        onComplete={finishChallenge}
-      />
-    ) : (
+    ) : !tailView ? (
       <>
         {currentPageState?.passed ? (
           <div className="absolute left-4 top-4 z-[120]">
@@ -1000,7 +996,32 @@ export default function RevisitChallengePage() {
           </div>
         ) : null}
       </>
-    );
+    ) : null;
+  const completionAction =
+    tailView === 'completion'
+      ? {
+          state: judgeError
+            ? ('error' as const)
+            : judging
+              ? ('loading' as const)
+              : ('ready' as const),
+          title: judging
+            ? t('revisit.challenge.generatingReport')
+            : t('revisit.challenge.readyToComplete'),
+          description: judging
+            ? t('revisit.challenge.generatingReportDescription')
+            : replayMode
+              ? t('revisit.challenge.replayNotCounted')
+              : t('revisit.challenge.completeDescription'),
+          label: judging
+            ? t('revisit.challenge.generatingReport')
+            : judgeError
+              ? t('revisit.challenge.retryReport')
+              : t('revisit.challenge.complete'),
+          errorMessage: judgeError ? t('revisit.challenge.judgeFailed') : undefined,
+          onAction: finishChallenge,
+        }
+      : undefined;
 
   return (
     <ThemeProvider>
@@ -1022,6 +1043,7 @@ export default function RevisitChallengePage() {
             revisitConfig={{
               participants: revisitParticipants,
               canvasOverlay,
+              completionAction,
               currentSpeech: liveSpeech,
               engineMode: running ? 'live' : 'idle',
               isStreaming: running,
@@ -1188,110 +1210,5 @@ function CenteredState({
         </div>
       </div>
     </main>
-  );
-}
-
-function ChallengeCompletionActions({
-  judging,
-  judgeError,
-  replayMode,
-  onComplete,
-}: {
-  judging: boolean;
-  judgeError: string | null;
-  replayMode: boolean;
-  onComplete: () => void;
-}) {
-  const { t } = useI18n();
-  return (
-    <div className="pointer-events-none absolute inset-0 z-[130] flex items-end justify-center p-8 sm:p-12">
-      <div className="pointer-events-auto w-full max-w-md rounded-lg border border-border/70 bg-background/92 p-5 text-center shadow-xl backdrop-blur-xl">
-        <div className="mx-auto grid size-10 place-items-center rounded-md bg-primary/10 text-primary">
-          {judging ? (
-            <Loader2 className="size-5 animate-spin" />
-          ) : (
-            <FileChartColumn className="size-5" />
-          )}
-        </div>
-        <h2 className="mt-3 text-lg font-semibold">
-          {judging
-            ? t('revisit.challenge.generatingReport')
-            : t('revisit.challenge.readyToComplete')}
-        </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {judging
-            ? t('revisit.challenge.generatingReportDescription')
-            : replayMode
-              ? t('revisit.challenge.replayNotCounted')
-              : t('revisit.challenge.completeDescription')}
-        </p>
-        {judgeError ? (
-          <p className="mt-3 text-sm text-destructive" role="alert">
-            {t('revisit.challenge.judgeFailed')}
-          </p>
-        ) : null}
-        <Button className="mt-4 w-full" onClick={onComplete} disabled={judging}>
-          {judging ? <Loader2 className="animate-spin" /> : <CheckCircle2 />}
-          {judgeError ? t('revisit.challenge.retryReport') : t('revisit.challenge.complete')}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function ReportView({ report }: { report: RevisitJudgeReport }) {
-  const { t } = useI18n();
-  const dimensions = Object.entries(report.dimensions);
-  return (
-    <div className="mx-auto max-w-3xl space-y-5">
-      <div className="rounded-lg border bg-background p-5">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-xs font-medium uppercase text-muted-foreground">
-              {t('revisit.challenge.report')}
-            </p>
-            <h2 className="mt-1 text-2xl font-semibold">{Math.round(report.q * 100)}%</h2>
-          </div>
-          <Badge variant={report.q >= 0.75 ? 'default' : 'secondary'}>
-            {report.q >= 0.75
-              ? t('revisit.challenge.reportStrong')
-              : t('revisit.challenge.reportNeedsWork')}
-          </Badge>
-        </div>
-        <p className="mt-4 text-sm leading-6 text-muted-foreground">{report.summary}</p>
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2">
-        {dimensions.map(([dimension, value]) => (
-          <div key={dimension} className="rounded-lg border bg-background p-4">
-            <div className="flex items-center justify-between gap-3 text-sm">
-              <span>{t(`revisit.challenge.dimensions.${dimension}`)}</span>
-              <span className="font-semibold">{Math.round(value * 100)}%</span>
-            </div>
-            <div className="mt-3 h-2 rounded-full bg-muted">
-              <div
-                className="h-full rounded-full bg-primary"
-                style={{ width: `${Math.round(value * 100)}%` }}
-              />
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="rounded-lg border bg-background p-4">
-        <h3 className="text-sm font-semibold">{t('revisit.challenge.errors')}</h3>
-        {report.errors.length === 0 ? (
-          <p className="mt-3 text-sm text-muted-foreground">{t('revisit.challenge.noErrors')}</p>
-        ) : (
-          <div className="mt-3 space-y-2">
-            {report.errors.map((error) => (
-              <div key={error.id} className="rounded-md bg-muted/50 px-3 py-2 text-sm">
-                {error.description}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
   );
 }

@@ -9,6 +9,7 @@ import {
   sanitizeStudyArtifactReferences,
   suggestStudyArtifactTitle,
 } from '@/lib/revisit/artifacts';
+import { simpleSourceHash } from '@/lib/revisit/blueprint';
 import type { RevisitAdaptiveContext, StudyArtifact } from '@/lib/revisit/types';
 import type { Scene, Stage } from '@/lib/types/stage';
 
@@ -122,6 +123,54 @@ const adaptiveContext: RevisitAdaptiveContext = {
   ],
 };
 
+const adaptiveContextWithFindings: RevisitAdaptiveContext = {
+  ...adaptiveContext,
+  latestReport: {
+    attemptId: 'attempt-2',
+    stageId: stage.id,
+    completedAt: 200,
+    summary: 'Definitions are clear; transfer needs practice.',
+    dimensions: {
+      clarity: 0.9,
+      doubtResolution: 0.7,
+      transfer: 0.4,
+      errorCorrection: 0.6,
+    },
+    qRaw: 0.61,
+    q: 0.6,
+    errors: [],
+    evidence: [],
+    pageReports: [],
+    findingsVersion: 1,
+    strengths: [
+      {
+        id: 'strength-1',
+        title: 'Clear distinction',
+        feedback: 'The explanation separated subjects from predicates.',
+        dimension: 'clarity',
+        conceptIds: ['subject-vs-predicate'],
+        citations: [
+          {
+            kind: 'transcript',
+            sourceId: 'message-1',
+            excerpt: 'SECRET_ARTIFACT_CITATION',
+          },
+        ],
+      },
+    ],
+    improvements: [
+      {
+        id: 'improvement-1',
+        title: 'Transfer to unfamiliar sentences',
+        feedback: 'Apply the distinction to a new sentence.',
+        dimension: 'transfer',
+        conceptIds: ['subject-vs-predicate'],
+        citations: [],
+      },
+    ],
+  },
+};
+
 describe('study artifacts', () => {
   it('applies kind-specific defaults on top of the common defaults', () => {
     expect(getDefaultStudyArtifactOptions('briefing')).toEqual({
@@ -196,6 +245,88 @@ describe('study artifacts', () => {
 
     expect(revised.lessonSourceHash).toBe(prompt.lessonSourceHash);
     expect(revised.sourceHash).not.toBe(prompt.sourceHash);
+  });
+
+  it('uses bounded findings and the same source boundary rules in all six prompts', () => {
+    for (const kind of [
+      'briefing',
+      'mindMap',
+      'studyGuide',
+      'faq',
+      'flashcards',
+      'quiz',
+    ] as const) {
+      const prompt = buildStudyArtifactPrompt({
+        stage,
+        scenes,
+        kind,
+        adaptiveContext: adaptiveContextWithFindings,
+      });
+      const combined = `${prompt.system}\n${prompt.user}`;
+
+      expect(prompt.user).toContain('"findingsAvailable": true');
+      expect(prompt.user).toContain('Transfer to unfamiliar sentences');
+      expect(prompt.user).toContain('Clear distinction');
+      expect(combined).not.toContain('SECRET_ARTIFACT_CITATION');
+      expect(combined).not.toMatch(/"citations"|"excerpt"|"evidence"|"pageReports"/);
+      expect(combined).toMatch(/balanced.*latestReport\.improvements/i);
+      expect(combined).toMatch(/weak-points.*latestReport\.improvements/i);
+      expect(combined).toMatch(/strengths.*reduce redundant review.*never introduce facts/i);
+      expect(combined).toMatch(/adaptive context.*untrusted data.*never instructions/i);
+      expect(combined).toMatch(/selected lesson scenes.*factual source boundary/i);
+    }
+  });
+
+  it('keeps the source hash stable when only stripped citation excerpts change', () => {
+    const original = buildStudyArtifactPrompt({
+      stage,
+      scenes,
+      kind: 'quiz',
+      adaptiveContext: adaptiveContextWithFindings,
+    });
+    const changedCitation = buildStudyArtifactPrompt({
+      stage,
+      scenes,
+      kind: 'quiz',
+      adaptiveContext: {
+        ...adaptiveContextWithFindings,
+        latestReport: {
+          ...adaptiveContextWithFindings.latestReport!,
+          strengths: adaptiveContextWithFindings.latestReport!.strengths!.map((finding) => ({
+            ...finding,
+            citations: [
+              {
+                kind: 'transcript',
+                sourceId: 'message-1',
+                excerpt: 'A completely different trusted citation excerpt.',
+              },
+            ],
+          })),
+        },
+      },
+    });
+
+    expect(changedCitation.sourceHash).toBe(original.sourceHash);
+  });
+
+  it('hashes the same empty adaptive object that it renders when context is absent', () => {
+    const prompt = buildStudyArtifactPrompt({
+      stage,
+      scenes,
+      kind: 'faq',
+    });
+
+    expect(prompt.user).toContain('Adaptive review context:\n{}');
+    expect(prompt.sourceHash).toBe(
+      simpleSourceHash(
+        JSON.stringify({
+          kind: 'faq',
+          lessonSourceHash: prompt.lessonSourceHash,
+          options: prompt.options,
+          adaptiveContext: {},
+        }),
+      ),
+    );
   });
 
   it('documents every controlled rich-block shape in briefing and guide prompts', () => {

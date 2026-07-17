@@ -1,6 +1,7 @@
 import { z, type ZodType } from 'zod';
 
 import { buildPrompt, PROMPT_IDS } from '@/lib/prompts';
+import { projectRevisitAdaptiveContextForPrompt } from '@/lib/revisit/adaptive-context';
 import { normalizeStudyArtifactOptions } from '@/lib/revisit/artifact-options';
 import { simpleSourceHash } from '@/lib/revisit/blueprint';
 import { extractJsonObject } from '@/lib/revisit/prompt-builders';
@@ -437,12 +438,15 @@ export function buildStudyArtifactPrompt<K extends StudyArtifactKind>(args: {
   const selectedScenes = resolveArtifactSourceScenes(args.scenes, options);
   const sceneDigest = buildSceneDigestWithStableIds(selectedScenes);
   const lessonSourceHash = buildLessonSourceHash(args.stage, args.scenes);
+  const adaptivePromptContext = args.adaptiveContext
+    ? projectRevisitAdaptiveContextForPrompt(args.adaptiveContext)
+    : {};
   const sourceHash = simpleSourceHash(
     JSON.stringify({
       kind: args.kind,
       lessonSourceHash,
       options,
-      adaptiveContext: args.adaptiveContext ?? null,
+      adaptiveContext: adaptivePromptContext,
     }),
   );
 
@@ -453,7 +457,7 @@ export function buildStudyArtifactPrompt<K extends StudyArtifactKind>(args: {
     artifactKindLabel: ARTIFACT_KIND_LABELS[args.kind],
     artifactOptionsJson: JSON.stringify(options, null, 2),
     selectedSceneDigest: sceneDigest,
-    adaptiveContextJson: JSON.stringify(args.adaptiveContext ?? {}, null, 2),
+    adaptiveContextJson: JSON.stringify(adaptivePromptContext, null, 2),
     customInstructions: options.customInstructions || '(none)',
   });
 

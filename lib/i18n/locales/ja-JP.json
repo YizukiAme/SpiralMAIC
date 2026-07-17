@@ -1907,7 +1907,18 @@
       "generateAnyway": "それでも生成"
     },
     "report": {
+      "overall": "総合スコア",
+      "strong": "定着しています",
+      "needsWork": "復習が必要",
       "summary": "チャレンジ概要",
+      "strengths": "良かった点",
+      "improvements": "次に伸ばす点",
+      "evidence": "根拠",
+      "legacyEvidenceUnavailable": "この古いレポートには、根拠付きの強みと改善点が記録されていません。",
+      "transcriptEvidence": "チャレンジ会話から",
+      "pageEvidence": "ページ {{page}}・{{status}}・プローブ {{count}} 回",
+      "radarLabel": "チャレンジの4次元パフォーマンスレーダー",
+      "radarDescription": "次元別スコア：{{scores}}",
       "errors": "事実誤り",
       "noErrors": "事実誤りは記録されていません。",
       "corrected": "訂正済み",

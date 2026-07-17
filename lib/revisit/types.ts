@@ -95,6 +95,39 @@ export interface RevisitPageReport {
   notes?: string;
 }
 
+export interface RevisitReportCitationReference {
+  kind: 'transcript' | 'pageReport';
+  sourceId: string;
+}
+
+export interface RevisitReportTranscriptCitation extends RevisitReportCitationReference {
+  kind: 'transcript';
+  excerpt: string;
+}
+
+export interface RevisitReportPageReportCitation extends RevisitReportCitationReference {
+  kind: 'pageReport';
+  pageId: string;
+  pageIndex: number;
+  passed: boolean;
+  probeCount: number;
+  conceptIds: string[];
+  notes?: string;
+}
+
+export type RevisitReportCitation =
+  | RevisitReportTranscriptCitation
+  | RevisitReportPageReportCitation;
+
+export interface RevisitReportFinding {
+  id: string;
+  title: string;
+  feedback: string;
+  dimension: RevisitDimension;
+  conceptIds: string[];
+  citations: RevisitReportCitation[];
+}
+
 export interface RevisitJudgeReport {
   attemptId: string;
   stageId: string;
@@ -106,6 +139,9 @@ export interface RevisitJudgeReport {
   errors: RevisitFactualError[];
   evidence: ConceptEvidence[];
   pageReports: RevisitPageReport[];
+  findingsVersion?: 1;
+  strengths?: RevisitReportFinding[];
+  improvements?: RevisitReportFinding[];
 }
 
 export interface LessonProgress {

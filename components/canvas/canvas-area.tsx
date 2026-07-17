@@ -13,7 +13,10 @@ import type { CanvasToolbarProps } from '@/components/canvas/canvas-toolbar';
 import { shouldShowCanvasPlayHint } from '@/components/canvas/playback-control-policy';
 import type { Scene, StageMode } from '@/lib/types/stage';
 import { useI18n } from '@/lib/hooks/use-i18n';
-import { ClassroomCompletePageConnected } from '@/components/scene-renderers/classroom-complete';
+import {
+  ClassroomCompletePageConnected,
+  type ClassroomCompleteAction,
+} from '@/components/scene-renderers/classroom-complete';
 
 interface CanvasAreaProps extends CanvasToolbarProps {
   readonly currentScene: Scene | null;
@@ -24,6 +27,7 @@ interface CanvasAreaProps extends CanvasToolbarProps {
   readonly isGenerationFailed?: boolean;
   readonly onRetryGeneration?: () => void;
   readonly overlay?: ReactNode;
+  readonly completionAction?: ClassroomCompleteAction;
   readonly hidePlaybackControls?: boolean;
 }
 
@@ -58,6 +62,7 @@ export function CanvasArea({
   canGoPrevOverride,
   canGoNextOverride,
   overlay,
+  completionAction,
   hidePlaybackControls,
 }: CanvasAreaProps) {
   const { t } = useI18n();
@@ -152,7 +157,7 @@ export function CanvasArea({
                 transition={{ duration: 0.3, ease: 'easeOut' }}
                 className="absolute inset-0"
               >
-                <ClassroomCompletePageConnected />
+                <ClassroomCompletePageConnected completionAction={completionAction} />
               </motion.div>
             )}
             {isPendingScene && !currentScene && !isCourseComplete && (

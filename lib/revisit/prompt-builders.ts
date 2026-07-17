@@ -2,13 +2,16 @@ import { jsonrepair } from 'jsonrepair';
 
 import { buildPrompt, PROMPT_IDS } from '@/lib/prompts';
 import type { Scene, Stage } from '@/lib/types/stage';
+import { projectRevisitAdaptiveContextForPrompt } from '@/lib/revisit/adaptive-context';
 import { normalizeBlueprint, simpleSourceHash } from '@/lib/revisit/blueprint';
 import { buildSceneDigest } from '@/lib/revisit/source';
 import { normalizeJudgeReport } from '@/lib/revisit/judge';
+import type { RevisitMessage } from '@/lib/revisit/session';
 import type {
   RevisitAdaptiveContext,
   RevisitExamBlueprint,
   RevisitJudgeReport,
+  RevisitPageReport,
 } from '@/lib/revisit/types';
 
 interface RevisitChallengeProfile {
@@ -65,6 +68,9 @@ export function buildBlueprintPrompt(args: {
   const sceneDigest = buildSceneDigest(args.scenes);
   const completedChallengeCount = args.adaptiveContext?.completedChallengeCount ?? 0;
   const challengeProfile = getRevisitChallengeProfile(completedChallengeCount);
+  const adaptivePromptContext = args.adaptiveContext
+    ? projectRevisitAdaptiveContextForPrompt(args.adaptiveContext)
+    : { completedChallengeCount };
   const sourceHash = simpleSourceHash(
     JSON.stringify({
       stageId: args.stage.id,
@@ -84,11 +90,7 @@ export function buildBlueprintPrompt(args: {
     scaffoldingLevel: challengeProfile.scaffoldingLevel,
     maxCuesPerPage: challengeProfile.maxCuesPerPage,
     challengeFocus: challengeProfile.focus,
-    adaptiveContextJson: JSON.stringify(
-      args.adaptiveContext ?? { completedChallengeCount },
-      null,
-      2,
-    ),
+    adaptiveContextJson: JSON.stringify(adaptivePromptContext, null, 2),
   });
 
   if (!prompt) throw new Error('revisit-exam-blueprint template not found');
@@ -136,6 +138,8 @@ export function parseJudgeResponse(args: {
   attemptId: string;
   stageId: string;
   blueprint: RevisitExamBlueprint;
+  transcript: RevisitMessage[];
+  pageReports: RevisitPageReport[];
   completedAt?: number;
 }): RevisitJudgeReport {
   const raw = extractJsonObject(args.text) as Record<string, unknown>;
@@ -146,7 +150,11 @@ export function parseJudgeResponse(args: {
       stageId: args.stageId,
       completedAt: args.completedAt ?? Date.now(),
     },
-    { expectedConceptIds: args.blueprint.concepts.map((concept) => concept.id) },
+    {
+      expectedConceptIds: args.blueprint.concepts.map((concept) => concept.id),
+      transcript: args.transcript,
+      pageReports: args.pageReports,
+    },
   );
 }
 

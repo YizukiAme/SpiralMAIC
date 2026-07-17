@@ -1907,7 +1907,18 @@
       "generateAnyway": "إنشاء على أي حال"
     },
     "report": {
+      "overall": "النتيجة الإجمالية",
+      "strong": "تذكّر راسخ",
+      "needsWork": "يحتاج إلى مراجعة",
       "summary": "ملخص التحدي",
+      "strengths": "نقاط القوة",
+      "improvements": "خطوات التحسين التالية",
+      "evidence": "الدليل",
+      "legacyEvidenceUnavailable": "لم يسجل هذا التقرير القديم نقاط القوة والتحسينات المدعومة بالأدلة.",
+      "transcriptEvidence": "من محادثة التحدي",
+      "pageEvidence": "الصفحة {{page}} · {{status}} · {{count}} أسئلة فحص",
+      "radarLabel": "مخطط راداري لأداء التحدي في أربعة أبعاد",
+      "radarDescription": "النتائج حسب البعد: {{scores}}",
       "errors": "أخطاء واقعية",
       "noErrors": "لم تسجل أخطاء واقعية.",
       "corrected": "تم التصحيح",

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { animate, motion, MotionConfig, useReducedMotion } from 'motion/react';
-import { FileText, HelpCircle, Gamepad2, Puzzle } from 'lucide-react';
+import { FileChartColumn, FileText, Gamepad2, HelpCircle, Loader2, Puzzle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { useStageStore } from '@/lib/store';
@@ -300,12 +300,26 @@ function QuizRing({ pct, delay = 0 }: { pct: number; delay?: number }) {
   );
 }
 
+export interface ClassroomCompleteAction {
+  readonly state: 'ready' | 'loading' | 'error';
+  readonly title: string;
+  readonly description: string;
+  readonly label: string;
+  readonly errorMessage?: string;
+  readonly onAction: () => void;
+}
+
 interface ClassroomCompletePageProps {
   readonly scenes: Scene[];
   readonly title: string;
+  readonly completionAction?: ClassroomCompleteAction;
 }
 
-export function ClassroomCompletePage({ scenes, title }: ClassroomCompletePageProps) {
+export function ClassroomCompletePage({
+  scenes,
+  title,
+  completionAction,
+}: ClassroomCompletePageProps) {
   const { t, locale } = useI18n();
   const prefersReducedMotion = useReducedMotion();
 
@@ -334,7 +348,7 @@ export function ClassroomCompletePage({ scenes, title }: ClassroomCompletePagePr
   return (
     <MotionConfig reducedMotion={prefersReducedMotion ? 'always' : 'user'}>
       <section
-        className="absolute inset-0 z-[105] flex items-center justify-center overflow-auto"
+        className="absolute inset-0 z-[105] overflow-auto"
         aria-label={t('classroomComplete.title')}
       >
         {/* Single-shot announcement for screen readers — replaces the noisy
@@ -359,146 +373,212 @@ export function ClassroomCompletePage({ scenes, title }: ClassroomCompletePagePr
         {/* Confetti */}
         <Confetti />
 
-        {/* Content */}
-        <div className="relative flex flex-col items-center gap-6 max-w-2xl w-full px-8 py-10">
-          {/* Trophy + halo + sparkles */}
-          <div className="relative" style={{ width: 200, height: 200 }}>
-            <motion.div
-              aria-hidden
-              initial={{ scale: 0.6, opacity: 0 }}
-              animate={{ scale: [0.9, 1.15, 0.95, 1.1], opacity: [0, 0.55, 0.4, 0.5] }}
-              transition={{
-                delay: 0.15,
-                duration: 2.6,
-                repeat: Infinity,
-                repeatType: 'reverse',
-                ease: 'easeInOut',
-              }}
-              className="absolute inset-0 rounded-full"
-              style={{
-                background:
-                  'radial-gradient(circle, rgba(251, 191, 36, 0.5), rgba(249, 115, 22, 0.12) 55%, transparent 72%)',
-                filter: 'blur(14px)',
-              }}
-            />
-            <motion.div
-              aria-hidden
-              initial={{ y: 44, scale: 0.4, opacity: 0 }}
-              animate={{ y: 0, scale: 1, opacity: 1 }}
-              transition={{ type: 'spring', stiffness: 260, damping: 18, delay: 0.2 }}
-              className="absolute inset-0 flex items-center justify-center"
-            >
+        {/* The scroll root must not center its child directly: doing so makes
+            overflow above the scroll origin unreachable when content grows.
+            This wrapper centers short content and expands from the top for tall content. */}
+        <div className="relative flex min-h-full w-full items-center justify-center z-[1]">
+          {/* Content */}
+          <div className="relative flex flex-col items-center gap-6 max-w-2xl w-full px-8 py-10">
+            {/* Trophy + halo + sparkles */}
+            <div className="relative" style={{ width: 200, height: 200 }}>
               <motion.div
-                animate={{ y: [0, -5, 0] }}
-                transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
-                style={{ width: 148, height: 185 }}
+                aria-hidden
+                initial={{ scale: 0.6, opacity: 0 }}
+                animate={{ scale: [0.9, 1.15, 0.95, 1.1], opacity: [0, 0.55, 0.4, 0.5] }}
+                transition={{
+                  delay: 0.15,
+                  duration: 2.6,
+                  repeat: Infinity,
+                  repeatType: 'reverse',
+                  ease: 'easeInOut',
+                }}
+                className="absolute inset-0 rounded-full"
+                style={{
+                  background:
+                    'radial-gradient(circle, rgba(251, 191, 36, 0.5), rgba(249, 115, 22, 0.12) 55%, transparent 72%)',
+                  filter: 'blur(14px)',
+                }}
+              />
+              <motion.div
+                aria-hidden
+                initial={{ y: 44, scale: 0.4, opacity: 0 }}
+                animate={{ y: 0, scale: 1, opacity: 1 }}
+                transition={{ type: 'spring', stiffness: 260, damping: 18, delay: 0.2 }}
+                className="absolute inset-0 flex items-center justify-center"
               >
-                <TrophySvg className="w-full h-full drop-shadow-[0_10px_18px_rgba(180,83,9,0.35)]" />
+                <motion.div
+                  animate={{ y: [0, -5, 0] }}
+                  transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+                  style={{ width: 148, height: 185 }}
+                >
+                  <TrophySvg className="w-full h-full drop-shadow-[0_10px_18px_rgba(180,83,9,0.35)]" />
+                </motion.div>
               </motion.div>
-            </motion.div>
-            <Sparkles />
-          </div>
-
-          {/* Ribbon */}
-          <motion.div
-            initial={{ opacity: 0, scale: 0.7, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            transition={{ delay: 0.65, type: 'spring', stiffness: 280, damping: 18 }}
-            className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-gradient-to-r from-amber-400 via-orange-400 to-amber-500 text-white text-xs font-bold uppercase tracking-wider shadow-lg shadow-amber-500/30"
-          >
-            <Sparkle className="w-3 h-3" />
-            {t('classroomComplete.title')}
-            <Sparkle className="w-3 h-3" />
-          </motion.div>
-
-          {/* Title + date */}
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.78, duration: 0.4, ease: 'easeOut' }}
-            className="text-center space-y-1.5"
-          >
-            <h2 className="text-3xl md:text-4xl font-black leading-tight bg-gradient-to-br from-amber-700 via-orange-600 to-amber-800 dark:from-amber-200 dark:via-orange-200 dark:to-amber-300 bg-clip-text text-transparent">
-              {title || t('classroomComplete.title')}
-            </h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400">{dateLabel}</p>
-          </motion.div>
-
-          {/* Stats cards */}
-          {trailItems.length > 0 && (
-            <div
-              className={cn(
-                'grid gap-3 w-full',
-                trailItems.length === 1 && 'grid-cols-1 max-w-[180px]',
-                trailItems.length === 2 && 'grid-cols-2 max-w-md',
-                trailItems.length === 3 && 'grid-cols-3',
-                trailItems.length === 4 && 'grid-cols-2 sm:grid-cols-4',
-              )}
-            >
-              {trailItems.map(({ type, count, Icon, label }, idx) => {
-                const cardDelay = 0.96 + idx * 0.08;
-                return (
-                  <motion.div
-                    key={type}
-                    initial={{ opacity: 0, y: 14, scale: 0.9 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    transition={{
-                      delay: cardDelay,
-                      type: 'spring',
-                      stiffness: 260,
-                      damping: 20,
-                    }}
-                    className="rounded-2xl bg-white/90 dark:bg-gray-900/70 border border-amber-100 dark:border-amber-900/40 shadow-sm px-4 py-4 flex flex-col items-center gap-1.5 backdrop-blur-sm"
-                  >
-                    <Icon
-                      className="w-6 h-6 text-amber-500 dark:text-amber-400"
-                      strokeWidth={1.8}
-                    />
-                    <div className="text-3xl font-black text-gray-900 dark:text-gray-100 leading-none">
-                      <AnimatedCounter value={count} delay={cardDelay + 0.15} />
-                    </div>
-                    <div className="text-[11px] text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                      {label}
-                    </div>
-                  </motion.div>
-                );
-              })}
+              <Sparkles />
             </div>
-          )}
 
-          {/* Quiz card */}
-          {summary.quiz && (
+            {/* Ribbon */}
             <motion.div
-              initial={{ opacity: 0, y: 14, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={{ delay: 1.2, type: 'spring', stiffness: 220, damping: 20 }}
-              className="w-full rounded-2xl bg-gradient-to-br from-amber-100 via-orange-50 to-amber-100 dark:from-amber-950/50 dark:via-orange-950/30 dark:to-amber-950/50 border border-amber-200 dark:border-amber-900/50 px-6 py-5 shadow-md shadow-amber-200/30 dark:shadow-amber-950/20"
+              initial={{ opacity: 0, scale: 0.7, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              transition={{ delay: 0.65, type: 'spring', stiffness: 280, damping: 18 }}
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-gradient-to-r from-amber-400 via-orange-400 to-amber-500 text-white text-xs font-bold uppercase tracking-wider shadow-lg shadow-amber-500/30"
             >
-              <div className="flex items-center gap-5">
-                <QuizRing pct={summary.quiz.pct} delay={1.3} />
-                <div className="flex-1 min-w-0">
-                  <div className="text-base font-bold text-amber-700 dark:text-amber-300">
-                    {t('classroomComplete.quizScoreLabel', {
-                      correct: summary.quiz.correct,
-                      total: summary.quiz.total,
-                    })}
-                  </div>
-                  <div className="mt-1 text-sm text-amber-700/80 dark:text-amber-300/80">
-                    {t(`classroomComplete.encouragement.${encouragementKey(summary.quiz.pct)}`)}
+              <Sparkle className="w-3 h-3" />
+              {t('classroomComplete.title')}
+              <Sparkle className="w-3 h-3" />
+            </motion.div>
+
+            {/* Title + date */}
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.78, duration: 0.4, ease: 'easeOut' }}
+              className="text-center space-y-1.5"
+            >
+              <h2 className="text-3xl md:text-4xl font-black leading-tight bg-gradient-to-br from-amber-700 via-orange-600 to-amber-800 dark:from-amber-200 dark:via-orange-200 dark:to-amber-300 bg-clip-text text-transparent">
+                {title || t('classroomComplete.title')}
+              </h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400">{dateLabel}</p>
+            </motion.div>
+
+            {/* Stats cards */}
+            {trailItems.length > 0 && (
+              <div
+                className={cn(
+                  'grid gap-3 w-full',
+                  trailItems.length === 1 && 'grid-cols-1 max-w-[180px]',
+                  trailItems.length === 2 && 'grid-cols-2 max-w-md',
+                  trailItems.length === 3 && 'grid-cols-3',
+                  trailItems.length === 4 && 'grid-cols-2 sm:grid-cols-4',
+                )}
+              >
+                {trailItems.map(({ type, count, Icon, label }, idx) => {
+                  const cardDelay = 0.96 + idx * 0.08;
+                  return (
+                    <motion.div
+                      key={type}
+                      initial={{ opacity: 0, y: 14, scale: 0.9 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      transition={{
+                        delay: cardDelay,
+                        type: 'spring',
+                        stiffness: 260,
+                        damping: 20,
+                      }}
+                      className="rounded-2xl bg-white/90 dark:bg-gray-900/70 border border-amber-100 dark:border-amber-900/40 shadow-sm px-4 py-4 flex flex-col items-center gap-1.5 backdrop-blur-sm"
+                    >
+                      <Icon
+                        className="w-6 h-6 text-amber-500 dark:text-amber-400"
+                        strokeWidth={1.8}
+                      />
+                      <div className="text-3xl font-black text-gray-900 dark:text-gray-100 leading-none">
+                        <AnimatedCounter value={count} delay={cardDelay + 0.15} />
+                      </div>
+                      <div className="text-[11px] text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                        {label}
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Quiz card */}
+            {summary.quiz && (
+              <motion.div
+                initial={{ opacity: 0, y: 14, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                transition={{ delay: 1.2, type: 'spring', stiffness: 220, damping: 20 }}
+                className="w-full rounded-2xl bg-gradient-to-br from-amber-100 via-orange-50 to-amber-100 dark:from-amber-950/50 dark:via-orange-950/30 dark:to-amber-950/50 border border-amber-200 dark:border-amber-900/50 px-6 py-5 shadow-md shadow-amber-200/30 dark:shadow-amber-950/20"
+              >
+                <div className="flex items-center gap-5">
+                  <QuizRing pct={summary.quiz.pct} delay={1.3} />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-base font-bold text-amber-700 dark:text-amber-300">
+                      {t('classroomComplete.quizScoreLabel', {
+                        correct: summary.quiz.correct,
+                        total: summary.quiz.total,
+                      })}
+                    </div>
+                    <div className="mt-1 text-sm text-amber-700/80 dark:text-amber-300/80">
+                      {t(`classroomComplete.encouragement.${encouragementKey(summary.quiz.pct)}`)}
+                    </div>
                   </div>
                 </div>
-              </div>
-            </motion.div>
-          )}
+              </motion.div>
+            )}
+
+            {completionAction ? (
+              <>
+                {completionAction.state === 'loading' ? (
+                  <span className="sr-only" role="status" aria-live="polite">
+                    {completionAction.title}
+                  </span>
+                ) : null}
+                <motion.div
+                  data-completion-action
+                  aria-busy={completionAction.state === 'loading'}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 1.3, duration: 0.4, ease: 'easeOut' }}
+                  className="w-full border-t border-amber-200/80 pt-5 text-center dark:border-amber-900/60"
+                >
+                  <div className="flex items-center justify-center gap-2 text-amber-800 dark:text-amber-200">
+                    {completionAction.state === 'loading' ? (
+                      <Loader2 className="size-5 motion-safe:animate-spin" aria-hidden />
+                    ) : (
+                      <FileChartColumn className="size-5" aria-hidden />
+                    )}
+                    <h3 className="text-base font-bold">{completionAction.title}</h3>
+                  </div>
+                  <p className="mx-auto mt-1.5 max-w-lg text-sm leading-5 text-amber-800/75 dark:text-amber-200/70">
+                    {completionAction.description}
+                  </p>
+                  {completionAction.state === 'error' && completionAction.errorMessage ? (
+                    <p
+                      className="mt-2 text-sm font-medium text-red-600 dark:text-red-400"
+                      role="alert"
+                    >
+                      {completionAction.errorMessage}
+                    </p>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={completionAction.onAction}
+                    disabled={completionAction.state === 'loading'}
+                    className="mt-4 inline-flex min-w-52 items-center justify-center gap-2 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 px-6 py-2.5 text-sm font-bold text-white shadow-md shadow-amber-500/25 transition hover:from-amber-600 hover:to-orange-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-70 dark:ring-offset-gray-900"
+                  >
+                    {completionAction.state === 'loading' ? (
+                      <Loader2 className="size-4 motion-safe:animate-spin" aria-hidden />
+                    ) : (
+                      <FileChartColumn className="size-4" aria-hidden />
+                    )}
+                    {completionAction.label}
+                  </button>
+                </motion.div>
+              </>
+            ) : null}
+          </div>
         </div>
       </section>
     </MotionConfig>
   );
 }
 
-export function ClassroomCompletePageConnected() {
+export function ClassroomCompletePageConnected({
+  completionAction,
+}: {
+  readonly completionAction?: ClassroomCompleteAction;
+}) {
   const stage = useStageStore((s) => s.stage);
   const scenes = useStageStore((s) => s.scenes);
 
-  return <ClassroomCompletePage scenes={scenes} title={stage?.name ?? ''} />;
+  return (
+    <ClassroomCompletePage
+      scenes={scenes}
+      title={stage?.name ?? ''}
+      completionAction={completionAction}
+    />
+  );
 }

@@ -1907,7 +1907,18 @@
       "generateAnyway": "仍然生成"
     },
     "report": {
+      "overall": "综合得分",
+      "strong": "掌握稳固",
+      "needsWork": "需要复习",
       "summary": "挑战总结",
+      "strengths": "做得好的地方",
+      "improvements": "下一步提升",
+      "evidence": "可信依据",
+      "legacyEvidenceUnavailable": "这份旧报告未记录基于证据的优势与改进点。",
+      "transcriptEvidence": "来自挑战对话",
+      "pageEvidence": "第 {{page}} 页 · {{status}} · {{count}} 次探针",
+      "radarLabel": "挑战四维表现雷达图",
+      "radarDescription": "各维度得分：{{scores}}",
       "errors": "事实错误",
       "noErrors": "没有记录到事实错误。",
       "corrected": "已纠正",
