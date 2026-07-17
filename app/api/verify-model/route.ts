@@ -1,32 +1,72 @@
 import { NextRequest } from 'next/server';
 import { createLogger } from '@/lib/logger';
 import { apiError, apiSuccess } from '@/lib/server/api-response';
-import { resolveModel } from '@/lib/server/resolve-model';
+import { getExpectedResolvedModelFromHeaders, resolveModel } from '@/lib/server/resolve-model';
 import { callLLM } from '@/lib/ai/llm';
 const log = createLogger('Verify Model');
 
+type SafeCodexStatus = 401 | 403 | 429;
+
+function getSafeCodexStatus(error: unknown): SafeCodexStatus | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const record = error as { statusCode?: unknown; upstreamStatus?: unknown; code?: unknown };
+  for (const status of [record.statusCode, record.upstreamStatus]) {
+    if (status === 401 || status === 403 || status === 429) return status;
+  }
+  if (
+    record.code === 'CREDENTIALS_MISSING' ||
+    record.code === 'SIGNED_OUT' ||
+    record.code === 'INVALID_GRANT' ||
+    record.code === 'REFRESH_REJECTED'
+  ) {
+    return 401;
+  }
+  return undefined;
+}
+
+function codexErrorResponse(error: unknown) {
+  const status = getSafeCodexStatus(error) ?? 500;
+  if (status === 401) {
+    return apiError('INVALID_REQUEST', status, 'ChatGPT sign-in is required');
+  }
+  if (status === 403) {
+    return apiError('INVALID_REQUEST', status, 'This ChatGPT workspace does not have Codex access');
+  }
+  if (status === 429) {
+    return apiError('RATE_LIMITED', status, 'ChatGPT plan quota or rate limit reached');
+  }
+  return apiError('UPSTREAM_ERROR', status, 'Codex connection failed');
+}
+
 export async function POST(req: NextRequest) {
   let model: string | undefined;
+  let isCodex = false;
   try {
     const body = await req.json();
-    const { apiKey, baseUrl, providerType } = body;
-    model = body.model;
+    const { apiKey, baseUrl, providerType, serviceTier } = body;
+    const rawModel: unknown = body.model;
 
-    if (!model) {
+    if (typeof rawModel !== 'string' || rawModel.trim().length === 0) {
       return apiError('MISSING_REQUIRED_FIELD', 400, 'Model name is required');
     }
+    model = rawModel;
+    isCodex = model.startsWith('openai-codex:');
 
     // Parse model string and resolve server-side fallback
     let languageModel;
     try {
+      const expectedResolvedModel = getExpectedResolvedModelFromHeaders(req);
       const result = await resolveModel({
         modelString: model,
         apiKey: apiKey || '',
         baseUrl: baseUrl || undefined,
         providerType,
+        ...(expectedResolvedModel ? { expectedResolvedModel } : {}),
+        ...(isCodex && serviceTier === 'priority' ? { serviceTier: 'priority' as const } : {}),
       });
       languageModel = result.model;
     } catch (error) {
+      if (isCodex) return codexErrorResponse(error);
       return apiError(
         'INVALID_REQUEST',
         401,
@@ -52,6 +92,11 @@ export async function POST(req: NextRequest) {
       response: text,
     });
   } catch (error) {
+    if (isCodex) {
+      const status = getSafeCodexStatus(error) ?? 500;
+      log.error(`Codex model verification failed [status=${status}]`);
+      return codexErrorResponse(error);
+    }
     log.error(`Model verification failed [model="${model ?? 'unknown'}"]:`, error);
 
     let errorMessage = 'Connection failed';
