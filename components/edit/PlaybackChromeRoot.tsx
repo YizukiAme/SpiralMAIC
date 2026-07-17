@@ -85,7 +85,9 @@ import { toast } from 'sonner';
 
 function markOvertimeSceneLearned(scene: Scene): void {
   const conceptIds = scene.overtime?.conceptIds ?? [];
-  if (conceptIds.length === 0 || useSettingsStore.getState().activeRevisitDemoSessionId) return;
+  const activeDemoSessionId =
+    useSettingsStore.getState().activeRevisitDemoSessionByStage[scene.stageId];
+  if (conceptIds.length === 0 || activeDemoSessionId) return;
   void markLessonConceptsLearned(scene.stageId, conceptIds, Date.now()).catch((error) => {
     console.error('[Overtime] Failed to record the page learning completion.', error);
   });
@@ -178,13 +180,21 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
     const setChatAreaCollapsed = useSettingsStore((s) => s.setChatAreaCollapsed);
     const setTTSMuted = useSettingsStore((s) => s.setTTSMuted);
     const setTTSVolume = useSettingsStore((s) => s.setTTSVolume);
-    const activeRevisitDemoSessionId = useSettingsStore((s) => s.activeRevisitDemoSessionId);
-    const revisitVirtualClockOffsetHours = useSettingsStore(
-      (s) => s.revisitVirtualClockOffsetHours,
+    const activeRevisitDemoSessionByStage = useSettingsStore(
+      (s) => s.activeRevisitDemoSessionByStage,
     );
+    const revisitVirtualClockOffsetHoursByStage = useSettingsStore(
+      (s) => s.revisitVirtualClockOffsetHoursByStage,
+    );
+    const activeRevisitDemoSessionId = stage?.id
+      ? activeRevisitDemoSessionByStage[stage.id]
+      : undefined;
+    const revisitVirtualClockOffsetHours = stage?.id
+      ? (revisitVirtualClockOffsetHoursByStage[stage.id] ?? 0)
+      : 0;
     const revisitDataScope = useMemo(
-      () => resolveActiveRevisitScope(activeRevisitDemoSessionId),
-      [activeRevisitDemoSessionId],
+      () => resolveActiveRevisitScope(stage?.id ?? '', activeRevisitDemoSessionByStage),
+      [activeRevisitDemoSessionByStage, stage?.id],
     );
     const [overtimeExtensions, setOvertimeExtensions] = useState<OvertimeExtension[]>([]);
     const [pendingNewCourse, setPendingNewCourse] = useState<{

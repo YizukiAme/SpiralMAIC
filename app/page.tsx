@@ -95,7 +95,6 @@ import { RevisitReviewPanel as SpiralReviewPanel } from '@/components/revisit/re
 import { createOrGetRevisitAttempt, listRevisitAttempts } from '@/lib/revisit/attempt-store';
 import { resolveActiveRevisitScope } from '@/lib/revisit/clock';
 import { serializeRevisitScope } from '@/lib/revisit/scope';
-import { RevisitDemoBadge } from '@/components/revisit/demo-badge';
 
 const log = createLogger('Home');
 
@@ -147,12 +146,13 @@ function HomePage() {
   const reverseChallengeEnabled = useSettingsStore((s) => s.reverseChallengeEnabled);
   const setReverseChallengeEnabled = useSettingsStore((s) => s.setReverseChallengeEnabled);
   const stableSuccessesRequired = useSettingsStore((s) => s.stableSuccessesRequired);
-  const activeRevisitDemoSessionId = useSettingsStore((s) => s.activeRevisitDemoSessionId);
-  const revisitVirtualClockOffsetHours = useSettingsStore((s) => s.revisitVirtualClockOffsetHours);
-  const setActiveRevisitDemoSession = useSettingsStore((s) => s.setActiveRevisitDemoSession);
-  const setRevisitVirtualClockOffsetHours = useSettingsStore(
-    (s) => s.setRevisitVirtualClockOffsetHours,
+  const activeRevisitDemoSessionByStage = useSettingsStore(
+    (s) => s.activeRevisitDemoSessionByStage,
   );
+  const revisitVirtualClockOffsetHoursByStage = useSettingsStore(
+    (s) => s.revisitVirtualClockOffsetHoursByStage,
+  );
+  const setActiveRevisitDemoSession = useSettingsStore((s) => s.setActiveRevisitDemoSession);
   const hasUsableProvider = hasUsableLLMProvider(providersConfig);
   const [recentOpen, setRecentOpen] = useState(true);
   const persistRecentOpen = useCallback((next: boolean) => {
@@ -226,13 +226,18 @@ function HomePage() {
     window.setTimeout(() => revokeThumbnailSlideMediaUrls(previous), 0);
   }, []);
 
-  const revisitScope = useMemo(
-    () => resolveActiveRevisitScope(activeRevisitDemoSessionId),
-    [activeRevisitDemoSessionId],
+  const getRevisitScope = useCallback(
+    (stageId: string) => resolveActiveRevisitScope(stageId, activeRevisitDemoSessionByStage),
+    [activeRevisitDemoSessionByStage],
   );
   const getCurrentRevisitNow = useCallback(
-    () => Date.now() + revisitVirtualClockOffsetHours * 60 * 60 * 1000,
-    [revisitVirtualClockOffsetHours],
+    (stageId: string) =>
+      Date.now() + (revisitVirtualClockOffsetHoursByStage[stageId] ?? 0) * 60 * 60 * 1000,
+    [revisitVirtualClockOffsetHoursByStage],
+  );
+  const revisitPanelScope = useMemo(
+    () => getRevisitScope(revisitPanelClassroom?.id ?? ''),
+    [getRevisitScope, revisitPanelClassroom?.id],
   );
 
   // Close dropdowns when clicking outside
@@ -277,14 +282,17 @@ function HomePage() {
     let refreshTimer: number | undefined;
     const refreshMemory = async () => {
       try {
-        const memory = await loadLessonMemorySummaries(
-          classrooms.map((c) => c.id),
-          {
-            stableSuccessesRequired,
-            scope: revisitScope,
-            now: getCurrentRevisitNow(),
-          },
+        const entries = await Promise.all(
+          classrooms.map(async (classroom) => {
+            const memory = await loadLessonMemorySummaries([classroom.id], {
+              stableSuccessesRequired,
+              scope: getRevisitScope(classroom.id),
+              now: getCurrentRevisitNow(classroom.id),
+            });
+            return [classroom.id, memory[classroom.id]] as const;
+          }),
         );
+        const memory = Object.fromEntries(entries);
         if (!cancelled) setMemorySummaries(memory);
       } catch (err) {
         log.error('Failed to load Spiral memory summaries:', err);
@@ -306,7 +314,7 @@ function HomePage() {
   }, [
     classrooms,
     getCurrentRevisitNow,
-    revisitScope,
+    getRevisitScope,
     reverseChallengeEnabled,
     stableSuccessesRequired,
   ]);
@@ -393,6 +401,7 @@ function HomePage() {
         setRevisitPanelError(null);
       }
       try {
+        const revisitScope = getRevisitScope(classroom.id);
         const [
           stageData,
           progress,
@@ -412,7 +421,7 @@ function HomePage() {
           listStudyArtifacts(classroom.id, undefined, revisitScope),
           getPendingAssessmentConcepts(classroom.id, revisitScope),
         ]);
-        const now = getCurrentRevisitNow();
+        const now = getCurrentRevisitNow(classroom.id);
         const memory =
           conceptStates.length > 0
             ? computeLessonMemory(conceptStates, now, {
@@ -454,7 +463,7 @@ function HomePage() {
         }
       }
     },
-    [getCurrentRevisitNow, revisitScope, stableSuccessesRequired],
+    [getCurrentRevisitNow, getRevisitScope, stableSuccessesRequired],
   );
 
   useEffect(() => {
@@ -495,6 +504,7 @@ function HomePage() {
   };
 
   const startReverseChallenge = async (classroom: StageListItem) => {
+    const revisitScope = getRevisitScope(classroom.id);
     try {
       if (!(await getLessonProgress(classroom.id, revisitScope))) {
         toast.info(t('revisit.panel.completeCourseFirst'));
@@ -520,7 +530,7 @@ function HomePage() {
       stage: stageData.stage,
       sourceScenes: stageData.scenes,
       scope: revisitScope,
-      now: getCurrentRevisitNow(),
+      now: getCurrentRevisitNow(classroom.id),
     });
     const scope = encodeURIComponent(serializeRevisitScope(revisitScope));
     if (attempt.status === 'ready') {
@@ -534,7 +544,10 @@ function HomePage() {
     );
   };
 
-  const openReverseAttempt = (attempt: RevisitAttempt, scope = revisitScope) => {
+  const openReverseAttempt = (
+    attempt: RevisitAttempt,
+    scope = getRevisitScope(attempt.stageId),
+  ) => {
     const serializedScope = encodeURIComponent(serializeRevisitScope(scope));
     const target =
       attempt.status === 'preparing' || !attempt.scenes[0]
@@ -711,7 +724,7 @@ function HomePage() {
 
   const formatSuggestedReview = (timestamp: number | null) => {
     if (!timestamp) return t('revisit.panel.none');
-    const now = getCurrentRevisitNow();
+    const now = getCurrentRevisitNow(revisitPanelClassroom?.id ?? '');
     if (timestamp <= now + 60_000) return t('revisit.panel.now');
     return formatDateTime(timestamp);
   };
@@ -746,7 +759,6 @@ function HomePage() {
       )}
       {/* ═══ Top-right controls ═══ */}
       <div ref={toolbarRef} className="fixed top-4 right-4 z-50 flex items-center gap-2">
-        <RevisitDemoBadge scope={revisitScope} offsetHours={revisitVirtualClockOffsetHours} />
         <SpiralModeBar
           enabled={reverseChallengeEnabled}
           onChange={(enabled) => {
@@ -1304,11 +1316,9 @@ function HomePage() {
           )
         }
         onClearDemoData={() => {
-          setActiveRevisitDemoSession(null);
-          setRevisitVirtualClockOffsetHours(0);
-          void (revisitPanelClassroom
-            ? loadRevisitPanel(revisitPanelClassroom, { silent: true })
-            : undefined);
+          if (revisitPanelClassroom) {
+            setActiveRevisitDemoSession(revisitPanelClassroom.id, null);
+          }
         }}
         onRefresh={() =>
           revisitPanelClassroom
@@ -1317,7 +1327,7 @@ function HomePage() {
         }
         formatDateTime={formatDateTime}
         formatSuggestedReview={formatSuggestedReview}
-        dataScope={revisitScope}
+        dataScope={revisitPanelScope}
       />
 
       {/* Footer — flows with content, at the very end */}

@@ -1715,7 +1715,7 @@
       "acceleratedClock": "加速时钟",
       "gateSkip": "跳过页门控",
       "virtualClock": "虚拟时钟",
-      "virtualClockDetail": "首次推进会复制完整 Spiral 数据；正式记录不会被模拟操作修改。",
+      "virtualClockDetail": "首次推进只会复制当前课程的 Spiral 数据；正式记录不会被模拟操作修改。",
       "simulatedTime": "当前时间",
       "realTime": "真实系统时间",
       "demoOffset": "Demo 时间已前进 {{hours}} 小时",
@@ -1926,7 +1926,7 @@
     },
     "demo": {
       "title": "Demo 临时盒",
-      "subtitle": "查看独立保存的模拟时间批次。",
+      "subtitle": "查看当前课程独立保存的模拟时间批次。",
       "batches": "演示批次",
       "isolated": "每个批次使用独立数据副本，不会写入正式学习记录。",
       "empty": "还没有 Demo 数据",
@@ -1935,8 +1935,8 @@
       "batchName": "Demo · {{date}}",
       "counts": "Reverse {{attempts}} · 报告 {{reports}} · 材料 {{artifacts}} · 练习 {{practice}}",
       "clear": "清空 Demo 数据",
-      "clearTitle": "清空所有 Demo 数据？",
-      "clearDescription": "所有演示批次及其挑战、报告、材料和练习记录都会被永久删除。"
+      "clearTitle": "清空这门课的 Demo 数据？",
+      "clearDescription": "当前课程的所有演示批次及其挑战、报告、材料和练习记录都会被永久删除。"
     },
     "studio": {
       "title": "教学材料工作台",

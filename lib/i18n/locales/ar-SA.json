@@ -1715,7 +1715,7 @@
       "acceleratedClock": "ساعة مسرعة",
       "gateSkip": "تخطي بوابات الصفحات",
       "virtualClock": "ساعة افتراضية",
-      "virtualClockDetail": "ينسخ أول انتقال زمني كل بيانات Spiral ولا يغير السجلات الرسمية.",
+      "virtualClockDetail": "ينسخ أول انتقال زمني بيانات Spiral الخاصة بهذه الدورة فقط ولا يغير السجلات الرسمية.",
       "simulatedTime": "الوقت الحالي",
       "realTime": "وقت النظام الحقيقي",
       "demoOffset": "وقت Demo متقدم {{hours}} ساعة",
@@ -1935,8 +1935,8 @@
       "batchName": "Demo · {{date}}",
       "counts": "Reverse {{attempts}} · تقارير {{reports}} · مواد {{artifacts}} · تدريب {{practice}}",
       "clear": "مسح بيانات Demo",
-      "clearTitle": "مسح كل بيانات Demo؟",
-      "clearDescription": "ستحذف نهائيًا كل دفعات العرض وتحدياتها وتقاريرها وموادها وتدريباتها."
+      "clearTitle": "مسح بيانات Demo لهذه الدورة؟",
+      "clearDescription": "ستحذف نهائيًا كل دفعات العرض لهذه الدورة وتحدياتها وتقاريرها وموادها وتدريباتها."
     },
     "studio": {
       "title": "استوديو مواد المراجعة",

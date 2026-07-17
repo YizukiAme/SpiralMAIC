@@ -1695,6 +1695,10 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
       setIsStreaming(true);
 
       const currentState = useStageStore.getState();
+      const activeDemoSessionId = currentState.stage?.id
+        ? (useSettingsStore.getState().activeRevisitDemoSessionByStage[currentState.stage.id] ??
+          null)
+        : null;
       const overtimeContext = buildOvertimeRequestContext({
         stageId: currentState.stage?.id,
         currentSceneId: currentState.currentSceneId,
@@ -1702,7 +1706,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
         generationComplete: currentState.generationComplete,
         outlineCount: currentState.outlines.length,
         generatingOutlineCount: currentState.generatingOutlines.length,
-        activeDemoSessionId: useSettingsStore.getState().activeRevisitDemoSessionId,
+        activeDemoSessionId,
       });
 
       try {
@@ -1929,6 +1933,10 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
       });
 
       const currentState = useStageStore.getState();
+      const activeDemoSessionId = currentState.stage?.id
+        ? (useSettingsStore.getState().activeRevisitDemoSessionByStage[currentState.stage.id] ??
+          null)
+        : null;
       const overtimeContext = buildOvertimeRequestContext({
         stageId: currentState.stage?.id,
         currentSceneId: currentState.currentSceneId,
@@ -1936,7 +1944,7 @@ export function useChatSessions(options: UseChatSessionsOptions = {}) {
         generationComplete: currentState.generationComplete,
         outlineCount: currentState.outlines.length,
         generatingOutlineCount: currentState.generatingOutlines.length,
-        activeDemoSessionId: useSettingsStore.getState().activeRevisitDemoSessionId,
+        activeDemoSessionId,
       });
 
       try {
