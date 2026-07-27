@@ -38,6 +38,14 @@ export function isPiChatEnabled(): boolean {
 }
 
 /**
+ * Server-only gate for the Pi Director web-search tool. Default OFF. Enabling
+ * Pi chat alone must not implicitly grant the Director external network access.
+ */
+export function isPiWebSearchEnabled(): boolean {
+  return readBoolean(process.env.OPENMAIC_ENABLE_PI_WEB_SEARCH);
+}
+
+/**
  * Server-authoritative gate for the vocational task-engine generation path.
  * Default OFF. When disabled, requests that include taskEngineMode must
  * silently fall back to the ordinary standard / interactive generation paths.

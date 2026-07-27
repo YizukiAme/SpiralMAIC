@@ -21,6 +21,7 @@ import type {
   ThinkingContent,
   Tool as PiTool,
   ToolCall,
+  SimpleStreamOptions,
 } from '@earendil-works/pi-ai';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
 import {
@@ -32,6 +33,7 @@ import {
   type ToolSet,
 } from 'ai';
 import { streamLLM } from '@/lib/ai/llm';
+import { normalizeUsage } from '@/lib/usage/normalize';
 import type { ThinkingConfig } from '@/lib/types/provider';
 import {
   captureToolCallMetadata,
@@ -207,9 +209,9 @@ export function createPartMapper(
 
 /** Build a pi `StreamFn` that calls OpenMAIC's connector instead of pi-ai providers. */
 export function createCallLlmStreamFn(opts: CallLlmStreamFnOptions): StreamFn {
-  return ((_piModel, context: PiContext) => {
+  return ((_piModel, context: PiContext, streamOptions?: SimpleStreamOptions) => {
     const stream = new LocalAssistantEventStream();
-    void pump(stream, context, opts);
+    void pump(stream, context, opts, streamOptions);
     return stream as unknown as AssistantMessageEventStream;
   }) as StreamFn;
 }
@@ -218,6 +220,7 @@ async function pump(
   stream: LocalAssistantEventStream,
   context: PiContext,
   opts: CallLlmStreamFnOptions,
+  streamOptions?: SimpleStreamOptions,
 ): Promise<void> {
   const partial: AssistantMessage = {
     role: 'assistant',
@@ -231,6 +234,11 @@ async function pump(
   };
 
   try {
+    const requestedMaxTokens = streamOptions?.maxTokens;
+    const maxOutputTokens =
+      opts.maxOutputTokens && requestedMaxTokens
+        ? Math.min(opts.maxOutputTokens, requestedMaxTokens)
+        : (requestedMaxTokens ?? opts.maxOutputTokens);
     const result = streamLLM(
       {
         model: opts.languageModel,
@@ -245,8 +253,8 @@ async function pump(
         toolChoice: 'auto',
         // pi's loop owns multi-step; one LLM turn per streamFn call.
         stopWhen: stepCountIs(1),
-        maxOutputTokens: opts.maxOutputTokens,
-        abortSignal: opts.abortSignal,
+        maxOutputTokens,
+        abortSignal: opts.abortSignal ?? streamOptions?.signal,
       },
       opts.source ?? 'maic-agent',
       opts.thinkingConfig,
@@ -259,6 +267,23 @@ async function pump(
       mapper.handle(part);
     }
     mapper.finalize();
+
+    const usage = normalizeUsage(await result.usage);
+    // AI SDK inputTokens includes cached input. Pi stores cached classes
+    // separately, so subtract them before calculating its total.
+    const uncachedInput = Math.max(
+      0,
+      usage.inputTokens - usage.cacheReadTokens - usage.cacheCreationTokens,
+    );
+    partial.usage = {
+      input: uncachedInput,
+      output: usage.outputTokens,
+      cacheRead: usage.cacheReadTokens,
+      cacheWrite: usage.cacheCreationTokens,
+      totalTokens:
+        uncachedInput + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    };
 
     const hasToolCall = partial.content.some((c) => (c as ToolCall).type === 'toolCall');
     partial.stopReason = hasToolCall ? 'toolUse' : 'stop';
