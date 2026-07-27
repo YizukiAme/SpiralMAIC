@@ -22,6 +22,14 @@ export function isMaicEditorEnabled(): boolean {
 }
 
 /**
+ * Experimental playback canvas renderer. Default OFF so classroom playback uses
+ * the legacy in-app renderer unless explicitly enabled in `.env.local`.
+ */
+export function isPlaybackRendererEnabled(): boolean {
+  return readBoolean(process.env.NEXT_PUBLIC_MAIC_PLAYBACK_RENDERER_ENABLED);
+}
+
+/**
  * Experimental Pi-based classroom chat runtime. Default OFF. The same public
  * flag selects the client runtime and gates the corresponding server route.
  */

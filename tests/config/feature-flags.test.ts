@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   isMaicEditorEnabled,
+  isPlaybackRendererEnabled,
   isPiChatEnabled,
   isVideoExportEnabled,
   isVocationalTaskEngineEnabled,
@@ -48,6 +49,44 @@ describe('isMaicEditorEnabled', () => {
   it('returns false for an unrecognized string', () => {
     process.env[FLAG] = 'yes';
     expect(isMaicEditorEnabled()).toBe(false);
+  });
+});
+
+describe('isPlaybackRendererEnabled', () => {
+  const flag = 'NEXT_PUBLIC_MAIC_PLAYBACK_RENDERER_ENABLED';
+  let original: string | undefined;
+
+  beforeEach(() => {
+    original = process.env[flag];
+  });
+
+  afterEach(() => {
+    if (original === undefined) {
+      delete process.env[flag];
+    } else {
+      process.env[flag] = original;
+    }
+  });
+
+  it('defaults off when unset', () => {
+    delete process.env[flag];
+    expect(isPlaybackRendererEnabled()).toBe(false);
+  });
+
+  it("returns true for 'true' and '1'", () => {
+    process.env[flag] = 'true';
+    expect(isPlaybackRendererEnabled()).toBe(true);
+
+    process.env[flag] = '1';
+    expect(isPlaybackRendererEnabled()).toBe(true);
+  });
+
+  it('returns false for other values', () => {
+    process.env[flag] = 'false';
+    expect(isPlaybackRendererEnabled()).toBe(false);
+
+    process.env[flag] = 'yes';
+    expect(isPlaybackRendererEnabled()).toBe(false);
   });
 });
 
