@@ -77,3 +77,8 @@ export function shouldShowVocationalTestUi(): boolean {
 export function isVideoExportEnabled(): boolean {
   return readBoolean(process.env.NEXT_PUBLIC_ENABLE_VIDEO_EXPORT);
 }
+
+/** Experimental PPTX import entry point. Default OFF. */
+export function isPptxImportEnabled(): boolean {
+  return readBoolean(process.env.NEXT_PUBLIC_ENABLE_PPTX_IMPORT);
+}

@@ -3,6 +3,7 @@ import {
   isMaicEditorEnabled,
   isPlaybackRendererEnabled,
   isPiChatEnabled,
+  isPptxImportEnabled,
   isPiWebSearchEnabled,
   isVideoExportEnabled,
   isVocationalTaskEngineEnabled,
@@ -267,5 +268,33 @@ describe('isVideoExportEnabled', () => {
 
     process.env[flag] = 'yes';
     expect(isVideoExportEnabled()).toBe(false);
+  });
+});
+
+describe('isPptxImportEnabled', () => {
+  const flag = 'NEXT_PUBLIC_ENABLE_PPTX_IMPORT';
+  let original: string | undefined;
+
+  beforeEach(() => {
+    original = process.env[flag];
+  });
+
+  afterEach(() => {
+    if (original === undefined) delete process.env[flag];
+    else process.env[flag] = original;
+  });
+
+  it("returns true for 'true' and '1'", () => {
+    process.env[flag] = 'true';
+    expect(isPptxImportEnabled()).toBe(true);
+    process.env[flag] = '1';
+    expect(isPptxImportEnabled()).toBe(true);
+  });
+
+  it('returns false when unset or disabled', () => {
+    delete process.env[flag];
+    expect(isPptxImportEnabled()).toBe(false);
+    process.env[flag] = 'false';
+    expect(isPptxImportEnabled()).toBe(false);
   });
 });
