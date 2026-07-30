@@ -89,7 +89,21 @@ semantics.
       DSL migration registry, validation gate) + browser backend
 - [x] `RuntimeStore` (sessions + append-only records, runtime version line,
       per-kind payload gate) + browser backend
-- [ ] wire the app's zustand stores + ad-hoc `localStorage` through `KVStore`
+- [x] wire the app's settings + user-profile `persist` stores through `KVStore`
+      (both `account` scope). No automatic migration of pre-cutover data: new
+      data persists through `KVStore`, legacy `localStorage` keys are ignored
+      (not migrated) and best-effort purged, and a user reconfigures once on
+      upgrade
+- [ ] wire the app's third `persist` store (`agent-registry-storage`), still on
+      zustand's default `localStorage`
+- [ ] wire the app's remaining ad-hoc `localStorage` keys through `KVStore`
+- [ ] a hydration gate the app actually consumes — **required before an
+      `account` scope can be served remotely**. With the browser backend,
+      hydration resolves within microtasks of module evaluation and nothing
+      observes it; a network round trip makes the gap visible, and the one-shot
+      decisions taken against a not-yet-hydrated store (classroom agent-selection
+      restore, media orchestration, scene-generator retry, server-provider
+      reconcile) decide wrongly and then have their corrective writes refused
 - [x] RuntimeStore HTTP backend + reference server + HTTP contract
 - [x] RuntimeStore PostgreSQL backend
 - [x] DocumentStore HTTP backend + reference-server routes + HTTP contract
