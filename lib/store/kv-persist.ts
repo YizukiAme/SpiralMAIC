@@ -34,6 +34,7 @@
 import {
   BrowserKVStore,
   kvPersistStorage,
+  type DeviceSafeKVStore,
   type KVScope,
   type KVStore,
   type PersistStorageLike,
@@ -472,6 +473,11 @@ function resolveKv(deps: KVPersistDeps): KVStore | null {
   return (defaultKv ??= new BrowserKVStore());
 }
 
+/** True when a KV backend keeps its `device` scope on the machine. */
+function isDeviceSafeKVStore(kv: KVStore): kv is DeviceSafeKVStore {
+  return (kv as Partial<DeviceSafeKVStore>).servesDeviceScopeLocally === true;
+}
+
 /**
  * Best-effort, fire-and-forget removal of a store's pre-cutover raw
  * `localStorage` entry (the value zustand's default storage used to write).
@@ -518,7 +524,19 @@ export function createKVPersistStorage<S>(
   // SSR as well, where there is no storage to bind to yet.
   const resolveKvStorage = (): PersistStorageLike<S> | null => {
     const kv = resolveKv(deps);
-    return kv ? kvPersistStorage<S>(kv, scope) : null;
+    if (!kv) return null;
+    // `kvPersistStorage` takes the scope as a literal, not a variable, so that
+    // pairing `'device'` with a store whose device scope would leave the machine
+    // is a type error. Branch on the scope; the `'device'` overload additionally
+    // requires a device-safe store, which is narrowed by its brand (the adapter
+    // re-checks it at runtime). The app only wires `'account'` today; the
+    // `'device'` arm keeps the generic helper honest.
+    if (scope === 'account') return kvPersistStorage<S>(kv, 'account');
+    if (isDeviceSafeKVStore(kv)) return kvPersistStorage<S>(kv, 'device');
+    throw new Error(
+      '@/lib/store/kv-persist: a device-scoped persist store requires a KV backend whose ' +
+        'device scope stays local (servesDeviceScopeLocally)',
+    );
   };
 
   const states = new Map<string, KeyState<S>>();

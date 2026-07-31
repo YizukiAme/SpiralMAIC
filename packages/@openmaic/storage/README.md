@@ -33,11 +33,18 @@ a browser.
 - **Scopes.** `account` values are user data a server-backed deployment syncs
   across devices; `device` values (theme, locale, layout) never leave the
   device — every backend honours that, so the scope is part of the primitive,
-  not the backend choice.
+  not the backend choice. The [KV HTTP contract](./docs/kv-http-contract.md) is
+  `account`-only and carries no scope on the wire at all, so `HttpKVStore`
+  routes `device` to a `LocalKVStore` it requires at construction — a *branded*
+  local backend, because a networked store satisfies plain `KVStore`
+  structurally and would otherwise be accepted as the place device values live.
 - **Content-addressed assets.** `BrowserAssetProvider` refs are `sha256-<hex>`,
   so identical bytes de-duplicate to one stored asset. A document embeds only
   the stable ref; the provider resolves it to a URL at render time (a raw URL
-  would bake in a provider + expiry and break portability).
+  would bake in a provider + expiry and break portability). The ref stays
+  opaque to this package — only the issuing provider interprets it. The server
+  backend is being redesigned around a global resource pool (#1007) and is not
+  part of this package yet.
 - **Document normalization.** The DSL `document` is a portable embedded
   aggregate; `DocumentStore` normalizes it into per-entity rows so scene-level
   writes (`putScene`) stay cheap, and reassembles it on read. Each document is
@@ -108,6 +115,10 @@ semantics.
 - [x] RuntimeStore PostgreSQL backend
 - [x] DocumentStore HTTP backend + reference-server routes + HTTP contract
 - [x] DocumentStore PostgreSQL backend
+- [x] `KVStore` (`account`) HTTP backend + HTTP contract
+- [ ] `KVStore` server-side reference backend and reference-server route
+- [ ] `AssetProvider` server backend — redesigned around a global resource
+      pool (#1007)
 
 ## License
 

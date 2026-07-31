@@ -2,9 +2,20 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # Integration branches are listed here as well as below: a pull_request run
+    # only ever proves one part merged into the branch, so without a push
+    # trigger the accumulated state of the branch that eventually reaches main
+    # is never built on its own.
+    branches: [main, integration/kv-asset-server-backend]
   pull_request:
-    branches: [main, feat/maic-editor-v0, feat/maic-editor-v1, runtime-server-backend]
+    branches:
+      [
+        main,
+        feat/maic-editor-v0,
+        feat/maic-editor-v1,
+        runtime-server-backend,
+        integration/kv-asset-server-backend,
+      ]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -75,6 +86,12 @@ jobs:
 
       - name: Unit Tests (dsl)
         run: pnpm --filter @openmaic/dsl test
+
+      # Covers the package's own test tree, which the root tsc reaches only by an
+      # incidental glob. The device-scope guard is written as `@ts-expect-error`
+      # probes in those tests, and a probe nothing type-checks proves nothing.
+      - name: TypeScript (storage, incl. tests)
+        run: pnpm --filter @openmaic/storage run typecheck
 
       - name: Unit Tests (storage)
         run: pnpm --filter @openmaic/storage test

@@ -13,7 +13,12 @@
  * lost. Most cases below are therefore *sequences*, not single calls.
  */
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
-import { BrowserKVStore, type KVScope, type KVStore } from '@openmaic/storage';
+import {
+  BrowserKVStore,
+  type DeviceSafeKVStore,
+  type KVScope,
+  type KVStore,
+} from '@openmaic/storage';
 
 import { createKVPersistStorage, DEFAULT_RECOVERY_BACKOFF_MS } from '@/lib/store/kv-persist';
 import {
@@ -36,7 +41,11 @@ const flushTasks = async () => {
  * the test releases it. Faults are the subject of these cases, so they are
  * injected at the backend rather than mocked at the adapter.
  */
-class ControllableKV implements KVStore {
+class ControllableKV implements DeviceSafeKVStore {
+  // Device-safe: it wraps a local BrowserKVStore, so its device scope stays on
+  // the machine. The brand lets it back a `'device'`-scoped persist store, which
+  // #1002's `kvPersistStorage` requires of any device backend.
+  readonly servesDeviceScopeLocally = true as const;
   failGet = false;
   failSet = false;
   failRemove = false;
