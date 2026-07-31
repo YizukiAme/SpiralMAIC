@@ -382,7 +382,8 @@
       "sessionEmpty": "暂无历史对话",
       "thinking": "思考中…",
       "reasoning": "思考过程",
-      "thought": "已思考"
+      "thought": "已思考",
+      "title": "用 AI 编辑"
     },
     "timeline": {
       "title": "讲解脚本",
@@ -475,6 +476,21 @@
       "notApplied": "未应用",
       "applyFailed": "编辑器无法应用元素修改，未更改任何内容。",
       "applyPartiallyFailed": "编辑器未能应用一项或多项元素修改，其他修改可能已应用。"
+    },
+    "roster": {
+      "title": "课堂阵容",
+      "count": "{{count}} 位",
+      "editHint": "点击一位展开编辑",
+      "personaLabel": "人设描述",
+      "personaPlaceholder": "描述角色的性格、教学风格与任务…",
+      "noPersona": "暂无人设",
+      "unnamed": "未命名",
+      "teacherBadge": "主讲",
+      "moveUp": "上移",
+      "moveDown": "下移",
+      "removeFromClass": "移出课堂",
+      "aiClassmates": "AI 同学 · {{count}}",
+      "addRole": "添加角色"
     }
   },
   "classroomComplete": {

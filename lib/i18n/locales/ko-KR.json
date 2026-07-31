@@ -333,7 +333,8 @@
         "lead": "이 인터랙티브 페이지의 버그(예: 눌러도 반응 없는 버튼)를 설명해 주세요. 해당 부분만 수정하고 나머지는 그대로 둡니다.",
         "placeholder": "이 인터랙티브 페이지의 버그를 설명하세요…"
       },
-      "thinking": "생각 중…"
+      "thinking": "생각 중…",
+      "title": "AI로 편집"
     },
     "timeline": {
       "title": "내레이션 스크립트",
@@ -475,6 +476,21 @@
       "notApplied": "미적용",
       "applyFailed": "편집기에서 요소 편집을 적용하지 못했습니다. 변경된 내용이 없습니다.",
       "applyPartiallyFailed": "하나 이상의 요소 편집을 적용하지 못했습니다. 다른 편집은 적용되었을 수 있습니다."
+    },
+    "roster": {
+      "title": "수업 구성원",
+      "count": "{{count}}명",
+      "editHint": "구성원을 클릭해 편집",
+      "personaLabel": "페르소나",
+      "personaPlaceholder": "역할의 성격, 수업 스타일, 과제를 설명하세요…",
+      "noPersona": "페르소나 없음",
+      "unnamed": "제목 없음",
+      "teacherBadge": "주강사",
+      "moveUp": "위로 이동",
+      "moveDown": "아래로 이동",
+      "removeFromClass": "수업에서 제거",
+      "aiClassmates": "AI 반 친구 · {{count}}",
+      "addRole": "역할 추가"
     }
   },
   "classroomComplete": {

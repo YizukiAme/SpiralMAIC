@@ -382,7 +382,8 @@
         "lead": "このインタラクティブページの不具合（例：押しても反応しないボタン）を教えてください。その箇所だけを修正し、ほかはそのまま残します。",
         "placeholder": "このインタラクティブページの不具合を入力…"
       },
-      "thinking": "考え中…"
+      "thinking": "考え中…",
+      "title": "AIで編集"
     },
     "timeline": {
       "title": "ナレーション台本",
@@ -475,6 +476,21 @@
       "notApplied": "未適用",
       "applyFailed": "エディターで要素の編集を適用できませんでした。変更はありません。",
       "applyPartiallyFailed": "一部の要素編集を適用できませんでした。ほかの編集は適用されている可能性があります。"
+    },
+    "roster": {
+      "title": "クラス編成",
+      "count": "{{count}}人",
+      "editHint": "メンバーをクリックして編集",
+      "personaLabel": "ペルソナ",
+      "personaPlaceholder": "役割の性格、指導スタイル、タスクを説明…",
+      "noPersona": "ペルソナ未設定",
+      "unnamed": "無題",
+      "teacherBadge": "主担当",
+      "moveUp": "上へ移動",
+      "moveDown": "下へ移動",
+      "removeFromClass": "クラスから削除",
+      "aiClassmates": "AIクラスメイト · {{count}}",
+      "addRole": "役割を追加"
     }
   },
   "classroomComplete": {

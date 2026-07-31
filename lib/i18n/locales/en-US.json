@@ -382,7 +382,8 @@
       "sessionEmpty": "No past conversations",
       "thinking": "Thinking…",
       "reasoning": "Reasoning",
-      "thought": "Thought for"
+      "thought": "Thought for",
+      "title": "Edit with AI"
     },
     "timeline": {
       "title": "Narration script",
@@ -475,6 +476,21 @@
       "notApplied": "Not applied",
       "applyFailed": "The editor could not apply the element edit. Nothing was changed.",
       "applyPartiallyFailed": "The editor could not apply one or more element edits. Other edits may have been applied."
+    },
+    "roster": {
+      "title": "Class roster",
+      "count": "{{count}} members",
+      "editHint": "Click a member to edit",
+      "personaLabel": "Persona",
+      "personaPlaceholder": "Describe the role personality, teaching style, and tasks...",
+      "noPersona": "No persona yet",
+      "unnamed": "Untitled",
+      "teacherBadge": "Lead",
+      "moveUp": "Move up",
+      "moveDown": "Move down",
+      "removeFromClass": "Remove from class",
+      "aiClassmates": "AI classmates · {{count}}",
+      "addRole": "Add role"
     }
   },
   "classroomComplete": {
