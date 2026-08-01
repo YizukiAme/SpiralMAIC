@@ -33,7 +33,7 @@ export interface RevisitPanelSummary {
   pendingAssessmentCount: number;
 }
 
-export function buildRevisitPanelSummary(args: {
+export async function buildRevisitPanelSummary(args: {
   classroom: StageListItem;
   scenes: Scene[];
   progress?: LessonProgress;
@@ -47,8 +47,8 @@ export function buildRevisitPanelSummary(args: {
   now: number;
   stableSuccessesRequired: number;
   readAnswers: AnswerReader;
-}): RevisitPanelSummary {
-  const completeSummary = summarizeScenes(args.scenes, args.readAnswers);
+}): Promise<RevisitPanelSummary> {
+  const completeSummary = await summarizeScenes(args.scenes, args.readAnswers);
   const lessonSourceHash = buildLessonSourceHash(args.classroom, args.scenes);
   return {
     stageId: args.classroom.id,

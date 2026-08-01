@@ -122,8 +122,8 @@ describe('Codex image request contract', () => {
     expect(headers.get('authorization')).toBe('Bearer access-secret');
     expect(headers.get('chatgpt-account-id')).toBe('account-secret');
     expect(headers.get('originator')).toBe('openmaic');
-    expect(headers.get('user-agent')).toMatch(/^OpenMAIC\/0\.3\.0/);
-    expect(headers.get('version')).toBe('0.3.0');
+    expect(headers.get('user-agent')).toMatch(/^OpenMAIC\/0\.3\.1/);
+    expect(headers.get('version')).toBe('0.3.1');
     expect(headers.get('content-type')).toBe('application/json');
   });
 

@@ -21,7 +21,6 @@ import type { WidgetType, WidgetConfig } from '@/lib/types/widgets';
 import type { PBLProjectConfig } from '@/lib/pbl/types';
 import type { PBLProjectV2 } from '@/lib/pbl/v2/types';
 import type { OvertimeSceneProvenance } from '@/lib/overtime/types';
-import type { TTSProviderId } from '@/lib/audio/types';
 import type { VoiceDesign } from '@/lib/audio/voice-design';
 
 export type {
@@ -38,7 +37,10 @@ export type {
 } from '@openmaic/dsl';
 
 export interface PersistedAgentConfig extends DslGeneratedAgentConfig {
-  voiceConfig?: { providerId: TTSProviderId; modelId?: string; voiceId: string };
+  // Persisted/imported documents intentionally keep provider ids open. The
+  // registry validates them against the app's provider catalog before a voice
+  // binding can reach the TTS path.
+  voiceConfig?: { providerId: string; modelId?: string; voiceId: string };
   voiceDesign?: VoiceDesign;
 }
 

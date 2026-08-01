@@ -1,9 +1,10 @@
 import type { PersistedAgentConfig, Stage } from '@/lib/types/stage';
 import type { RevisitAttemptStatus } from '@/lib/revisit/types';
-import { db } from '@/lib/utils/database';
-import { withStagePersistenceLock } from '@/lib/utils/stage-persistence-lock';
-import { useAgentRegistry } from '@/lib/orchestration/registry/store';
-import { getActionsForRole } from '@/lib/orchestration/registry/types';
+import { mutateDocument } from '@/lib/document-store';
+import {
+  applyGeneratedAgentsToRegistry,
+  useAgentRegistry,
+} from '@/lib/orchestration/registry/store';
 import type { AgentConfig } from '@/lib/orchestration/registry/types';
 
 const LEGACY_REVISIT_DEFAULT_AGENTS = [
@@ -83,12 +84,14 @@ export async function saveStageSpiralAgents(
   if (!isValidSpiralAgentRoster(agents)) {
     throw new Error('Invalid Spiral agent roster.');
   }
-  await withStagePersistenceLock(stageId, async () => {
-    const updated = await db.stages.update(stageId, {
+  await mutateDocument(stageId, async (document, store) => {
+    if (!document) throw new Error(`Could not persist Spiral agents for stage ${stageId}.`);
+    const nextStage: Stage = {
+      ...(document.stage as Stage),
       spiralAgentConfigs: structuredClone(agents),
       updatedAt: now,
-    });
-    if (updated !== 1) throw new Error(`Could not persist Spiral agents for stage ${stageId}.`);
+    };
+    await store.putStage(stageId, nextStage);
   });
 }
 
@@ -97,20 +100,5 @@ export function hydrateSpiralAgentRegistry(
   agents: readonly PersistedAgentConfig[],
 ): void {
   if (!isValidSpiralAgentRoster(agents)) throw new Error('Invalid Spiral agent roster.');
-  const registry = useAgentRegistry.getState();
-  for (const agent of registry.listAgents()) {
-    if (agent.isGenerated) registry.deleteAgent(agent.id);
-  }
-  const now = new Date();
-  for (const agent of agents) {
-    registry.addAgent({
-      ...agent,
-      allowedActions: getActionsForRole(agent.role),
-      createdAt: now,
-      updatedAt: now,
-      isDefault: false,
-      isGenerated: true,
-      boundStageId: stageId,
-    });
-  }
+  applyGeneratedAgentsToRegistry(stageId, agents);
 }

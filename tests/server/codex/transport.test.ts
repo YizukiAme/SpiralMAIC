@@ -246,7 +246,7 @@ describe('Codex Responses transport boundary', () => {
     expect(headers.get('authorization')).toBe('Bearer access-token');
     expect(headers.get('chatgpt-account-id')).toBe('account-id');
     expect(headers.get('originator')).toBe('openmaic');
-    expect(headers.get('user-agent')).toMatch(/^OpenMAIC\/0\.3\.0/);
+    expect(headers.get('user-agent')).toMatch(/^OpenMAIC\/0\.3\.1/);
     expect(headers.get('session-id')).toBe(expectedSessionId);
     expect(headers.get('thread-id')).toBeNull();
     expect(headers.get('content-type')).toBe('application/json');

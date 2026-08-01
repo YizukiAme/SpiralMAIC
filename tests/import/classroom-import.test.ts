@@ -1,10 +1,20 @@
 import 'fake-indexeddb/auto';
 
 import JSZip from 'jszip';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { importClassroomBlob } from '@/lib/import/classroom-import';
+import { accessDocument } from '@/lib/document-store';
 import { db } from '@/lib/utils/database';
+import type { Stage } from '@/lib/types/stage';
+
+const storage = new Map<string, string>();
+const localStorageStub = {
+  getItem: (key: string) => storage.get(key) ?? null,
+  setItem: (key: string, value: string) => storage.set(key, value),
+  removeItem: (key: string) => storage.delete(key),
+};
+vi.stubGlobal('localStorage', localStorageStub);
 
 async function clearImportTables() {
   await db.open();
@@ -56,7 +66,10 @@ async function classroomBlob(overrides: Record<string, unknown> = {}) {
   return zip.generateAsync({ type: 'blob' });
 }
 
-beforeEach(clearImportTables);
+beforeEach(async () => {
+  storage.clear();
+  await clearImportTables();
+});
 afterEach(clearImportTables);
 
 describe('importClassroomBlob', () => {
@@ -67,11 +80,12 @@ describe('importClassroomBlob', () => {
       onPhase: (phase) => phases.push(phase),
     });
 
-    await expect(db.stages.get(stageId)).resolves.toMatchObject({
+    const imported = (await accessDocument(stageId)).document;
+    expect(imported?.stage).toMatchObject({
       id: stageId,
       name: 'Demo',
     });
-    await expect(db.scenes.where('stageId').equals(stageId).count()).resolves.toBe(1);
+    expect(imported?.scenes).toHaveLength(1);
     expect(phases).toEqual(['parsing', 'validating', 'writingMedia', 'writingCourse', 'done']);
   });
 
@@ -107,11 +121,16 @@ describe('importClassroomBlob', () => {
       }),
     );
 
-    const imported = await db.stages.get(stageId);
-    expect(imported?.spiralAgentConfigs).toHaveLength(3);
-    expect(imported?.spiralAgentConfigs?.every((agent) => agent.id.startsWith('spiral-'))).toBe(
-      true,
-    );
+    const imported = (await accessDocument(stageId)).document;
+    const spiralAgents = (
+      imported?.stage as
+        | (Stage & {
+            spiralAgentConfigs?: Array<{ id: string }>;
+          })
+        | undefined
+    )?.spiralAgentConfigs;
+    expect(spiralAgents).toHaveLength(3);
+    expect(spiralAgents?.every((agent) => agent.id.startsWith('spiral-'))).toBe(true);
     await expect(db.generatedAgents.where('stageId').equals(stageId).count()).resolves.toBe(0);
   });
 

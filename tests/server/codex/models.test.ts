@@ -420,7 +420,7 @@ describe('Codex models transport boundary', () => {
     expect(headers.get('chatgpt-account-id')).toBe('account-secret');
     expect(headers.get('originator')).toBe('openmaic');
     expect(headers.get('if-none-match')).toBe('etag-1');
-    expect(headers.get('user-agent')).toMatch(/^OpenMAIC\/0\.3\.0 /);
+    expect(headers.get('user-agent')).toMatch(/^OpenMAIC\/0\.3\.1 /);
   });
 
   it('rejects non-GET requests before credential lookup', async () => {

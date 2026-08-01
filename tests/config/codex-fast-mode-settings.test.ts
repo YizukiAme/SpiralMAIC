@@ -13,13 +13,16 @@ const localStorageStub = {
 vi.stubGlobal('localStorage', localStorageStub);
 vi.stubGlobal('window', { localStorage: localStorageStub });
 
+const SETTINGS_KV_KEY = 'maic:account:settings-storage';
+
 async function freshStore(persistedState?: Record<string, unknown>) {
   vi.resetModules();
   storage.clear();
   if (persistedState) {
-    storage.set('settings-storage', JSON.stringify({ state: persistedState, version: 4 }));
+    storage.set(SETTINGS_KV_KEY, JSON.stringify({ state: persistedState, version: 4 }));
   }
   const { useSettingsStore } = await import('@/lib/store/settings');
+  await useSettingsStore.persist.rehydrate();
   return useSettingsStore;
 }
 
@@ -38,7 +41,8 @@ describe('Codex fast mode preference', () => {
     store.getState().setCodexFastMode(true);
 
     expect(store.getState().codexFastMode).toBe(true);
-    expect(JSON.parse(storage.get('settings-storage')!).state.codexFastMode).toBe(true);
+    await vi.waitFor(() => expect(storage.has(SETTINGS_KV_KEY)).toBe(true));
+    expect(JSON.parse(storage.get(SETTINGS_KV_KEY)!).state.codexFastMode).toBe(true);
   });
 
   it('hydrates an older settings blob with the default off', async () => {

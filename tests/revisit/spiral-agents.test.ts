@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   buildLegacyRevisitAgentRoster,
@@ -15,6 +15,15 @@ import { db } from '@/lib/utils/database';
 import { useAgentRegistry } from '@/lib/orchestration/registry/store';
 import { loadStageData } from '@/lib/utils/stage-storage';
 import type { PersistedAgentConfig, Stage } from '@/lib/types/stage';
+import { getDocumentStore, mutateDocument } from '@/lib/document-store';
+
+const storage = new Map<string, string>();
+const localStorageStub = {
+  getItem: (key: string) => storage.get(key) ?? null,
+  setItem: (key: string, value: string) => storage.set(key, value),
+  removeItem: (key: string) => storage.delete(key),
+};
+vi.stubGlobal('localStorage', localStorageStub);
 
 const assistant: PersistedAgentConfig = {
   id: 'spiral-assistant',
@@ -61,10 +70,13 @@ const stage: Stage = {
 
 describe('Spiral agent roster persistence', () => {
   beforeEach(async () => {
+    storage.clear();
+    await getDocumentStore().deleteDocument(stage.id);
     await Promise.all([db.stages.clear(), db.scenes.clear(), db.generatedAgents.clear()]);
   });
 
   afterEach(async () => {
+    await getDocumentStore().deleteDocument(stage.id);
     await Promise.all([db.stages.clear(), db.scenes.clear(), db.generatedAgents.clear()]);
   });
 
@@ -214,7 +226,9 @@ describe('Spiral agent roster persistence', () => {
   });
 
   it('round-trips the roster on the stage without changing normal generated agents', async () => {
-    await db.stages.put(stage);
+    await mutateDocument(stage.id, async (_document, store) =>
+      store.saveDocument({ stage, scenes: [] }),
+    );
     await db.generatedAgents.put({
       id: 'gen-course-teacher',
       stageId: stage.id,

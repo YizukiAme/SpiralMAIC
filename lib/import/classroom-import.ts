@@ -2,9 +2,14 @@
 
 import { nanoid } from 'nanoid';
 
-import type { ClassroomManifest, ManifestScene } from '@/lib/export/classroom-zip-types';
+import {
+  agentConfigFromManifest,
+  type ClassroomManifest,
+  type ManifestScene,
+} from '@/lib/export/classroom-zip-types';
 import { rewriteAudioRefsToIds } from '@/lib/export/classroom-zip-utils';
-import type { GeneratedAgentRecord, MediaFileRecord, StageRecord } from '@/lib/utils/database';
+import { canonicalizeLegacyScene, mutateDocument, type AppDocument } from '@/lib/document-store';
+import type { MediaFileRecord } from '@/lib/utils/database';
 import { db, mediaFileKey } from '@/lib/utils/database';
 import type { PersistedAgentConfig } from '@/lib/types/stage';
 import { isValidSpiralAgentRoster } from '@/lib/revisit/spiral-agents';
@@ -32,17 +37,15 @@ export interface ClassroomImportOptions {
 
 async function bestEffortRollback(created: {
   stageId: string;
-  sceneIds: string[];
-  agentIds: string[];
   audioIds: string[];
   mediaIds: string[];
 }) {
   await Promise.allSettled([
-    db.scenes.bulkDelete(created.sceneIds),
-    db.generatedAgents.bulkDelete(created.agentIds),
+    mutateDocument(created.stageId, async (_document, store) =>
+      store.deleteDocument(created.stageId),
+    ),
     db.audioFiles.bulkDelete(created.audioIds),
     db.mediaFiles.bulkDelete(created.mediaIds),
-    db.stages.delete(created.stageId),
   ]);
 }
 
@@ -54,8 +57,6 @@ export async function importClassroomBlob(
   const newStageId = nanoid();
   const created = {
     stageId: newStageId,
-    sceneIds: [] as string[],
-    agentIds: [] as string[],
     audioIds: [] as string[],
     mediaIds: [] as string[],
   };
@@ -80,21 +81,13 @@ export async function importClassroomBlob(
 
     const now = Date.now();
     const newAgentIds = (manifest.agents ?? []).map(() => nanoid());
+    const generatedAgentConfigs = (manifest.agents ?? []).map((agent, index) =>
+      agentConfigFromManifest(agent, newAgentIds[index]),
+    );
     const newSpiralAgentIds = (manifest.spiralAgents ?? []).map(() => `spiral-${nanoid(8)}`);
-    created.agentIds.push(...newAgentIds);
     const spiralAgentConfigs: PersistedAgentConfig[] = (manifest.spiralAgents ?? []).map(
       (agent, index) => ({
-        id: newSpiralAgentIds[index],
-        name: agent.name,
-        role: agent.role,
-        persona: agent.persona,
-        avatar: agent.avatar,
-        color: agent.color,
-        priority: agent.priority,
-        ...(agent.voiceConfig
-          ? { voiceConfig: agent.voiceConfig as PersistedAgentConfig['voiceConfig'] }
-          : {}),
-        ...(agent.voiceDesign ? { voiceDesign: agent.voiceDesign } : {}),
+        ...agentConfigFromManifest(agent, newSpiralAgentIds[index]),
       }),
     );
     const studentAgentIndex = manifest.agents?.findIndex((agent) => agent.role === 'student') ?? -1;
@@ -162,69 +155,53 @@ export async function importClassroomBlob(
     }
 
     onPhase('writingCourse');
-    const stage: StageRecord = {
-      id: newStageId,
-      name: manifest.stage.name || 'Imported Classroom',
-      description: manifest.stage.description,
-      languageDirective: manifest.stage.language,
-      style: manifest.stage.style,
-      createdAt: manifest.stage.createdAt || now,
-      updatedAt: now,
-      agentIds: newAgentIds.length > 0 ? newAgentIds : undefined,
-      spiralAgentConfigs: isValidSpiralAgentRoster(spiralAgentConfigs)
-        ? spiralAgentConfigs
-        : undefined,
-    };
-    await db.stages.put(stage);
-
-    if (manifest.agents?.length) {
-      const agentRecords: GeneratedAgentRecord[] = manifest.agents.map((agent, index) => ({
-        id: newAgentIds[index],
-        stageId: newStageId,
-        name: agent.name,
-        role: agent.role,
-        persona: agent.persona,
-        avatar: agent.avatar,
-        color: agent.color,
-        priority: agent.priority,
-        createdAt: now,
-      }));
-      await db.generatedAgents.bulkPut(agentRecords);
-    }
-
-    const sceneRecords = manifest.scenes.map((manifestScene: ManifestScene, index: number) => {
-      const newSceneId = nanoid();
-      created.sceneIds.push(newSceneId);
-      const actions = manifestScene.actions
-        ? rewriteAudioRefsToIds(manifestScene.actions, audioRefToNewId, {
-            agentIds: newAgentIds,
-            fallbackDiscussionAgentIndex,
-          })
-        : undefined;
-      const multiAgent = manifestScene.multiAgent?.enabled
-        ? {
-            enabled: true,
-            agentIds: (manifestScene.multiAgent.agentIndices ?? [])
-              .map((agentIndex) => newAgentIds[agentIndex])
-              .filter(Boolean),
-            directorPrompt: manifestScene.multiAgent.directorPrompt,
-          }
-        : undefined;
-      return {
-        id: newSceneId,
-        stageId: newStageId,
-        type: manifestScene.type,
-        title: manifestScene.title,
-        order: manifestScene.order ?? index,
-        content: manifestScene.content,
-        actions,
-        whiteboard: manifestScene.whiteboards,
-        multiAgent,
-        createdAt: now,
+    const document: AppDocument = {
+      stage: {
+        id: newStageId,
+        name: manifest.stage.name || 'Imported Classroom',
+        description: manifest.stage.description,
+        languageDirective: manifest.stage.language,
+        style: manifest.stage.style,
+        createdAt: manifest.stage.createdAt || now,
         updatedAt: now,
-      };
-    });
-    await db.scenes.bulkPut(sceneRecords);
+        agentIds: newAgentIds.length > 0 ? newAgentIds : undefined,
+        ...(generatedAgentConfigs.length > 0 ? { generatedAgentConfigs } : {}),
+        ...(isValidSpiralAgentRoster(spiralAgentConfigs) ? { spiralAgentConfigs } : {}),
+      },
+      scenes: manifest.scenes.map((manifestScene: ManifestScene, index: number) => {
+        const newSceneId = nanoid();
+        const actions = manifestScene.actions
+          ? rewriteAudioRefsToIds(manifestScene.actions, audioRefToNewId, {
+              agentIds: newAgentIds,
+              fallbackDiscussionAgentIndex,
+            })
+          : undefined;
+        const multiAgent = manifestScene.multiAgent?.enabled
+          ? {
+              enabled: true,
+              agentIds: (manifestScene.multiAgent.agentIndices ?? [])
+                .map((agentIndex) => newAgentIds[agentIndex])
+                .filter(Boolean),
+              directorPrompt: manifestScene.multiAgent.directorPrompt,
+            }
+          : undefined;
+
+        return canonicalizeLegacyScene({
+          id: newSceneId,
+          stageId: newStageId,
+          title: manifestScene.title,
+          order: manifestScene.order ?? index,
+          content: manifestScene.content,
+          actions,
+          whiteboards: manifestScene.whiteboards,
+          multiAgent,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }),
+    };
+
+    await mutateDocument(newStageId, async (_existing, store) => store.saveDocument(document));
 
     onPhase('done');
     return newStageId;

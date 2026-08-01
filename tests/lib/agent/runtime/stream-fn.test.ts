@@ -332,6 +332,30 @@ describe('toModelMessages', () => {
     ]);
   });
 
+  it('preserves assistant thinking as an AI SDK reasoning part when requested', () => {
+    const messages: PiMessage[] = [
+      {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: 'keep this reasoning' },
+          { type: 'text', text: 'answer' },
+        ],
+        api: 'unknown' as never,
+        provider: 'unknown' as never,
+        model: 'test',
+        usage: emptyPartial().usage,
+        stopReason: 'stop',
+        timestamp: 0,
+      },
+    ];
+
+    const result = toModelMessages(messages, { includeReasoning: true });
+    expect((result[0] as { content: unknown }).content).toEqual([
+      { type: 'reasoning', text: 'keep this reasoning' },
+      { type: 'text', text: 'answer' },
+    ]);
+  });
+
   it.each(['unrelated-provider-signature', 'openmaic:openai-reasoning:v1:{bad-json'])(
     'keeps reasoning text but ignores an unrecognized signature: %s',
     (thinkingSignature) => {

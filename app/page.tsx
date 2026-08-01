@@ -66,7 +66,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useDraftCache } from '@/lib/hooks/use-draft-cache';
 import { SpeechButton } from '@/components/audio/speech-button';
 import { useImportClassroom } from '@/lib/import/use-import-classroom';
-import { shouldShowVocationalTestUi } from '@/lib/config/feature-flags';
+import { isPptxImportEnabled, shouldShowVocationalTestUi } from '@/lib/config/feature-flags';
 import { useImportPptx } from '@/lib/import/use-import-pptx';
 import { loadLessonMemorySummaries } from '@/lib/revisit/client';
 import type { LessonMemorySummary } from '@/lib/revisit/types';
@@ -90,7 +90,8 @@ import {
 } from '@/lib/revisit/home-surface';
 import { buildRevisitPanelSummary, type RevisitPanelSummary } from '@/lib/revisit/panel-summary';
 import { computeLessonMemory, computeLessonMemoryFromCompletion } from '@/lib/revisit/memory';
-import { readAnswersForSummary } from '@/lib/quiz/persistence';
+import { readSceneQuizAnswers } from '@/lib/classroom/complete-summary';
+import { loadQuizAttemptState } from '@/lib/quiz/runtime';
 import { RevisitReviewPanel as SpiralReviewPanel } from '@/components/revisit/review-panel';
 import { createOrGetRevisitAttempt, listRevisitAttempts } from '@/lib/revisit/attempt-store';
 import { resolveActiveRevisitScope } from '@/lib/revisit/clock';
@@ -105,8 +106,7 @@ const INTERACTIVE_MODE_STORAGE_KEY = 'interactiveModeEnabled';
 // PPTX import is still scaffolding: `useImportPptx` has no `onImported` consumer
 // yet, so the flow only logs the parsed slides. Hide the entry point behind a
 // flag until it's wired end-to-end, so the UI doesn't expose a no-op button.
-// Enable with NEXT_PUBLIC_ENABLE_PPTX_IMPORT=true.
-const PPTX_IMPORT_ENABLED = process.env.NEXT_PUBLIC_ENABLE_PPTX_IMPORT === 'true';
+const PPTX_IMPORT_ENABLED = isPptxImportEnabled();
 
 interface FormState {
   courseMaterials: SelectedCourseMaterial[];
@@ -265,6 +265,7 @@ function HomePage() {
       }
     } catch (err) {
       log.error('Failed to load classrooms:', err);
+      toast.error('Persistence is unavailable. Saved classrooms could not be loaded.');
     }
   }, [replaceThumbnails]);
 
@@ -434,7 +435,7 @@ function HomePage() {
                 });
         if (!isCurrentRevisitPanelRequest(requestId, revisitPanelRequestRef.current)) return;
         setRevisitPanelSummary(
-          buildRevisitPanelSummary({
+          await buildRevisitPanelSummary({
             classroom,
             scenes: stageData?.scenes ?? [],
             progress,
@@ -447,7 +448,11 @@ function HomePage() {
             studyArtifacts,
             now,
             stableSuccessesRequired,
-            readAnswers: readAnswersForSummary,
+            readAnswers: (sceneId) =>
+              readSceneQuizAnswers(
+                stageData?.scenes.find((scene) => scene.id === sceneId),
+                loadQuizAttemptState,
+              ),
           }),
         );
       } catch (err) {

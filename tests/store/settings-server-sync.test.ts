@@ -7,6 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
+import { BrowserKVStore } from '@openmaic/storage';
 import { isProviderUsable } from '@/lib/store/settings-validation';
 import type { ModelInfo } from '@/lib/types/provider';
 
@@ -236,6 +237,25 @@ const localStorageStub = {
 vi.stubGlobal('localStorage', localStorageStub);
 vi.stubGlobal('window', { localStorage: localStorageStub });
 
+// The persisted blob is written through the KVStore's `account` scope, so read
+// it back through the same primitive rather than guessing its key layout. The
+// write is async, hence the poll.
+const persistKv = new BrowserKVStore({ storage: localStorageStub as unknown as Storage });
+// The store reads from the KVStore's `account` scope (namespaced key), and
+// does not migrate the bare `settings-storage` key. Seeding a pre-existing
+// blob therefore writes the namespaced key directly into the shared backing.
+const SETTINGS_KV_KEY = 'maic:account:settings-storage';
+async function readPersistedState(): Promise<Record<string, unknown>> {
+  return await vi.waitFor(async () => {
+    const blob = await persistKv.get<{ state: Record<string, unknown> }>(
+      'settings-storage',
+      'account',
+    );
+    expect(blob).not.toBeNull();
+    return blob!.state;
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -308,12 +328,15 @@ describe('settings rehydrate — built-in provider models', () => {
 
   async function getStore() {
     const { useSettingsStore } = await import('@/lib/store/settings');
+    // persist hydrates asynchronously now that it reads through the KVStore —
+    // await it so the assertions below never race the rehydrate.
+    await useSettingsStore.persist.rehydrate();
     return useSettingsStore;
   }
 
   it('distrusts persisted Codex image credentials and connected state', async () => {
     storage.set(
-      'settings-storage',
+      SETTINGS_KV_KEY,
       JSON.stringify({
         state: {
           imageProviderId: 'codex-image',
@@ -358,7 +381,7 @@ describe('settings rehydrate — built-in provider models', () => {
 
   it('reorders persisted built-in models to registry order while preserving custom models', async () => {
     storage.set(
-      'settings-storage',
+      SETTINGS_KV_KEY,
       JSON.stringify({
         state: {
           providerId: 'openai',
@@ -403,7 +426,7 @@ describe('settings rehydrate — built-in provider models', () => {
 
   it('strips a legacy serverBaseUrl from persisted provider configs on rehydrate (#620)', async () => {
     storage.set(
-      'settings-storage',
+      SETTINGS_KV_KEY,
       JSON.stringify({
         state: {
           providerId: 'openai',
@@ -453,7 +476,7 @@ describe('settings rehydrate — built-in provider models', () => {
 
   it('removes the retired insert-toolbar collapse preference on rehydrate', async () => {
     storage.set(
-      'settings-storage',
+      SETTINGS_KV_KEY,
       JSON.stringify({
         state: { editInsertToolbarCollapsed: true },
         version: 4,
@@ -464,8 +487,12 @@ describe('settings rehydrate — built-in provider models', () => {
     expect('editInsertToolbarCollapsed' in store.getState()).toBe(false);
 
     store.getState().setSidebarCollapsed(false);
-    const persisted = JSON.parse(storage.get('settings-storage')!).state;
-    expect('editInsertToolbarCollapsed' in persisted).toBe(false);
+    // Hydration already left a blob in place, so poll on the assertion itself
+    // rather than on a blob merely existing — otherwise this reads the
+    // seeded blob back before the write lands.
+    await vi.waitFor(async () => {
+      expect('editInsertToolbarCollapsed' in (await readPersistedState())).toBe(false);
+    });
   });
 
   it('distrusts persisted Codex server state, credentials, and dynamic models', async () => {
@@ -527,6 +554,9 @@ describe('fetchServerProviders — provider availability sync', () => {
 
   async function getStore() {
     const { useSettingsStore } = await import('@/lib/store/settings');
+    // persist hydrates asynchronously now that it reads through the KVStore —
+    // await it so the assertions below never race the rehydrate.
+    await useSettingsStore.persist.rehydrate();
     return useSettingsStore;
   }
 
@@ -584,16 +614,16 @@ describe('fetchServerProviders — provider availability sync', () => {
       await store.getState().fetchServerProviders();
       expectFastClosedBaseline();
 
-      const persisted = JSON.parse(storage.get('settings-storage')!) as {
-        state: { providersConfig: Record<string, { models: ModelInfo[] }> };
-      };
+      const persisted = await readPersistedState();
       expect(
-        persisted.state.providersConfig['openai-codex'].models.map((model) => model.id),
+        (persisted.providersConfig as Record<string, { models: ModelInfo[] }>)[
+          'openai-codex'
+        ].models.map((model) => model.id),
       ).toEqual(baselineIds);
       expect(
-        persisted.state.providersConfig['openai-codex'].models.every(
-          (model) => !model.capabilities?.serviceTiers,
-        ),
+        (persisted.providersConfig as Record<string, { models: ModelInfo[] }>)[
+          'openai-codex'
+        ].models.every((model) => !model.capabilities?.serviceTiers),
       ).toBe(true);
     } finally {
       registryModels.splice(0, registryModels.length, ...originalRegistryModels);
@@ -799,11 +829,11 @@ describe('fetchServerProviders — provider availability sync', () => {
       },
     ]);
     expect(store.getState().providersConfig['openai-codex'].models).toHaveLength(1);
-    const persisted = JSON.parse(storage.get('settings-storage')!) as {
-      state: { providersConfig: Record<string, { models: ModelInfo[] }> };
-    };
+    const persisted = await readPersistedState();
     expect(
-      persisted.state.providersConfig['openai-codex'].models.map((model) => model.id),
+      (persisted.providersConfig as Record<string, { models: ModelInfo[] }>)[
+        'openai-codex'
+      ].models.map((model) => model.id),
     ).not.toContain('gpt-live');
   });
 
@@ -1172,6 +1202,9 @@ describe('fetchServerProviders — TTS stale selection', () => {
 
   async function getStore() {
     const { useSettingsStore } = await import('@/lib/store/settings');
+    // persist hydrates asynchronously now that it reads through the KVStore —
+    // await it so the assertions below never race the rehydrate.
+    await useSettingsStore.persist.rehydrate();
     return useSettingsStore;
   }
 
@@ -1225,6 +1258,9 @@ describe('fetchServerProviders — ASR stale selection', () => {
 
   async function getStore() {
     const { useSettingsStore } = await import('@/lib/store/settings');
+    // persist hydrates asynchronously now that it reads through the KVStore —
+    // await it so the assertions below never race the rehydrate.
+    await useSettingsStore.persist.rehydrate();
     return useSettingsStore;
   }
 
@@ -1265,6 +1301,9 @@ describe('fetchServerProviders — Web Search provider sync', () => {
 
   async function getStore() {
     const { useSettingsStore } = await import('@/lib/store/settings');
+    // persist hydrates asynchronously now that it reads through the KVStore —
+    // await it so the assertions below never race the rehydrate.
+    await useSettingsStore.persist.rehydrate();
     return useSettingsStore;
   }
 
@@ -1361,6 +1400,9 @@ describe('fetchServerProviders — PDF stale selection', () => {
 
   async function getStore() {
     const { useSettingsStore } = await import('@/lib/store/settings');
+    // persist hydrates asynchronously now that it reads through the KVStore —
+    // await it so the assertions below never race the rehydrate.
+    await useSettingsStore.persist.rehydrate();
     return useSettingsStore;
   }
 
@@ -1387,6 +1429,9 @@ describe('fetchServerProviders — Image stale selection', () => {
 
   async function getStore() {
     const { useSettingsStore } = await import('@/lib/store/settings');
+    // persist hydrates asynchronously now that it reads through the KVStore —
+    // await it so the assertions below never race the rehydrate.
+    await useSettingsStore.persist.rehydrate();
     return useSettingsStore;
   }
 
@@ -1952,6 +1997,9 @@ describe('fetchServerProviders — Video stale selection', () => {
 
   async function getStore() {
     const { useSettingsStore } = await import('@/lib/store/settings');
+    // persist hydrates asynchronously now that it reads through the KVStore —
+    // await it so the assertions below never race the rehydrate.
+    await useSettingsStore.persist.rehydrate();
     return useSettingsStore;
   }
 
@@ -2040,6 +2088,9 @@ describe('fetchServerProviders — LLM cross-provider fallback', () => {
 
   async function getStore() {
     const { useSettingsStore } = await import('@/lib/store/settings');
+    // persist hydrates asynchronously now that it reads through the KVStore —
+    // await it so the assertions below never race the rehydrate.
+    await useSettingsStore.persist.rehydrate();
     return useSettingsStore;
   }
 
@@ -2267,6 +2318,9 @@ describe('usable provider ⇒ concrete model invariant (#580)', () => {
 
   async function getStore() {
     const { useSettingsStore } = await import('@/lib/store/settings');
+    // persist hydrates asynchronously now that it reads through the KVStore —
+    // await it so the assertions below never race the rehydrate.
+    await useSettingsStore.persist.rehydrate();
     return useSettingsStore;
   }
 
@@ -2648,6 +2702,9 @@ describe('settings store — outline review preference', () => {
 
   async function getStore() {
     const { useSettingsStore } = await import('@/lib/store/settings');
+    // persist hydrates asynchronously now that it reads through the KVStore —
+    // await it so the assertions below never race the rehydrate.
+    await useSettingsStore.persist.rehydrate();
     return useSettingsStore;
   }
 
@@ -2667,7 +2724,7 @@ describe('settings store — outline review preference', () => {
 
   it('rehydrates older persisted settings without the outline flag to false', async () => {
     storage.set(
-      'settings-storage',
+      SETTINGS_KV_KEY,
       JSON.stringify({
         state: {
           providerId: 'openai',
@@ -2697,6 +2754,9 @@ describe('TTS provider enablement (#665)', () => {
 
   async function getStore() {
     const { useSettingsStore } = await import('@/lib/store/settings');
+    // persist hydrates asynchronously now that it reads through the KVStore —
+    // await it so the assertions below never race the rehydrate.
+    await useSettingsStore.persist.rehydrate();
     return useSettingsStore;
   }
 
@@ -2734,7 +2794,7 @@ describe('TTS provider enablement (#665)', () => {
 
   it('v3→v4 migration normalizes stale enabled flags (others ON, browser-native OFF)', async () => {
     storage.set(
-      'settings-storage',
+      SETTINGS_KV_KEY,
       JSON.stringify({
         version: 3,
         state: {

@@ -296,7 +296,10 @@ export interface LectureNoteEntry {
 // ==================== Stateless Multi-Agent API Types ====================
 
 import type { Stage, Scene, StageMode } from '@/lib/types/stage';
+import type { SceneOutline } from '@/lib/types/generation';
 import type { AgentTurnSummary, WhiteboardActionRecord } from '@/lib/orchestration/types';
+import type { DirectorCompactionTrace } from '@/lib/chat/pi/director-compaction';
+import type { DirectorToolTraceEntry } from '@/lib/chat/pi/types';
 
 /**
  * Accumulated director state passed between per-agent requests.
@@ -321,6 +324,8 @@ export interface StatelessChatRequest {
   storeState: {
     stage: Stage | null;
     scenes: Scene[];
+    /** Thin course map available to the Pi Director before it reads any scene. */
+    outlines?: SceneOutline[];
     currentSceneId: string | null;
     mode: StageMode;
     whiteboardOpen: boolean;
@@ -461,6 +466,8 @@ export type StatelessEvent =
         cueUserReceived?: boolean;
         sessionClosed?: boolean;
         endReason?: string;
+        directorCompaction?: DirectorCompactionTrace;
+        directorToolTrace?: DirectorToolTraceEntry[];
         directorState?: DirectorState;
       };
     }

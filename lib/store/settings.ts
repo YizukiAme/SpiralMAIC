@@ -1,6 +1,10 @@
 /**
  * Settings Store
- * Global settings state synchronized with localStorage
+ *
+ * Global settings, persisted through the `@openmaic/storage` KVStore in the
+ * `account` scope. The bulk of this store is the user's provider/model
+ * configuration — the canonical `account`-scoped value in the storage contract,
+ * and the thing a second device should not have to be told again.
  */
 
 import { create } from 'zustand';
@@ -30,6 +34,7 @@ import {
   resolveSelectedModel,
   isLLMProviderConfigured,
 } from '@/lib/store/settings-validation';
+import { createKVPersistStorage, purgeLegacyPersistKey } from '@/lib/store/kv-persist';
 
 const log = createLogger('Settings');
 let latestServerProvidersRequest = 0;
@@ -84,6 +89,16 @@ function resetOAuthProviderState(providersConfig: ProvidersConfig): ProvidersCon
   }
   return next;
 }
+
+/** Persisted-blob version for zustand's `persist` `migrate` ladder. */
+const SETTINGS_PERSIST_VERSION = 7;
+
+/**
+ * Bound after the store exists; see `onWriteRefused` for why it is not inlined.
+ * The explicit annotation is what breaks the type cycle — inferring this from
+ * the store would put the store back in its own definition.
+ */
+const recovery: { rehydrate?: () => void | Promise<void> } = {};
 
 function pruneThinkingConfigs(
   thinkingConfigs: Record<string, ThinkingConfig> | undefined,
@@ -1046,95 +1061,26 @@ function stripLegacyServerBaseUrl(state: Partial<SettingsState>): void {
   }
 }
 
-// Migrate from old localStorage format
-const migrateFromOldStorage = () => {
-  if (typeof window === 'undefined') return null;
-
-  // Check if new storage already exists
-  const newStorage = localStorage.getItem('settings-storage');
-  if (newStorage) return null; // Already migrated or new install
-
-  // Read old localStorage keys
-  const oldLlmModel = localStorage.getItem('llmModel');
-  const oldProvidersConfig = localStorage.getItem('providersConfig');
-  const oldTtsModel = localStorage.getItem('ttsModel');
-  const oldSelectedAgents = localStorage.getItem('selectedAgentIds');
-
-  if (!oldLlmModel && !oldProvidersConfig) return null; // No old data
-
-  // Parse model selection
-  let providerId: ProviderId = 'openai';
-  let modelId = 'gpt-5.4-mini';
-  if (oldLlmModel) {
-    const [pid, mid] = oldLlmModel.split(':');
-    if (pid && mid) {
-      providerId = pid as ProviderId;
-      modelId = mid;
-    }
-  }
-
-  // Parse providers config
-  let providersConfig = getDefaultProvidersConfig();
-  if (oldProvidersConfig) {
-    try {
-      const parsed = JSON.parse(oldProvidersConfig);
-      providersConfig = { ...providersConfig, ...parsed };
-    } catch (e) {
-      log.error('Failed to parse old providersConfig:', e);
-    }
-  }
-
-  // Parse other settings
-  let ttsModel = 'openai-tts';
-  if (oldTtsModel) ttsModel = oldTtsModel;
-
-  let selectedAgentIds = ['default-1', 'default-2', 'default-3'];
-  if (oldSelectedAgents) {
-    try {
-      const parsed = JSON.parse(oldSelectedAgents);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        selectedAgentIds = parsed;
-      }
-    } catch (e) {
-      log.error('Failed to parse old selectedAgentIds:', e);
-    }
-  }
-
-  return {
-    providerId,
-    modelId,
-    thinkingConfigs: {},
-    providersConfig,
-    ttsModel,
-    selectedAgentIds,
-  };
-};
-
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set, get) => {
-      // Try to migrate from old storage
-      const migratedData = migrateFromOldStorage();
       const defaultAudioConfig = getDefaultAudioConfig();
       const defaultPDFConfig = getDefaultPDFConfig();
       const defaultImageConfig = getDefaultImageConfig();
       const defaultVideoConfig = getDefaultVideoConfig();
       const defaultWebSearchConfig = getDefaultWebSearchConfig();
 
-      const initialProvidersConfig = migratedData?.providersConfig || getDefaultProvidersConfig();
-
       return {
-        // Initial state (use migrated data if available)
-        providerId: migratedData?.providerId || 'openai',
-        modelId: migratedData?.modelId || '',
-        thinkingConfigs: pruneThinkingConfigs(
-          migratedData?.thinkingConfigs || {},
-          initialProvidersConfig,
-        ),
+        // Initial state is plain defaults. This store does not migrate any
+        // pre-cutover localStorage data — everything persisted arrives through
+        // the KVStore on rehydration; an upgrading user reconfigures once.
+        providerId: 'openai' as ProviderId,
+        modelId: '',
+        thinkingConfigs: {},
         codexFastMode: false,
-        providersConfig: initialProvidersConfig,
-        ttsModel: migratedData?.ttsModel || 'openai-tts',
-        selectedAgentIds: migratedData?.selectedAgentIds || ['default-1', 'default-2', 'default-3'],
+        providersConfig: getDefaultProvidersConfig(),
+        ttsModel: 'openai-tts',
+        selectedAgentIds: ['default-1', 'default-2', 'default-3'],
         agentMode: 'auto' as const,
         autoAgentCount: 3,
         agentVoiceOverrides: {},
@@ -2401,7 +2347,16 @@ export const useSettingsStore = create<SettingsState>()(
     },
     {
       name: 'settings-storage',
-      version: 7,
+      // `Partial<SettingsState>` because `migrate` below returns a partial —
+      // that is what zustand infers as the persisted shape here.
+      storage: createKVPersistStorage<Partial<SettingsState>>('account', {
+        // One recovery attempt when a write is refused because hydration never
+        // succeeded — the backend may have come back since. Routed through a
+        // variable assigned below rather than naming the store directly: a
+        // self-reference here would make the store's own type circular.
+        onWriteRefused: () => recovery.rehydrate?.(),
+      }),
+      version: SETTINGS_PERSIST_VERSION,
       // A rich Codex catalog is account-scoped server truth. Keep it in live
       // UI state, but persist only the audited bundled snapshot so browser
       // storage can never become a second last-known-good cache.
@@ -2706,3 +2661,13 @@ export const useSettingsStore = create<SettingsState>()(
     },
   ),
 );
+
+// Bound after the store exists so the `onWriteRefused` hook above stays free of
+// a self-reference (see the comment there).
+recovery.rehydrate = () => useSettingsStore.persist.rehydrate();
+
+// Best-effort, fire-and-forget: drop the pre-cutover raw `localStorage` blob.
+// It is never read (this store does not migrate legacy data), and the old blob
+// holds plaintext provider API keys, so clearing it is a small security win. No
+// correctness depends on it.
+purgeLegacyPersistKey('settings-storage');

@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BrowserRuntimeStore } from '@openmaic/storage';
 
 import {
@@ -19,6 +19,14 @@ import {
   exportDatabase,
   importDatabase,
 } from '@/lib/utils/database';
+
+const storage = new Map<string, string>();
+const localStorageStub = {
+  getItem: (key: string) => storage.get(key) ?? null,
+  setItem: (key: string, value: string) => storage.set(key, value),
+  removeItem: (key: string) => storage.delete(key),
+};
+vi.stubGlobal('localStorage', localStorageStub);
 
 const decision = {
   disposition: 'append_page' as const,

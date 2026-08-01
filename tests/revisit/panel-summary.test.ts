@@ -114,9 +114,9 @@ const studyArtifact = {
 };
 
 describe('revisit panel summary', () => {
-  it('summarizes progress, quiz score, latest report, and future review time', () => {
+  it('summarizes progress, quiz score, latest report, and future review time', async () => {
     const now = classroom.createdAt;
-    const summary = buildRevisitPanelSummary({
+    const summary = await buildRevisitPanelSummary({
       classroom,
       scenes: [quizScene],
       progress: {
@@ -144,7 +144,7 @@ describe('revisit panel summary', () => {
       studyArtifacts: [studyArtifact],
       now,
       stableSuccessesRequired: 2,
-      readAnswers: () => ({ q1: 'b' }),
+      readAnswers: async () => ({ q1: 'b' }),
     });
 
     expect(summary.completedAt).toBe(now);
@@ -156,9 +156,9 @@ describe('revisit panel summary', () => {
     expect(summary.suggestedReviewAt).toBeLessThan(now + 4 * DAY);
   });
 
-  it('uses concept states for review timing when challenge evidence exists', () => {
+  it('uses concept states for review timing when challenge evidence exists', async () => {
     const now = Date.UTC(2026, 6, 5);
-    const summary = buildRevisitPanelSummary({
+    const summary = await buildRevisitPanelSummary({
       classroom,
       scenes: [],
       progress: {
@@ -175,14 +175,14 @@ describe('revisit panel summary', () => {
       latestReport: undefined,
       now,
       stableSuccessesRequired: 2,
-      readAnswers: () => ({}),
+      readAnswers: async () => ({}),
     });
 
     expect(summary.suggestedReviewAt).toBe(now);
   });
 
-  it('keeps artifacts from an older course revision visible and marks them stale', () => {
-    const summary = buildRevisitPanelSummary({
+  it('keeps artifacts from an older course revision visible and marks them stale', async () => {
+    const summary = await buildRevisitPanelSummary({
       classroom,
       scenes: [],
       memorySummary: freshMemory,
@@ -190,7 +190,7 @@ describe('revisit panel summary', () => {
       studyArtifacts: [{ ...studyArtifact, lessonSourceHash: 'stale-lesson-source' }],
       now: classroom.updatedAt,
       stableSuccessesRequired: 2,
-      readAnswers: () => ({}),
+      readAnswers: async () => ({}),
     });
 
     expect(summary.artifacts).toHaveLength(1);

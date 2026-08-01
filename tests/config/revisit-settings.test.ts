@@ -13,13 +13,16 @@ const localStorageStub = {
 vi.stubGlobal('localStorage', localStorageStub);
 vi.stubGlobal('window', { localStorage: localStorageStub });
 
+const SETTINGS_KV_KEY = 'maic:account:settings-storage';
+
 async function freshStore(persistedState?: Record<string, unknown>) {
   vi.resetModules();
   storage.clear();
   if (persistedState) {
-    storage.set('settings-storage', JSON.stringify({ state: persistedState, version: 4 }));
+    storage.set(SETTINGS_KV_KEY, JSON.stringify({ state: persistedState, version: 4 }));
   }
   const { useSettingsStore } = await import('@/lib/store/settings');
+  await useSettingsStore.persist.rehydrate();
   return useSettingsStore;
 }
 
@@ -63,7 +66,8 @@ describe('SpiralMAIC revisit settings', () => {
       demoGateSkipEnabled: true,
     });
 
-    const persisted = JSON.parse(storage.get('settings-storage')!);
+    await vi.waitFor(() => expect(storage.has(SETTINGS_KV_KEY)).toBe(true));
+    const persisted = JSON.parse(storage.get(SETTINGS_KV_KEY)!);
     expect(persisted.state).toMatchObject({
       reverseChallengeEnabled: false,
       stableSuccessesRequired: 1,

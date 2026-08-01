@@ -78,11 +78,7 @@ describe('agent-profiles route — Spiral mode', () => {
     },
     {
       label: 'has no assistant',
-      agents: [
-        agent('Bo', 'student', 5),
-        agent('Cy', 'student', 4),
-        agent('Dee', 'student', 3),
-      ],
+      agents: [agent('Bo', 'student', 5), agent('Cy', 'student', 4), agent('Dee', 'student', 3)],
     },
     {
       label: 'has only one student',

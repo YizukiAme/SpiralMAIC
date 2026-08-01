@@ -6,9 +6,9 @@ persisting app state, depending only on [`@openmaic/dsl`](../dsl).
 The DSL owns _what_ persists (document / runtime shape + validation + migration +
 the asset `StorageProvider` interface). This package owns _where / how_ it
 persists — the primitives and their backends. The pluggable seam is the
-**backend**, not the database driver: a browser backend (zero server, the
-`clone-and-run` default) and, later, an HTTP backend whose server owns a
-database.
+**backend**, not the database driver: browser backends (the zero-server
+`clone-and-run` default), HTTP clients plus a reference server, and PostgreSQL
+server backends.
 
 ## Dependency arrow (acyclic)
 
@@ -33,11 +33,18 @@ a browser.
 - **Scopes.** `account` values are user data a server-backed deployment syncs
   across devices; `device` values (theme, locale, layout) never leave the
   device — every backend honours that, so the scope is part of the primitive,
-  not the backend choice.
+  not the backend choice. The [KV HTTP contract](./docs/kv-http-contract.md) is
+  `account`-only and carries no scope on the wire at all, so `HttpKVStore`
+  routes `device` to a `LocalKVStore` it requires at construction — a *branded*
+  local backend, because a networked store satisfies plain `KVStore`
+  structurally and would otherwise be accepted as the place device values live.
 - **Content-addressed assets.** `BrowserAssetProvider` refs are `sha256-<hex>`,
   so identical bytes de-duplicate to one stored asset. A document embeds only
   the stable ref; the provider resolves it to a URL at render time (a raw URL
-  would bake in a provider + expiry and break portability).
+  would bake in a provider + expiry and break portability). The ref stays
+  opaque to this package — only the issuing provider interprets it. The server
+  backend is being redesigned around a global resource pool (#1007) and is not
+  part of this package yet.
 - **Document normalization.** The DSL `document` is a portable embedded
   aggregate; `DocumentStore` normalizes it into per-entity rows so scene-level
   writes (`putScene`) stay cheap, and reassembles it on read. Each document is
@@ -76,8 +83,9 @@ a browser.
 Each primitive has one implementation-agnostic contract suite
 (`test/kv-contract.ts`, `test/asset-contract.ts`, `test/document-contract.ts`,
 `test/runtime-contract.ts`).
-Every backend is proven by running the same suite against it, so a new backend
-(the coming HTTP one) cannot silently diverge from the primitive's semantics.
+Every backend is proven by running the same suite against it, so browser, HTTP,
+and PostgreSQL implementations cannot silently diverge from a primitive's
+semantics.
 
 ## Roadmap
 
@@ -88,8 +96,29 @@ Every backend is proven by running the same suite against it, so a new backend
       DSL migration registry, validation gate) + browser backend
 - [x] `RuntimeStore` (sessions + append-only records, runtime version line,
       per-kind payload gate) + browser backend
-- [ ] wire the app's zustand stores + ad-hoc `localStorage` through `KVStore`
-- [ ] HTTP backend + reference server + one HTTP contract
+- [x] wire the app's settings + user-profile `persist` stores through `KVStore`
+      (both `account` scope). No automatic migration of pre-cutover data: new
+      data persists through `KVStore`, legacy `localStorage` keys are ignored
+      (not migrated) and best-effort purged, and a user reconfigures once on
+      upgrade
+- [ ] wire the app's third `persist` store (`agent-registry-storage`), still on
+      zustand's default `localStorage`
+- [ ] wire the app's remaining ad-hoc `localStorage` keys through `KVStore`
+- [ ] a hydration gate the app actually consumes — **required before an
+      `account` scope can be served remotely**. With the browser backend,
+      hydration resolves within microtasks of module evaluation and nothing
+      observes it; a network round trip makes the gap visible, and the one-shot
+      decisions taken against a not-yet-hydrated store (classroom agent-selection
+      restore, media orchestration, scene-generator retry, server-provider
+      reconcile) decide wrongly and then have their corrective writes refused
+- [x] RuntimeStore HTTP backend + reference server + HTTP contract
+- [x] RuntimeStore PostgreSQL backend
+- [x] DocumentStore HTTP backend + reference-server routes + HTTP contract
+- [x] DocumentStore PostgreSQL backend
+- [x] `KVStore` (`account`) HTTP backend + HTTP contract
+- [ ] `KVStore` server-side reference backend and reference-server route
+- [ ] `AssetProvider` server backend — redesigned around a global resource
+      pool (#1007)
 
 ## License
 
