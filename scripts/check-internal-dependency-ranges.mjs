@@ -28,7 +28,7 @@ import {
  *
  * WHERE THIS RUNS. `scripts/smoke-test-package-tarballs.mjs` proves the same
  * thing about the tarball that would actually be published, which is the
- * stronger claim — but it packs and installs four packages, so it runs only on
+ * stronger claim — but it installs four package tarballs, so it runs only on
  * the release path. This is the cheap source-level form, in `ci.yml`, so that a
  * pull request reintroducing an exact pin fails at review time rather than at
  * release time, after a version number has already been spent.

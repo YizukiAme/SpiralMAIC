@@ -1,12 +1,21 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { INTERNAL_DEPENDENTS, OPENMAIC_PACKAGES } from './openmaic-packages.mjs';
+import { INTERNAL_DEPENDENTS, OPENMAIC_PACKAGES, readManifest } from './openmaic-packages.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const args = process.argv.slice(2);
+if (args[0] === '--') args.shift();
+const artifactDirectoryArgument = args[0];
+assert(
+  artifactDirectoryArgument,
+  'Usage: node smoke-test-package-tarballs.mjs <artifact-directory>',
+);
+assert.equal(args.length, 1, 'Unexpected command-line arguments');
+const artifactDirectory = resolve(root, artifactDirectoryArgument);
 const temporaryDirectory = mkdtempSync(join(tmpdir(), 'openmaic-package-smoke-'));
 
 function run(command, args, options = {}) {
@@ -15,30 +24,6 @@ function run(command, args, options = {}) {
     encoding: 'utf8',
     stdio: options.stdio ?? 'inherit',
   });
-}
-
-function pack(name) {
-  const packageDirectory = join(root, 'packages', '@openmaic', name);
-  // `--config.ignore-scripts=true` because the publish step runs
-  // `pnpm publish --ignore-scripts`. Packing WITH lifecycle scripts while
-  // publishing without them means this smoke test inspects a different tarball
-  // than the one that reaches the registry: a `prepack` that rewrote the
-  // manifest — committing `workspace:*` alongside a `prepack` that turns it
-  // into `workspace:^`, say — would satisfy every assertion below and then not
-  // run at publish time, so the exact pin would ship anyway. Validation and
-  // publication must have identical lifecycle semantics, or validation proves
-  // nothing about what is published.
-  run('pnpm', ['pack', '--config.ignore-scripts=true', '--pack-destination', temporaryDirectory], {
-    cwd: packageDirectory,
-    stdio: 'pipe',
-  });
-  const prefix = `openmaic-${name}-`;
-  const tarball = readdirSync(temporaryDirectory).find(
-    (entry) => entry.startsWith(prefix) && entry.endsWith('.tgz'),
-  );
-  assert(tarball, `pnpm pack did not produce a tarball for @openmaic/${name}`);
-  console.log(`Packed @openmaic/${name}.`);
-  return join(temporaryDirectory, tarball);
 }
 
 /** The manifest as the registry will see it, read out of the tarball itself. */
@@ -99,15 +84,22 @@ function assertDeduplicableDslRange(name, manifest, dslVersion, ownedPackages) {
 try {
   const packageNames = OPENMAIC_PACKAGES;
   const localPackages = new Set(packageNames.map((name) => `@openmaic/${name}`));
+  const tarballs = Object.fromEntries(
+    packageNames.map((name) => {
+      const { version } = readManifest(name);
+      return [name, join(artifactDirectory, `openmaic-${name}-${version}.tgz`)];
+    }),
+  );
+  const packedManifests = Object.fromEntries(
+    packageNames.map((name) => [name, packedManifest(tarballs[name])]),
+  );
   // The smoke program executes the renderer root, whose optional chart and
   // highlighting peers are imported by that entry. Other optional peers remain
   // optional unless the smoke program starts executing their owning entry.
   const installOptionalPeersFor = new Set(['renderer']);
   const peerDependencies = {};
   for (const name of packageNames) {
-    const manifest = JSON.parse(
-      readFileSync(join(root, 'packages/@openmaic', name, 'package.json'), 'utf8'),
-    );
+    const manifest = packedManifests[name];
     for (const [peer, range] of Object.entries(manifest.peerDependencies ?? {})) {
       if (localPackages.has(peer)) continue;
       const isOptional = manifest.peerDependenciesMeta?.[peer]?.optional === true;
@@ -122,11 +114,9 @@ try {
       peerDependencies[peer] = range;
     }
   }
-  const tarballs = Object.fromEntries(packageNames.map((name) => [name, pack(name)]));
-
-  const dslVersion = packedManifest(tarballs.dsl).version;
+  const dslVersion = packedManifests.dsl.version;
   for (const name of Object.keys(INTERNAL_DEPENDENTS)) {
-    assertDeduplicableDslRange(name, packedManifest(tarballs[name]), dslVersion, localPackages);
+    assertDeduplicableDslRange(name, packedManifests[name], dslVersion, localPackages);
   }
 
   const consumerDirectory = join(temporaryDirectory, 'consumer');
@@ -188,7 +178,7 @@ for (const subpath of [
   );
   run('node', ['smoke.mjs'], { cwd: consumerDirectory });
 
-  console.log('Packed @openmaic package imports passed.');
+  console.log('Validated @openmaic package tarball imports passed.');
 } finally {
   rmSync(temporaryDirectory, { recursive: true, force: true });
 }
