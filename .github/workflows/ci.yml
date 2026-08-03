@@ -64,7 +64,34 @@ jobs:
         env:
           BEFORE_SHA: ${{ github.event.before }}
 
+      # The tarball smoke test proves this about the bytes that would actually
+      # be published, but it packs and installs four packages, so it runs only
+      # on the release path. This is the cheap source-level form, here so that a
+      # pull request restoring `workspace:*` fails at review time rather than at
+      # release time, after a version number has already been spent.
+      - name: Internal dependency ranges
+        run: node scripts/check-internal-dependency-ranges.mjs
+
       - run: pnpm install --frozen-lockfile
+
+      # `postinstall` builds all four @openmaic packages, and some of them
+      # generate tracked, publishable files (renderer's fonts.css and its KaTeX
+      # font snapshot). The publish workflow refuses to release when the build
+      # rewrites one; catching it here means a stale generated file is a pull
+      # request failure instead of a release failure.
+      #
+      # Against HEAD, not the index: a bare `git diff` compares the worktree to
+      # the index, so anything the install staged would be invisible to it.
+      - name: Verify the install did not rewrite tracked package files
+        run: |
+          set -euo pipefail
+          if ! git diff --quiet HEAD -- packages/@openmaic; then
+            echo "::error::Installing rewrote tracked files under packages/@openmaic."
+            echo "Regenerate them and commit the result."
+            git --no-pager diff --stat HEAD -- packages/@openmaic
+            exit 1
+          fi
+          echo "Tracked package files match the commit under test."
 
       - name: Prettier
         run: pnpm check

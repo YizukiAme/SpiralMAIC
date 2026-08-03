@@ -119,31 +119,60 @@ jobs:
       # (renderer's fonts.css and its KaTeX font snapshot). If the committed
       # copies are stale, the build rewrites them here and the registry would
       # receive content that is not in the commit being released.
+      #
+      # Compare against HEAD, not the index. A bare `git diff` compares the
+      # worktree to the index, so anything the build staged is invisible to it:
+      # the steps above run third-party package code, which needs no credential
+      # to rewrite a tracked file and `git add` it, after which the bare form
+      # reports clean and the rewritten bytes are packed and published. `git
+      # diff HEAD` compares against the commit being released, which is the
+      # thing this step actually claims.
       - name: Verify the build did not rewrite tracked package files
         run: |
           set -euo pipefail
-          if ! git diff --quiet -- packages/@openmaic; then
+          if ! git diff --quiet HEAD -- packages/@openmaic; then
             echo "::error::The build modified tracked files under packages/@openmaic."
             echo "Regenerate them and commit the result before releasing."
-            git --no-pager diff --stat -- packages/@openmaic
+            git --no-pager diff --stat HEAD -- packages/@openmaic
             exit 1
           fi
           echo "Tracked package files match the commit being released."
 
+      # storage runs separately, under the json reporter, so that the run leaves
+      # a record of WHICH suites executed. STORAGE_PG_CONTRACT_REQUIRED only
+      # protects against a missing database: it is a `throw` inside the test
+      # modules, so it never fires if vitest stops collecting those modules at
+      # all, and what decides collection is storage's vitest.config.ts — an
+      # ignored publishable input, so excluding `*.pg.test.ts` there needs no
+      # version bump and leaves the run green. The assertion below is outside
+      # the tests for exactly that reason.
       - name: Test & typecheck
         env:
           PG_CONTRACT_URL: postgresql://postgres:postgres@localhost:5432/openmaic
           STORAGE_PG_CONTRACT_REQUIRED: "1"
+          STORAGE_VITEST_RESULTS: ${{ runner.temp }}/storage-vitest.json
+          STORAGE_PG_BASELINE: ${{ runner.temp }}/storage-pg-baseline.json
         run: |
-          pnpm --filter "@openmaic/dsl" --filter "@openmaic/storage" \
+          set -euo pipefail
+          pnpm --filter "@openmaic/dsl" \
             --filter "@openmaic/renderer" --filter "@openmaic/importer" run test
+          node scripts/assert-pg-contract-suites.mjs --capture-baseline "$STORAGE_PG_BASELINE"
+          pnpm --filter "@openmaic/storage" exec \
+            vitest run --reporter=default --reporter=json \
+            --outputFile.json="$STORAGE_VITEST_RESULTS"
+          node scripts/assert-pg-contract-suites.mjs "$STORAGE_VITEST_RESULTS" \
+            --baseline "$STORAGE_PG_BASELINE"
           pnpm --filter "@openmaic/dsl" --filter "@openmaic/storage" --filter "@openmaic/renderer" run typecheck
 
+      # `--config.ignore-scripts=true` mirrors the publish step's
+      # `--ignore-scripts`. Inspecting a tarball built with lifecycle scripts
+      # while publishing one built without them means this step describes a
+      # tarball the registry never receives.
       - name: Inspect tarball contents (dry-run pack)
         run: |
           for pkg in dsl storage renderer importer; do
             echo "::group::@openmaic/$pkg"
-            ( cd "packages/@openmaic/$pkg" && pnpm pack --dry-run )
+            ( cd "packages/@openmaic/$pkg" && pnpm pack --dry-run --config.ignore-scripts=true )
             echo "::endgroup::"
           done
 
@@ -254,12 +283,15 @@ jobs:
           --filter "@openmaic/importer"
           run build
 
+      # As in `validate`, and for the same reason: against HEAD, so that a
+      # rewrite the build staged cannot pass as a clean worktree. This is the
+      # copy that guards the bytes actually being published.
       - name: Verify the build did not rewrite tracked package files
         run: |
           set -euo pipefail
-          if ! git diff --quiet -- packages/@openmaic; then
+          if ! git diff --quiet HEAD -- packages/@openmaic; then
             echo "::error::The build modified tracked files under packages/@openmaic."
-            git --no-pager diff --stat -- packages/@openmaic
+            git --no-pager diff --stat HEAD -- packages/@openmaic
             exit 1
           fi
 
