@@ -222,6 +222,42 @@ export const PROVIDERS: Record<ProviderId, ProviderConfig> = {
     models: [],
   },
 
+  atlascloud: {
+    id: 'atlascloud',
+    name: 'Atlas Cloud',
+    type: 'openai',
+    defaultBaseUrl: 'https://api.atlascloud.ai/v1',
+    supportsModelDiscovery: true,
+    requiresApiKey: true,
+    models: [
+      {
+        id: 'qwen/qwen3.5-flash',
+        name: 'Qwen3.5 Flash',
+        contextWindow: 1000000,
+        outputWindow: 67072,
+        capabilities: { streaming: true, tools: false, vision: false },
+      },
+      {
+        id: 'deepseek-ai/deepseek-v4-pro',
+        name: 'DeepSeek V4 Pro',
+        contextWindow: 1048576,
+        outputWindow: 393216,
+        // Live-verified with enabled/disabled thinking payloads and a forced
+        // OpenAI-compatible function call against Atlas Cloud.
+        capabilities: {
+          streaming: true,
+          tools: true,
+          vision: false,
+          thinking: {
+            toggleable: true,
+            budgetAdjustable: true,
+            defaultEnabled: true,
+          },
+        },
+      },
+    ],
+  },
+
   anthropic: {
     id: 'anthropic',
     name: 'Claude',
