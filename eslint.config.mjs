@@ -140,8 +140,9 @@ const eslintConfig = defineConfig([
   },
   // Package boundary (machine-enforced): @openmaic/generation is a standalone,
   // app-agnostic package. Every package code directory is covered so future
-  // scripts and tooling cannot bypass the boundary. Package code may import
-  // only @openmaic/dsl, Node built-ins, or relative modules.
+  // scripts and tooling cannot bypass the boundary. The leaf dependency list
+  // mirrors the package's declared dependencies and is widened only together
+  // with package.json.
   {
     files: ['packages/@openmaic/generation/**/*.{ts,tsx,js,jsx,mjs,cjs}'],
     rules: {
@@ -160,21 +161,21 @@ const eslintConfig = defineConfig([
         },
         {
           selector:
-            'ImportDeclaration > Literal.source[value=/^(?!@openmaic\\/dsl(\\/|$)|node:|\\.\\.?\\/).+/]',
+            'ImportDeclaration > Literal.source[value=/^(?!@openmaic\\/dsl(\\/|$)|(nanoid|jsonrepair)(\\/|$)|node:|\\.\\.?\\/).+/]',
           message:
-            '@openmaic/generation may import only from @openmaic/dsl, Node built-ins, or relative modules (./… or ../…).',
+            '@openmaic/generation may import only from @openmaic/dsl, approved leaf runtime dependencies, Node built-ins, or relative modules (./… or ../…).',
         },
         {
           selector:
-            'ExportNamedDeclaration > Literal.source[value=/^(?!@openmaic\\/dsl(\\/|$)|node:|\\.\\.?\\/).+/]',
+            'ExportNamedDeclaration > Literal.source[value=/^(?!@openmaic\\/dsl(\\/|$)|(nanoid|jsonrepair)(\\/|$)|node:|\\.\\.?\\/).+/]',
           message:
-            '@openmaic/generation may re-export only from @openmaic/dsl, Node built-ins, or relative modules (./… or ../…).',
+            '@openmaic/generation may re-export only from @openmaic/dsl, approved leaf runtime dependencies, Node built-ins, or relative modules (./… or ../…).',
         },
         {
           selector:
-            'ExportAllDeclaration > Literal.source[value=/^(?!@openmaic\\/dsl(\\/|$)|node:|\\.\\.?\\/).+/]',
+            'ExportAllDeclaration > Literal.source[value=/^(?!@openmaic\\/dsl(\\/|$)|(nanoid|jsonrepair)(\\/|$)|node:|\\.\\.?\\/).+/]',
           message:
-            '@openmaic/generation may re-export only from @openmaic/dsl, Node built-ins, or relative modules (./… or ../…).',
+            '@openmaic/generation may re-export only from @openmaic/dsl, approved leaf runtime dependencies, Node built-ins, or relative modules (./… or ../…).',
         },
         {
           selector: 'ImportExpression',
