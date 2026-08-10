@@ -256,6 +256,8 @@ export interface SettingsState {
       enabled: boolean;
       requiresApiKey?: boolean;
       isServerConfigured?: boolean;
+      /** Model-based providers only (Claude): the model that runs the search. */
+      modelId?: string;
     }
   >;
 
@@ -436,7 +438,7 @@ export interface SettingsState {
   setWebSearchProvider: (providerId: WebSearchProviderId) => void;
   setWebSearchProviderConfig: (
     providerId: WebSearchProviderId,
-    config: Partial<{ apiKey: string; baseUrl: string; enabled: boolean }>,
+    config: Partial<{ apiKey: string; baseUrl: string; enabled: boolean; modelId: string }>,
   ) => void;
   setBaiduSubSources: (sources: Partial<BaiduSubSources>) => void;
 
@@ -653,6 +655,7 @@ const getDefaultAudioConfig = () => ({
     'browser-native': { apiKey: '', baseUrl: '', enabled: true },
     'qwen-asr': { apiKey: '', baseUrl: '', enabled: false },
     'azure-asr': { apiKey: '', baseUrl: '', enabled: false },
+    'funasr-asr': { apiKey: '', baseUrl: '', enabled: false },
     'lemonade-asr': { apiKey: '', baseUrl: '', enabled: false },
   } as Record<ASRProviderId, { apiKey: string; baseUrl: string; enabled: boolean }>,
 });
@@ -722,6 +725,13 @@ const getDefaultWebSearchConfig = () => ({
       requiresApiKey: false,
     },
     baidu: { apiKey: '', baseUrl: '', enabled: true, requiresApiKey: true },
+    claude: {
+      apiKey: '',
+      baseUrl: '',
+      enabled: true,
+      requiresApiKey: true,
+      modelId: '',
+    },
     minimax: {
       apiKey: '',
       baseUrl: WEB_SEARCH_PROVIDERS.minimax.defaultBaseUrl || '',
@@ -742,7 +752,13 @@ const getDefaultWebSearchConfig = () => ({
     },
   } as Record<
     WebSearchProviderId,
-    { apiKey: string; baseUrl: string; enabled: boolean; requiresApiKey?: boolean }
+    {
+      apiKey: string;
+      baseUrl: string;
+      enabled: boolean;
+      requiresApiKey?: boolean;
+      modelId?: string;
+    }
   >,
   baiduSubSources: {
     webSearch: true,

@@ -24,8 +24,7 @@ vi.mock('@/lib/utils/database', () => ({
   db: { stageOutlines: { put: vi.fn(), get: vi.fn() } },
 }));
 
-import type { PBLProjectConfig } from '@/lib/pbl/types';
-import { transitionProjectUiPhase } from '@/lib/pbl/v2/operations/runtime-events';
+import { transitionProjectUiPhase } from '@/lib/pbl/v2/operations/kernel/runtime-events';
 import { drainProjectRuntime } from '@/lib/pbl/v2/runtime/drain';
 import type { PBLProjectV2 } from '@/lib/pbl/v2/types';
 import {
@@ -160,7 +159,6 @@ function makePBLScene(project: PBLProjectV2): Scene {
     },
     {
       type: 'pbl',
-      projectConfig: {} as PBLProjectConfig,
       projectV2: project,
     },
   );

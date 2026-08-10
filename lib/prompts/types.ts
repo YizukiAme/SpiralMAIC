@@ -35,8 +35,7 @@ export type PromptId =
   | 'revisit-study-artifact-faq'
   | 'revisit-study-artifact-flashcards'
   | 'revisit-study-artifact-quiz'
-  | 'overtime-extension-outline'
-  | 'pbl-design';
+  | 'overtime-extension-outline';
 
 /**
  * Snippet identifier
@@ -63,3 +62,5 @@ export interface LoadedPrompt {
   systemPrompt: string;
   userPromptTemplate: string;
 }
+
+export type PromptVariableDefaults = Partial<Record<PromptId, Readonly<Record<string, unknown>>>>;

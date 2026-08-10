@@ -9,10 +9,17 @@
  *
  * `KVStore` ships a browser backend and an HTTP backend, proven equivalent by
  * one shared contract suite, with one asymmetry: only its `account` scope has
- * an HTTP backend, because `device` values never leave the device. The
- * `AssetProvider` ships its browser backend only; its server design is being
- * reworked around a global resource pool (#1007), so no HTTP backend is exposed
- * here.
+ * an HTTP backend, because `device` values never leave the device.
+ *
+ * The asset seam ships `BrowserAssetStore`: a global asset pool, in which an
+ * allocated `AssetId` names a registry entry and the registry names
+ * content-addressed bytes (#1007). Its byte table is embedded in the registry's
+ * IndexedDB database so writes, reference counting, and reclamation share one
+ * transaction, and its inline reclamation is what keeps them there. A server
+ * backend collects bytes offline instead, which lets its byte layer be
+ * pluggable — a column of the transactional store, or an object store keyed by
+ * content hash. The HTTP backend downloads bytes through authenticated fetches
+ * and mints object URLs locally.
  */
 export type { DeviceSafeKVStore, KVScope, KVStore, LocalKVStore } from './kv/types.js';
 export { assertKVScope, DEFAULT_KV_SCOPE, KVScopeViolationError } from './kv/types.js';
@@ -27,7 +34,37 @@ export {
   type HttpKVHeadersHook,
   type HttpKVStoreOptions,
 } from './kv/http.js';
-export { BrowserAssetProvider, type BrowserAssetProviderOptions } from './asset/browser.js';
+export { BrowserAssetStore, type BrowserAssetStoreOptions } from './asset/browser-store.js';
+export {
+  HttpAssetStore,
+  HttpAssetStoreError,
+  type HttpAssetHeadersContext,
+  type HttpAssetHeadersHook,
+  type HttpAssetStoreOptions,
+} from './asset/http.js';
+export { newAssetId, toAssetId, type AssetId } from './asset/id.js';
+export {
+  AssetNotFoundError,
+  AssetQuotaExceededError,
+  DEFAULT_RENDERABLE_TYPES,
+  EXCLUDED_RENDERABLE_TYPES,
+  type AssetBytes,
+  type AssetIdentity,
+  type AssetPrincipal,
+  type AssetStore,
+} from './asset/types.js';
+export {
+  ASSET_PG_SCHEMA,
+  PgAssetStore,
+  ensureAssetSchema,
+  type PgAssetStoreOptions,
+} from './asset/pg.js';
+export { PgAssetByteStore } from './asset/pg-bytes.js';
+export {
+  AssetCollector,
+  DEFAULT_ASSET_COLLECTION_GRACE_MS,
+  type AssetCollectorOptions,
+} from './asset/collector.js';
 
 export {
   kvPersistStorage,

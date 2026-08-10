@@ -9,7 +9,22 @@ const { deleteDocument, clearCurrentScene, clearAllForScene } = vi.hoisted(() =>
 vi.mock('@/lib/document-store', () => ({
   clearCurrentScene,
   mutateDocument: vi.fn(async (_stageId, work) =>
-    work({ scenes: [{ id: 'new-scene' }] }, { deleteDocument }),
+    work(
+      {
+        stage: { id: 'stage-7', name: 'Stage', createdAt: 1, updatedAt: 1 },
+        scenes: [
+          {
+            id: 'new-scene',
+            stageId: 'stage-7',
+            type: 'text',
+            title: 'Scene',
+            order: 1,
+            content: { type: 'text', markdown: '' },
+          },
+        ],
+      },
+      { deleteDocument },
+    ),
   ),
   getDocumentStore: vi.fn(() => ({
     loadDocument: vi.fn().mockResolvedValue({ scenes: [{ id: 'new-scene' }] }),
@@ -32,6 +47,18 @@ vi.mock('@/lib/utils/database', () => ({
     transaction: vi.fn(async (_mode, _tables, work) => work()),
     stages: { delete: vi.fn().mockResolvedValue(undefined) },
     playbackState: { delete: vi.fn().mockResolvedValue(undefined) },
+    mediaFiles: {
+      where: () => ({ equals: () => ({ toArray: vi.fn().mockResolvedValue([]) }) }),
+      bulkDelete: vi.fn().mockResolvedValue(undefined),
+    },
+    audioFiles: {
+      where: () => ({ equals: () => ({ toArray: vi.fn().mockResolvedValue([]) }) }),
+      bulkGet: vi.fn().mockResolvedValue([]),
+      bulkDelete: vi.fn().mockResolvedValue(undefined),
+    },
+    generatedAgents: {
+      where: () => ({ equals: () => ({ delete: vi.fn().mockResolvedValue(0) }) }),
+    },
     scenes: {
       where: () => ({
         equals: () => ({
@@ -41,12 +68,6 @@ vi.mock('@/lib/utils/database', () => ({
       }),
     },
     stageOutlines: { delete: vi.fn().mockResolvedValue(undefined) },
-    mediaFiles: {
-      where: () => ({ equals: () => ({ delete: vi.fn().mockResolvedValue(0) }) }),
-    },
-    generatedAgents: {
-      where: () => ({ equals: () => ({ delete: vi.fn().mockResolvedValue(0) }) }),
-    },
     agentEditSessions: {
       where: () => ({ equals: () => ({ delete: vi.fn().mockResolvedValue(0) }) }),
     },
@@ -54,6 +75,9 @@ vi.mock('@/lib/utils/database', () => ({
       where: () => ({ equals: () => ({ delete: vi.fn().mockResolvedValue(0) }) }),
     },
   },
+}));
+vi.mock('@/lib/media/asset-pool', () => ({
+  removeAsset: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('@/lib/utils/chat-storage', () => ({
   saveChatSessions: vi.fn(),

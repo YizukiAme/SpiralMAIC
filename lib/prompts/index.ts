@@ -54,5 +54,4 @@ export const PROMPT_IDS = {
   REVISIT_STUDY_ARTIFACT_FLASHCARDS: 'revisit-study-artifact-flashcards',
   REVISIT_STUDY_ARTIFACT_QUIZ: 'revisit-study-artifact-quiz',
   OVERTIME_EXTENSION_OUTLINE: 'overtime-extension-outline',
-  PBL_DESIGN: 'pbl-design',
 } as const satisfies Record<string, PromptId>;

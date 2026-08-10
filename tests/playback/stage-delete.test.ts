@@ -29,7 +29,13 @@ vi.mock('@/lib/utils/database', () => ({
     stageOutlines: { delete: vi.fn().mockResolvedValue(undefined) },
     playbackState: { delete: deleteLegacyPlaybackRow },
     mediaFiles: {
-      where: () => ({ equals: () => ({ delete: vi.fn().mockResolvedValue(0) }) }),
+      where: () => ({ equals: () => ({ toArray: vi.fn().mockResolvedValue([]) }) }),
+      bulkDelete: vi.fn().mockResolvedValue(undefined),
+    },
+    audioFiles: {
+      where: () => ({ equals: () => ({ toArray: vi.fn().mockResolvedValue([]) }) }),
+      bulkGet: vi.fn().mockResolvedValue([]),
+      bulkDelete: vi.fn().mockResolvedValue(undefined),
     },
     agentEditSessions: {
       where: () => ({ equals: () => ({ delete: vi.fn().mockResolvedValue(0) }) }),
@@ -49,6 +55,9 @@ vi.mock('@/lib/utils/database', () => ({
       }),
     },
   },
+}));
+vi.mock('@/lib/media/asset-pool', () => ({
+  removeAsset: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('@/lib/utils/chat-storage', () => ({
   saveChatSessions: vi.fn(),

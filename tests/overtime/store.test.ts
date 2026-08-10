@@ -113,8 +113,7 @@ describe('overtime extension persistence', () => {
 
   afterEach(clearCoreTables);
 
-  it('keeps overtime storage through Core Dexie v15 and creates only one unfinished task per course', async () => {
-    expect(db.verno).toBe(15);
+  it('keeps overtime storage in the current Core Dexie schema and creates only one unfinished task per course', async () => {
     expect(db.tables.map((table) => table.name)).toContain('overtimeExtensions');
 
     const first = await createOrGetOvertimeExtension({

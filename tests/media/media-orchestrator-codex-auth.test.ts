@@ -2,11 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => {
   const mediaStore = {
+    tasks: {},
     getTask: vi.fn(() => undefined),
     enqueueTasks: vi.fn(),
     markGenerating: vi.fn(),
     markFailed: vi.fn(),
     markDone: vi.fn(),
+    rekeyDone: vi.fn(),
     markPendingForRetry: vi.fn(),
   };
   const settingsState = {
@@ -26,7 +28,12 @@ const mocks = vi.hoisted(() => {
     mediaStore,
     settingsState,
     mediaFilesPut: vi.fn(async (_record: unknown) => undefined),
+    mediaFilesGet: vi.fn(async () => undefined),
     mediaFilesDelete: vi.fn(async () => undefined),
+    assetPut: vi.fn(async (_blob: Blob, meta: { prompt?: string }) =>
+      (meta.prompt ?? 'asset').replace(/^illustration /, ''),
+    ),
+    assetRemove: vi.fn(async () => undefined),
     logError: vi.fn(),
   };
 });
@@ -43,10 +50,38 @@ vi.mock('@/lib/utils/database', () => ({
   db: {
     mediaFiles: {
       put: mocks.mediaFilesPut,
+      get: mocks.mediaFilesGet,
       delete: mocks.mediaFilesDelete,
     },
   },
   mediaFileKey: (stageId: string, elementId: string) => `${stageId}:${elementId}`,
+}));
+
+vi.mock('@/lib/media/asset-pool', () => ({
+  putAsset: mocks.assetPut,
+  removeAsset: mocks.assetRemove,
+  replaceAsset: vi.fn(),
+}));
+
+vi.mock('@/lib/document-store', () => {
+  const document = {
+    stage: { id: 'stage-1', name: 'Test', createdAt: 0, updatedAt: 0 },
+    scenes: [],
+  };
+  return {
+    accessDocument: vi.fn(async () => ({ document })),
+    mutateDocument: vi.fn(async (_stageId, work) =>
+      work(document, { saveDocument: vi.fn(async () => undefined) }),
+    ),
+  };
+});
+
+vi.mock('@/lib/store/stage', () => ({
+  useStageStore: {
+    getState: () => ({ stage: null, scenes: [] }),
+    setState: vi.fn(),
+  },
+  markStagePersistenceDirty: vi.fn(),
 }));
 
 vi.mock('@/lib/logger', () => ({
@@ -133,11 +168,6 @@ describe('media orchestrator Codex auth invalidation', () => {
     expect(record.blob).toBeInstanceOf(Blob);
     expect(record.blob.size).toBeGreaterThan(0);
     expect(createObjectURL).toHaveBeenCalledWith(record.blob);
-    expect(mocks.mediaStore.markDone).toHaveBeenCalledWith(
-      'image-1',
-      'blob:codex-image-page-ready',
-      undefined,
-    );
     expect(mocks.mediaStore.markFailed).not.toHaveBeenCalled();
   });
 
