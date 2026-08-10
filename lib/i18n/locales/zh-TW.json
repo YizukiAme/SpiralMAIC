@@ -227,6 +227,7 @@
       }
     },
     "text": {
+      "toolbar": "文字工具列",
       "label": "文字",
       "font": "字型",
       "fontDefault": "預設",
@@ -240,17 +241,99 @@
       "alignLeft": "靠左對齊",
       "alignCenter": "置中對齊",
       "alignRight": "靠右對齊",
-      "bullet": "項目符號"
+      "bullet": "項目符號",
+      "colorHex": "顏色值"
+    },
+    "line": {
+      "toolbar": "線條工具列",
+      "kind": "線條類型",
+      "color": "線條顏色",
+      "width": "線寬",
+      "style": "線條樣式",
+      "start": "起點樣式",
+      "end": "終點樣式",
+      "straight": "直線",
+      "broken": "折線",
+      "broken2": "雙折線",
+      "curve": "曲線",
+      "cubic": "三次曲線",
+      "solid": "實線",
+      "dashed": "虛線",
+      "dotted": "點線",
+      "none": "無",
+      "arrow": "箭頭",
+      "dot": "圓點"
     },
     "insert": {
+      "toolbar": "插入工具列",
       "textBox": "文字方塊",
+      "line": "線條",
+      "linePresets": {
+        "straight": "直線",
+        "dashed": "虛線",
+        "arrow": "箭頭直線",
+        "dashedArrow": "虛線箭頭",
+        "dottedEnd": "圓點端點線",
+        "broken": "折線",
+        "doubleBroken": "雙折線",
+        "curve": "曲線",
+        "cubic": "三次曲線"
+      },
+      "table": "表格",
+      "formula": "公式",
+      "chart": "圖表",
+      "chartBar": "柱狀圖",
+      "chartLine": "折線圖",
+      "chartPie": "圓餅圖",
+      "tableDimensions": "{{rows}} x {{columns}} 表格",
       "dragToolbar": "拖動工具列",
       "dragToolbarKeyboard": "移動工具列：按 Enter 或空白鍵開始，再使用方向鍵移動",
       "image": "圖片",
       "imageDrop": "拖曳圖片或點按選擇檔案",
       "imageOr": "或貼上圖片網址",
       "imageUrlPlaceholder": "https://…",
-      "imageInsert": "插入"
+      "imageInsert": "插入",
+      "video": "影片",
+      "videoDrop": "拖曳影片或點按選擇檔案",
+      "videoOr": "或貼上影片網址",
+      "videoUrlPlaceholder": "https://…",
+      "videoInsert": "插入",
+      "audio": "音訊",
+      "audioDrop": "拖曳音訊或點按選擇檔案",
+      "audioOr": "或貼上音訊網址",
+      "audioUrlPlaceholder": "https://…",
+      "audioInsert": "插入"
+    },
+    "asset": {
+      "drop": "拖入檔案或點擊選擇",
+      "orUrl": "或貼上檔案 URL",
+      "urlPlaceholder": "https://…",
+      "insert": "插入",
+      "invalidType": "不支援此檔案類型",
+      "readFailed": "無法讀取檔案"
+    },
+    "latex": {
+      "toolbar": "公式工具列",
+      "editFormula": "編輯公式",
+      "dialog": "公式編輯器",
+      "source": "LaTeX 原始碼",
+      "preview": "預覽",
+      "symbols": "常用符號",
+      "presets": "預設公式",
+      "invalidSource": "LaTeX 原始碼無效。"
+    },
+    "video": {
+      "toolbar": "影片工具列",
+      "poster": "設定封面"
+    },
+    "audio": {
+      "toolbar": "音訊工具列",
+      "preview": "試聽音訊",
+      "pause": "暫停試聽",
+      "loop": "循環播放"
+    },
+    "table": {
+      "doubleClickToEdit": "雙擊編輯"
     },
     "nav": {
       "addSlide": "新增投影片",
@@ -273,14 +356,38 @@
       "toBack": "移至最下層"
     },
     "image": {
+      "toolbar": "圖片工具列",
       "replace": "替換圖片",
       "flipH": "水平翻轉",
-      "flipV": "垂直翻轉"
+      "flipV": "垂直翻轉",
+      "crop": "裁剪圖片"
+    },
+    "contextMenu": {
+      "horizontalAlignment": "水平對齊",
+      "verticalAlignment": "垂直對齊",
+      "selectAll": "全選",
+      "copy": "複製",
+      "cut": "剪下",
+      "paste": "貼上",
+      "unlock": "解鎖",
+      "lock": "鎖定",
+      "group": "群組",
+      "ungroup": "取消群組",
+      "bringForward": "上移一層",
+      "sendBackward": "下移一層",
+      "alignTop": "頂端對齊",
+      "alignMiddle": "垂直置中",
+      "alignBottom": "底端對齊"
     },
     "background": {
       "label": "背景",
       "solid": "純色",
-      "image": "圖片"
+      "image": "圖片",
+      "color": "顏色"
+    },
+    "common": {
+      "cancel": "取消",
+      "confirm": "確定"
     },
     "quiz": {
       "addQuestion": "新增題目",
@@ -330,6 +437,7 @@
       "discussion": "討論"
     },
     "element": {
+      "toolbar": "元素工具列",
       "text": "文字",
       "image": "圖片",
       "shape": "形狀",

@@ -227,6 +227,7 @@
       }
     },
     "text": {
+      "toolbar": "Barra de texto",
       "label": "Texto",
       "font": "Fuente",
       "fontDefault": "Predeterminada",
@@ -240,17 +241,99 @@
       "alignLeft": "Alinear a la izquierda",
       "alignCenter": "Centrar",
       "alignRight": "Alinear a la derecha",
-      "bullet": "Lista con viñetas"
+      "bullet": "Lista con viñetas",
+      "colorHex": "Código de color"
+    },
+    "line": {
+      "toolbar": "Barra de línea",
+      "kind": "Tipo de línea",
+      "color": "Color de línea",
+      "width": "Grosor de línea",
+      "style": "Estilo de línea",
+      "start": "Estilo inicial",
+      "end": "Estilo final",
+      "straight": "Recta",
+      "broken": "Quebrada",
+      "broken2": "Quebrada doble",
+      "curve": "Curva",
+      "cubic": "Curva cúbica",
+      "solid": "Sólida",
+      "dashed": "Discontinua",
+      "dotted": "Punteada",
+      "none": "Ninguno",
+      "arrow": "Flecha",
+      "dot": "Punto"
     },
     "insert": {
+      "toolbar": "Barra de inserción",
       "textBox": "Cuadro de texto",
+      "line": "Línea",
+      "linePresets": {
+        "straight": "Línea recta",
+        "dashed": "Línea discontinua",
+        "arrow": "Línea con flecha",
+        "dashedArrow": "Línea discontinua con flecha",
+        "dottedEnd": "Línea con extremo de punto",
+        "broken": "Línea quebrada",
+        "doubleBroken": "Línea con doble quiebre",
+        "curve": "Curva",
+        "cubic": "Curva cúbica"
+      },
+      "table": "Tabla",
+      "formula": "Fórmula",
+      "chart": "Gráfica",
+      "chartBar": "Gráfica de barras",
+      "chartLine": "Gráfica de líneas",
+      "chartPie": "Gráfica circular",
+      "tableDimensions": "Tabla {{rows}} x {{columns}}",
       "dragToolbar": "Mover herramientas de inserción",
       "dragToolbarKeyboard": "Mover herramientas de inserción: presiona Enter o Espacio y luego usa las flechas",
       "image": "Imagen",
       "imageDrop": "Suelta una imagen o haz clic para elegir un archivo",
       "imageOr": "o pega la URL de una imagen",
       "imageUrlPlaceholder": "https://…",
-      "imageInsert": "Insertar"
+      "imageInsert": "Insertar",
+      "video": "Video",
+      "videoDrop": "Suelta un video o haz clic para elegir un archivo",
+      "videoOr": "o pega la URL de un video",
+      "videoUrlPlaceholder": "https://…",
+      "videoInsert": "Insertar",
+      "audio": "Audio",
+      "audioDrop": "Suelta un audio o haz clic para elegir un archivo",
+      "audioOr": "o pega la URL de un audio",
+      "audioUrlPlaceholder": "https://…",
+      "audioInsert": "Insertar"
+    },
+    "asset": {
+      "drop": "Arrastra un archivo o haz clic para elegir",
+      "orUrl": "o pega la URL del archivo",
+      "urlPlaceholder": "https://…",
+      "insert": "Insertar",
+      "invalidType": "Tipo de archivo no compatible",
+      "readFailed": "No se pudo leer el archivo"
+    },
+    "latex": {
+      "toolbar": "Barra de fórmulas",
+      "editFormula": "Editar fórmula",
+      "dialog": "Editor de fórmulas",
+      "source": "Código fuente LaTeX",
+      "preview": "Vista previa",
+      "symbols": "Símbolos",
+      "presets": "Fórmulas predefinidas",
+      "invalidSource": "El código fuente LaTeX no es válido."
+    },
+    "video": {
+      "toolbar": "Barra de video",
+      "poster": "Establecer portada"
+    },
+    "audio": {
+      "toolbar": "Barra de audio",
+      "preview": "Escuchar audio",
+      "pause": "Pausar vista previa",
+      "loop": "Repetir"
+    },
+    "table": {
+      "doubleClickToEdit": "Haz doble clic para editar"
     },
     "nav": {
       "addSlide": "Agregar diapositiva",
@@ -273,14 +356,38 @@
       "toBack": "Enviar al fondo"
     },
     "image": {
+      "toolbar": "Barra de imagen",
       "replace": "Reemplazar imagen",
       "flipH": "Voltear horizontal",
-      "flipV": "Voltear vertical"
+      "flipV": "Voltear vertical",
+      "crop": "Recortar imagen"
+    },
+    "contextMenu": {
+      "horizontalAlignment": "Alineación horizontal",
+      "verticalAlignment": "Alineación vertical",
+      "selectAll": "Seleccionar todo",
+      "copy": "Copiar",
+      "cut": "Cortar",
+      "paste": "Pegar",
+      "unlock": "Desbloquear",
+      "lock": "Bloquear",
+      "group": "Agrupar",
+      "ungroup": "Desagrupar",
+      "bringForward": "Traer adelante",
+      "sendBackward": "Enviar atrás",
+      "alignTop": "Alinear arriba",
+      "alignMiddle": "Alinear al medio",
+      "alignBottom": "Alinear abajo"
     },
     "background": {
       "label": "Fondo",
       "solid": "Sólido",
-      "image": "Imagen"
+      "image": "Imagen",
+      "color": "Color"
+    },
+    "common": {
+      "cancel": "Cancelar",
+      "confirm": "Confirmar"
     },
     "quiz": {
       "addQuestion": "Agregar pregunta",
@@ -330,6 +437,7 @@
       "discussion": "Discusión"
     },
     "element": {
+      "toolbar": "Barra de elementos",
       "text": "Texto",
       "image": "Imagen",
       "shape": "Forma",
