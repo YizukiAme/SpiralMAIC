@@ -238,7 +238,9 @@ jobs:
   publish:
     name: Publish to npm
     needs: validate
-    if: github.event_name == 'push' || inputs.dry_run == false
+    if: >-
+      github.repository == 'THU-MAIC/OpenMAIC' &&
+      (github.event_name == 'push' || inputs.dry_run == false)
     runs-on: ubuntu-latest
     environment: release
     outputs:

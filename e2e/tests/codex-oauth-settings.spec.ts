@@ -1,6 +1,6 @@
 import { expect, test } from '../fixtures/base';
 import { HomePage } from '../pages/home.page';
-import { createSettingsStorage } from '../fixtures/test-data/settings';
+import { createSettingsStorage, SETTINGS_KV_KEY } from '../fixtures/test-data/settings';
 
 function serverProvidersBody(connected: boolean, fastModels = ['gpt-live']) {
   return JSON.stringify({
@@ -41,7 +41,7 @@ async function openCodexSettings(page: HomePage['page'], connected = false) {
 test.describe.configure({ mode: 'serial' });
 
 test.describe('Codex OAuth settings', () => {
-  test('runs blocked-popup fallback, device completion, safe test, and logout fallback', async ({
+  test('runs blocked-popup cleanup, manual device completion, safe test, and logout fallback', async ({
     page,
   }) => {
     let connected = false;
@@ -57,8 +57,8 @@ test.describe('Codex OAuth settings', () => {
     });
 
     await page.addInitScript(
-      ({ settings }) => {
-        localStorage.setItem('settings-storage', settings);
+      ({ settings, settingsKey }) => {
+        localStorage.setItem(settingsKey, settings);
         Object.defineProperty(window, 'open', { configurable: true, value: () => null });
         Object.defineProperty(navigator, 'clipboard', {
           configurable: true,
@@ -70,6 +70,7 @@ test.describe('Codex OAuth settings', () => {
         });
       },
       {
+        settingsKey: SETTINGS_KV_KEY,
         settings: createSettingsStorage({
           providerId: 'openai',
           modelId: 'gpt-5.5',
@@ -160,8 +161,15 @@ test.describe('Codex OAuth settings', () => {
     await expect(page.locator('input[name^="llm-base-url-openai-codex"]')).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Sign in with ChatGPT', exact: true }).click();
+    await expect(
+      page.getByText('Sign-in failed. Choose either sign-in method to try again.'),
+    ).toBeVisible();
+    expect(loginEvents.slice(-2)).toEqual(['POST browser', 'DELETE login']);
+    await expect(page.getByText('PLAY-WRITE', { exact: true })).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Use device code' }).click();
     await expect(page.getByText('PLAY-WRITE', { exact: true })).toBeVisible();
-    expect(loginEvents.slice(-3)).toEqual(['POST browser', 'DELETE login', 'POST device']);
+    expect(loginEvents.at(-1)).toBe('POST device');
     await expect(page.getByRole('link', { name: 'Open verification page' })).toHaveAttribute(
       'href',
       'https://auth.openai.com/codex/device',
@@ -200,10 +208,10 @@ test.describe('Codex OAuth settings', () => {
     await expect(fastMode).toBeChecked();
     await expect
       .poll(async () =>
-        page.evaluate(() => {
-          const raw = localStorage.getItem('settings-storage');
+        page.evaluate((settingsKey) => {
+          const raw = localStorage.getItem(settingsKey);
           return raw ? JSON.parse(raw).state.codexFastMode : null;
-        }),
+        }, SETTINGS_KV_KEY),
       )
       .toBe(true);
 
@@ -219,10 +227,10 @@ test.describe('Codex OAuth settings', () => {
     ).toBeVisible();
     await expect
       .poll(async () =>
-        page.evaluate(() => {
-          const raw = localStorage.getItem('settings-storage');
+        page.evaluate((settingsKey) => {
+          const raw = localStorage.getItem(settingsKey);
           return raw ? JSON.parse(raw).state.providerId : null;
-        }),
+        }, SETTINGS_KV_KEY),
       )
       .toBe('openai');
     await expect(page.getByRole('switch', { name: 'Fast mode' })).toHaveCount(0);

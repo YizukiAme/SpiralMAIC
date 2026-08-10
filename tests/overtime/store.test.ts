@@ -28,6 +28,18 @@ const localStorageStub = {
 };
 vi.stubGlobal('localStorage', localStorageStub);
 
+const lockManager = {
+  async request<T>(
+    _name: string,
+    optionsOrCallback: LockOptions | (() => Promise<T> | T),
+    maybeCallback?: () => Promise<T> | T,
+  ): Promise<T> {
+    const callback = typeof optionsOrCallback === 'function' ? optionsOrCallback : maybeCallback!;
+    return await callback();
+  },
+} as Pick<LockManager, 'request'>;
+vi.stubGlobal('navigator', { locks: lockManager });
+
 const decision = {
   disposition: 'append_page' as const,
   topic: 'approach',

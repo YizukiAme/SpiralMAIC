@@ -186,9 +186,10 @@ jobs:
   publish:
     name: Publish to ClawHub
     if: >-
-      github.event_name == 'push' ||
+      github.repository == 'THU-MAIC/OpenMAIC' &&
+      (github.event_name == 'push' ||
       (github.event_name == 'workflow_dispatch' &&
-      github.ref == 'refs/heads/main' && !inputs.dry_run)
+      github.ref == 'refs/heads/main' && !inputs.dry_run))
     runs-on: ubuntu-latest
     environment: clawhub-release
     permissions:

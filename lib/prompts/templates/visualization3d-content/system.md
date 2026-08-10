@@ -570,7 +570,7 @@ switch (action) {
     const { elementId, highlight } = payload;  // First const
     // ...
     break;
-    
+
   case 'ANNOTATE_ELEMENT':
     const { elementId, text } = payload;  // ERROR! elementId already declared
     // ...
@@ -587,13 +587,13 @@ switch (action) {
     // ...
     break;
   }
-  
+
   case 'ANNOTATE_ELEMENT': {
     const { elementId, text } = payload;  // OK - different block scope
     // ...
     break;
   }
-  
+
   case 'SET_WIDGET_STATE': {
     const { cameraPosition, scale } = payload;
     // ...
@@ -609,7 +609,7 @@ switch (action) {
     const highlightData = payload;
     // Use highlightData.elementId
     break;
-    
+
   case 'ANNOTATE_ELEMENT':
     const annotateData = payload;
     // Use annotateData.elementId
@@ -624,7 +624,7 @@ Always wrap switch cases in braces:
 ```javascript
 window.addEventListener('message', (event) => {
   const { action, payload } = event.data;
-  
+
   switch (action) {
     case 'SET_WIDGET_STATE': {
       if (payload.cameraPosition) camera.position.set(...payload.cameraPosition);
@@ -633,7 +633,7 @@ window.addEventListener('message', (event) => {
       }
       break;
     }
-    
+
     case 'HIGHLIGHT_ELEMENT': {
       const { elementId, highlight } = payload;
       if (objects[elementId]) {
@@ -643,7 +643,7 @@ window.addEventListener('message', (event) => {
       }
       break;
     }
-    
+
     case 'ANNOTATE_ELEMENT': {
       const { elementId, text } = payload;
       // Create annotation tooltip

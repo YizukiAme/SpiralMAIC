@@ -221,6 +221,13 @@ describe('check-clawhub-version', () => {
     expect(publishJob.match(/\bhandle_divergence\b/g)).toHaveLength(4);
   });
 
+  it('keeps the token-bearing publish job confined to the canonical repository', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const publishJob = workflowJob(workflow, 'publish');
+
+    expect(publishJob).toContain("github.repository == 'THU-MAIC/OpenMAIC'");
+  });
+
   it('lets Node drain output without immediate process exits', () => {
     const checker = readFileSync(scriptPath, 'utf8');
 

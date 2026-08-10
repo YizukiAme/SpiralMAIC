@@ -11,6 +11,7 @@ interface WorkflowStep {
 }
 
 interface WorkflowJob {
+  if?: string;
   needs?: string | string[];
   outputs?: Record<string, string>;
   steps: WorkflowStep[];
@@ -71,6 +72,12 @@ function assertPublishedVersionHandoff(workflow: Workflow): void {
 }
 
 describe('publish-package marker workflow contract', () => {
+  it('keeps the token-bearing publish job confined to the canonical repository', () => {
+    const workflow = parseWorkflow();
+
+    expect(workflow.jobs.publish.if).toContain("github.repository == 'THU-MAIC/OpenMAIC'");
+  });
+
   it('hands exact successful publishes to the marker job without losing reconciliation', () => {
     assertPublishedVersionHandoff(parseWorkflow());
   });
