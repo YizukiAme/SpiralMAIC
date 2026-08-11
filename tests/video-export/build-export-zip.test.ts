@@ -60,6 +60,14 @@ afterAll(() => {
 });
 
 describe('buildExportZip CTA boundary', () => {
+  it('does not expose a runtime diagnostics sidecar that cannot be updated after packaging', async () => {
+    mocks.accessDocument.mockResolvedValue(undefined);
+
+    const result = await buildExportZip({ resolution: '720p', locale: 'en-US' });
+
+    expect(result).not.toHaveProperty('runtimeDiagnosticsPath');
+  });
+
   it('freezes the configured CTA and complete locale labels before its first await', async () => {
     let releaseDocument!: (value: unknown) => void;
     mocks.accessDocument.mockReturnValue(

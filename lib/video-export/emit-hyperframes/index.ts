@@ -28,7 +28,9 @@ import type {
   VideoTimelineScene,
   VisualSegment,
 } from '../ir';
+import { INTERACTIVE_STATIC_MESSAGE_FLAG } from '../interactive-static';
 import { emitManifestJson } from '../passes/emit';
+import { RUNTIME_DIAGNOSTIC_CODES } from '../runtime-diagnostics';
 import { toSrt, toVtt } from '../subtitles';
 import { EASE_DEFS, emitEffect } from './effects';
 import { escapeHtml, sec } from './format';
@@ -46,14 +48,27 @@ export interface VideoExportCta {
   destination: string;
 }
 
+export interface InteractiveFallbackLabels {
+  /** Localized fallback copy shown when a static interactive page cannot load. */
+  fallback: string;
+  /** Localized readiness-timeout copy shown in the static fallback. */
+  readyTimeout: string;
+  /** Localized load-failure copy shown in the static fallback. */
+  loadFailure: string;
+  /** Localized readiness-failure copy shown in the static fallback. */
+  readyFailure: string;
+  /** Localized runtime-failure copy shown in the static fallback. */
+  runtimeFailure: string;
+}
+
 /**
- * Learner-facing chrome on the Quiz/PBL cover cards — everything on the card
+ * Learner-facing chrome on exported video cards and fallback scenes — everything
  * that is *not* authored scene data. The defaults are the `en-US` values of the
  * very i18n keys the live QuizView/PBL Hero use; the app passes the classroom's
  * active locale so an exported video reads like the lesson it came from. Kept as
  * injected strings (not an i18n import) so the emitter stays pure.
  */
-export interface CoverCardLabels {
+export interface VideoExportLabels {
   /** `quiz.title` — the Quiz card's eyebrow. */
   quiz: string;
   /** `quiz.questionsCount` — unit after the question count. */
@@ -82,7 +97,13 @@ export interface CoverCardLabels {
   pblCtaPrompt: string;
   /** Verb preceding the configured destination. */
   ctaVisit: string;
+  /** Localized fallback and failure copy for static interactive scenes. */
+  interactive: InteractiveFallbackLabels;
 }
+
+type VideoExportLabelOverrides = Partial<Omit<VideoExportLabels, 'interactive'>> & {
+  interactive?: Partial<InteractiveFallbackLabels>;
+};
 
 export interface EmitHyperframesOptions {
   /** Render width in px. Default 1920. Height is derived from the IR's 16:9 aspect. */
@@ -96,7 +117,7 @@ export interface EmitHyperframesOptions {
   /** Manifest filename. Default `openmaic-video-manifest.json`. */
   manifestPath?: string;
   /** Cover-card chrome; each omitted key falls back to its `en-US` default. */
-  labels?: Partial<CoverCardLabels>;
+  labels?: VideoExportLabelOverrides;
   /** Informational destination for Quiz/PBL covers. Omitted or null disables it. */
   cta?: VideoExportCta | null;
   /**
@@ -105,7 +126,7 @@ export interface EmitHyperframesOptions {
    * right-to-left direction is scoped to text-bearing cover panels because
    * Hyperframes cannot safely render a document-level RTL direction. The locale
    * is recorded in the project README so a re-render can reproduce this exact
-   * output. Default `en-US`, matching {@link DEFAULT_COVER_LABELS}.
+   * output. Default `en-US`, matching {@link DEFAULT_VIDEO_EXPORT_LABELS}.
    */
   locale?: string;
   /**
@@ -140,7 +161,7 @@ function isRtl(locale: string): boolean {
   return RTL_LANGUAGES.has(locale.split('-')[0].toLowerCase());
 }
 
-const DEFAULT_COVER_LABELS: CoverCardLabels = {
+const DEFAULT_VIDEO_EXPORT_LABELS: VideoExportLabels = {
   quiz: 'Quiz',
   questions: 'questions',
   points: 'pts',
@@ -155,6 +176,13 @@ const DEFAULT_COVER_LABELS: CoverCardLabels = {
   quizCtaPrompt: 'Want to try an interactive quiz?',
   pblCtaPrompt: 'Want to explore project-based learning?',
   ctaVisit: 'Visit',
+  interactive: {
+    fallback: 'interactive-static-fallback',
+    readyTimeout: 'interactive-ready-timeout',
+    loadFailure: 'interactive-load-failure',
+    readyFailure: 'interactive-ready-failure',
+    runtimeFailure: 'interactive-runtime-failure',
+  },
 };
 
 /**
@@ -171,8 +199,22 @@ export function assetUrl(planPath: string): string {
   return `${ASSETS_DIR}/${planPath}`;
 }
 
-/** The base layer for one scene: a slide-snapshot `<img>` clip, or a true unsupported placeholder. */
-function renderBase(scene: VideoTimelineScene): string {
+function placeholderContent(scene: VideoTimelineScene, reason: string, reasonAttrs = ''): string {
+  const reasonAttributeText = reasonAttrs ? ` ${reasonAttrs}` : '';
+  return [
+    `<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:#0f172a;color:#e2e8f0;font-family:system-ui,sans-serif;text-align:center;padding:8%">`,
+    `  <div dir="auto" style="font-size:2.2vw;font-weight:700">${escapeHtml(scene.title)}</div>`,
+    reason
+      ? `  <div${reasonAttributeText} dir="auto" style="font-size:1.2vw;color:#94a3b8;max-width:70%">${escapeHtml(reason)}</div>`
+      : '',
+    `</div>`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+/** The base layer for one scene: snapshot, packaged frozen HTML, or placeholder. */
+function renderBase(scene: VideoTimelineScene, labels: VideoExportLabels): string {
   const start = sec(scene.startMs);
   const duration = sec(scene.durationMs);
   const id = `scene-${scene.index + 1}-base`;
@@ -181,17 +223,128 @@ function renderBase(scene: VideoTimelineScene): string {
     return `<img ${clip} src="${escapeHtml(assetUrl(scene.base.assetRef))}" alt="" style="position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain" />`;
   }
   if (scene.base.kind === 'visual-segments') return '';
-  const reason = scene.base.reason ? escapeHtml(scene.base.reason) : '';
-  return [
-    `<div ${clip} style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:#0f172a;color:#e2e8f0;font-family:system-ui,sans-serif;text-align:center;padding:8%">`,
-    `  <div dir="auto" style="font-size:2.2vw;font-weight:700">${escapeHtml(scene.title)}</div>`,
-    reason
-      ? `  <div dir="auto" style="font-size:1.2vw;color:#94a3b8;max-width:70%">${reason}</div>`
-      : '',
-    `</div>`,
-  ]
-    .filter(Boolean)
-    .join('\n');
+  if (scene.base.kind === 'interactive-html' && scene.base.assetRef) {
+    const fallback = placeholderContent(
+      scene,
+      labels.interactive.fallback,
+      'data-interactive-fallback-reason',
+    );
+    return [
+      `<div ${clip} data-interactive-static-host data-scene-id="${escapeHtml(scene.id)}" data-ready-timeout-ms="${scene.base.readyTimeoutMs}" data-content-hash="${escapeHtml(scene.base.contentHash)}" style="position:absolute;inset:0;background:#0f172a">`,
+      `  <div data-interactive-fallback>${fallback}</div>`,
+      `  <iframe data-interactive-static-frame data-src="${escapeHtml(assetUrl(scene.base.assetRef))}" title="${escapeHtml(scene.title)}" sandbox="allow-scripts" style="position:absolute;inset:0;width:100%;height:100%;border:0;visibility:hidden;pointer-events:none;background:#fff"></iframe>`,
+      `</div>`,
+    ].join('\n');
+  }
+  const reason =
+    scene.type === 'interactive'
+      ? labels.interactive.fallback
+      : scene.base.kind === 'placeholder'
+        ? (scene.base.reason ?? '')
+        : '';
+  return `<div ${clip}>${placeholderContent(scene, reason)}</div>`;
+}
+
+/** Parent-side readiness/fallback bridge for every packaged interactive iframe. */
+function interactiveStaticBridgeScript(labels: InteractiveFallbackLabels): string {
+  const flag = JSON.stringify(INTERACTIVE_STATIC_MESSAGE_FLAG);
+  const localized = JSON.stringify(labels);
+  const diagnosticCodes = JSON.stringify(RUNTIME_DIAGNOSTIC_CODES);
+  return `
+function initializeOpenMaicInteractiveStaticFrames() {
+  var hosts = Array.from(document.querySelectorAll('[data-interactive-static-host]'));
+  window.__openmaicVideoDiagnostics = window.__openmaicVideoDiagnostics || [];
+  window.__openmaicVideoManifest = window.__openmaicVideoManifest || { runtimeDiagnostics: [] };
+  var labels = ${localized};
+  var diagnosticCodes = new Set(${diagnosticCodes});
+  var runtimeReport = document.querySelector('[data-openmaic-runtime-diagnostics]');
+  function record(sceneId, code, message) {
+    var normalizedCode = diagnosticCodes.has(code) ? code : 'interactive-ready-failure';
+    var diagnostic = { sceneId: sceneId, code: normalizedCode, message: String(message || '').slice(0, 1200) };
+    window.__openmaicVideoDiagnostics.push(diagnostic);
+    window.__openmaicVideoManifest.runtimeDiagnostics = window.__openmaicVideoDiagnostics.slice();
+    if (runtimeReport) runtimeReport.textContent = JSON.stringify(window.__openmaicVideoDiagnostics);
+    console.error('interactive-static-diagnostic', diagnostic);
+  }
+  function messageFor(code, detail) {
+    var prefix = code === 'interactive-load-failure' ? labels.loadFailure
+      : code === 'interactive-ready-timeout' || code === 'interactive-load-timeout' ? labels.readyTimeout
+      : code === 'interactive-runtime-failure' ? labels.runtimeFailure
+      : labels.readyFailure;
+    return detail && detail !== 'ready' ? prefix + ': ' + detail : prefix;
+  }
+  return Promise.all(hosts.map(function (host) {
+    return new Promise(function (resolve) {
+      var sceneId = host.getAttribute('data-scene-id') || 'interactive';
+      var timeoutMs = Number(host.getAttribute('data-ready-timeout-ms')) || 8000;
+      var iframe = host.querySelector('[data-interactive-static-frame]');
+      var fallback = host.querySelector('[data-interactive-fallback]');
+      var reason = host.querySelector('[data-interactive-fallback-reason]');
+      var loaded = false;
+      var settled = false;
+      var runtimeErrors = [];
+
+      function finish(ok, code, message) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        window.removeEventListener('message', onMessage);
+        if (ok) {
+          iframe.style.visibility = 'visible';
+          fallback.style.display = 'none';
+          host.setAttribute('data-interactive-static-state', 'frozen');
+        } else {
+          iframe.style.visibility = 'hidden';
+          fallback.style.display = 'block';
+          if (reason) reason.textContent = message;
+          host.setAttribute('data-interactive-static-state', 'fallback');
+          host.setAttribute('data-interactive-diagnostic', code);
+          record(sceneId, code, message);
+          iframe.remove();
+        }
+        resolve({ sceneId: sceneId, ok: ok, code: code });
+      }
+
+      function onMessage(event) {
+        if (event.source !== iframe.contentWindow) return;
+        var data = event.data || {};
+        if (data.__maicInteractive === true && data.kind === 'runtime-error') {
+          runtimeErrors.push('[' + (data.errorKind || 'error') + '] ' + String(data.message || 'runtime error'));
+          return;
+        }
+        if (data[${flag}] !== true) return;
+        if (data.kind === 'failure') {
+          var failureCode = data.code || 'interactive-ready-failure';
+          finish(false, failureCode, messageFor(failureCode, data.message));
+        } else if (data.kind === 'frozen') {
+          if (runtimeErrors.length > 0) {
+          finish(false, 'interactive-runtime-failure', messageFor('interactive-runtime-failure', runtimeErrors[0]));
+          } else {
+            finish(true, 'interactive-static-ready', 'ready');
+          }
+        }
+      }
+
+      window.addEventListener('message', onMessage);
+      iframe.addEventListener('load', function () {
+        loaded = true;
+        try { iframe.contentWindow.postMessage({ __maicErrorReplayRequest: true }, '*'); } catch (_) {}
+      }, { once: true });
+      iframe.addEventListener('error', function () {
+        finish(false, 'interactive-load-failure', messageFor('interactive-load-failure'));
+      }, { once: true });
+      var timer = setTimeout(function () {
+        finish(
+          false,
+          loaded ? 'interactive-ready-timeout' : 'interactive-load-timeout',
+          messageFor(loaded ? 'interactive-ready-timeout' : 'interactive-load-timeout')
+        );
+      }, timeoutMs);
+      iframe.setAttribute('src', iframe.getAttribute('data-src'));
+    });
+  }));
+}
+`;
 }
 
 /**
@@ -232,7 +385,7 @@ function renderQuizCover(
   scene: VideoTimelineScene,
   visual: QuizCoverVisual,
   index: number,
-  labels: CoverCardLabels,
+  labels: VideoExportLabels,
   cta: VideoExportCta | null,
   direction: 'ltr' | 'rtl',
 ): string {
@@ -274,7 +427,7 @@ function renderPblCover(
   scene: VideoTimelineScene,
   visual: PblCoverVisual,
   index: number,
-  labels: CoverCardLabels,
+  labels: VideoExportLabels,
   plan: PblCoverPlan,
   cta: VideoExportCta | null,
   direction: 'ltr' | 'rtl',
@@ -338,7 +491,7 @@ function renderPblCover(
 /** Render first-class track-0 visuals independently from the scene base. */
 function renderVisuals(
   scene: VideoTimelineScene,
-  labels: CoverCardLabels,
+  labels: VideoExportLabels,
   frame: { width: number; height: number; burnInSubtitles: boolean },
   cta: VideoExportCta | null,
   direction: 'ltr' | 'rtl',
@@ -647,7 +800,7 @@ interface PblCoverPlan {
  * alongside the authored text: an eyebrow or section heading that wraps in one
  * language and not another moves the whole card down with it.
  */
-function pblPlanHeight(title: string, plan: PblCoverPlan, labels: CoverCardLabels): number {
+function pblPlanHeight(title: string, plan: PblCoverPlan, labels: VideoExportLabels): number {
   const gainColumn = (PANEL_CONTENT_WIDTH - GAIN_ROW_GAP) / 2 - 44;
   const gainRows = Math.ceil(plan.gains.length / 2);
   const tallestGainRow = Math.max(1, ...plan.gains.map((g) => lineCount(g, 13, gainColumn, 2)));
@@ -692,7 +845,7 @@ function pblPlanHeight(title: string, plan: PblCoverPlan, labels: CoverCardLabel
  */
 function planPblCover(
   visual: PblCoverVisual,
-  labels: CoverCardLabels,
+  labels: VideoExportLabels,
   frame: {
     width: number;
     height: number;
@@ -830,7 +983,7 @@ function renderReadme(project: {
   stageName: string;
   locale: string;
   burnInSubtitles: boolean;
-  labels: CoverCardLabels;
+  labels: VideoExportLabels;
   cta: VideoExportCta | null;
 }): string {
   const seconds = (project.totalDurationMs / 1000).toFixed(1);
@@ -865,8 +1018,9 @@ folder — no network access, no CDN.
 
 - \`index.html\` — the composition (one data-composition-id=${optionValue(project.compositionId)} stage, one paused GSAP timeline on \`window.__timelines\`).
 - ${optionValue(project.manifestPath)} — the \`VideoTimeline\` manifest / export report (scenes, timing, assets, diagnostics).
+- Runtime interactive diagnostics are exposed live through \`window.__openmaicVideoManifest.runtimeDiagnostics\` and the machine-readable DOM report in \`index.html\`.
 - \`subtitles.srt\` / \`subtitles.vtt\` — narration subtitles.
-- \`assets/frames\`, \`assets/audio\`, \`assets/media\` — slide snapshots, narration audio, embedded video clips.
+- \`assets/frames\`, \`assets/audio\`, \`assets/media\`, \`assets/interactive\` — slide snapshots, narration audio, embedded video clips, frozen interactive pages.
 - ${optionValue(project.gsapVendorPath)} — vendored GSAP (determinism: no CDN at render time).
 - \`LICENSES/Inter-OFL-1.1.txt\` — license for the font embedded in \`index.html\`.
 
@@ -923,10 +1077,18 @@ export function emitHyperframes(
   const compositionId = options.compositionId ?? 'openmaic';
   const gsapVendorPath = options.gsapVendorPath ?? DEFAULT_GSAP_PATH;
   const manifestPath = options.manifestPath ?? DEFAULT_MANIFEST;
-  const labels: CoverCardLabels = { ...DEFAULT_COVER_LABELS, ...options.labels };
+  const labels: VideoExportLabels = {
+    ...DEFAULT_VIDEO_EXPORT_LABELS,
+    ...options.labels,
+    interactive: {
+      ...DEFAULT_VIDEO_EXPORT_LABELS.interactive,
+      ...options.labels?.interactive,
+    },
+  };
   const cta = options.cta ?? null;
   const locale = options.locale ?? DEFAULT_LOCALE;
   const totalSec = sec(ir.totalDurationMs);
+  const hasInteractiveHtml = ir.scenes.some((scene) => scene.base.kind === 'interactive-html');
 
   const sceneHtml: string[] = [];
   const effectHtml: string[] = [];
@@ -934,7 +1096,7 @@ export function emitHyperframes(
 
   for (const scene of ir.scenes) {
     sceneHtml.push(`<!-- scene ${scene.index + 1}: ${escapeHtml(scene.title)} -->`);
-    sceneHtml.push(renderBase(scene));
+    sceneHtml.push(renderBase(scene, labels));
     sceneHtml.push(
       ...renderVisuals(
         scene,
@@ -991,14 +1153,24 @@ ${coverCardCss(width)}
 ${sceneHtml.filter(Boolean).join('\n')}
 ${effectHtml.join('\n')}
 ${subtitles.html}
+<script type="application/json" data-openmaic-runtime-diagnostics>[]</script>
 </div>
 <script src="${escapeHtml(gsapVendorPath)}"></script>
 <script>
 ${EASE_DEFS}
 var tl = gsap.timeline({ paused: true });
 ${statements.join('\n')}
+window.__openmaicVideoManifest = { runtimeDiagnostics: [], manifestPath: ${JSON.stringify(manifestPath)} };
 window.__timelines = window.__timelines || {};
-window.__timelines[${JSON.stringify(compositionId)}] = tl;
+${
+  hasInteractiveHtml
+    ? `${interactiveStaticBridgeScript(labels.interactive)}
+window.__openmaicInteractiveReady = initializeOpenMaicInteractiveStaticFrames();
+window.__openmaicInteractiveReady.then(function () {
+  window.__timelines[${JSON.stringify(compositionId)}] = tl;
+});`
+    : `window.__timelines[${JSON.stringify(compositionId)}] = tl;`
+}
 </script>
 </body>
 </html>
