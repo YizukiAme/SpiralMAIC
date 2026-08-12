@@ -185,6 +185,7 @@ export class RenderCoordinator {
         failure: result.failure,
         error: result.failure.message,
         ...(result.performance ? { performance: result.performance } : {}),
+        ...(result.metrics ? { metrics: result.metrics } : {}),
       });
     } finally {
       await this.cleanupProject(projectDir);
@@ -225,6 +226,7 @@ export class RenderCoordinator {
           status: 'cancelled',
           failure: { code: 'cancelled', message: 'Render cancelled' },
           ...(result.performance ? { performance: result.performance } : {}),
+          ...(result.metrics ? { metrics: result.metrics } : {}),
         });
         return;
       }
@@ -236,6 +238,7 @@ export class RenderCoordinator {
         currentStage: 'complete',
         outputPath,
         ...(result.performance ? { performance: result.performance } : {}),
+        ...(result.metrics ? { metrics: result.metrics } : {}),
       });
     } catch (error) {
       await this.artifacts.remove(id).catch(() => {});

@@ -198,6 +198,9 @@ jobs:
         working-directory: render-service
         run: npm test
 
+      - name: Build container image
+        run: docker build --tag openmaic-render-service:ci render-service
+
   e2e:
     name: E2E Tests
     runs-on: ubuntu-latest

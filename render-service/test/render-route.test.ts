@@ -95,6 +95,42 @@ async function waitForPoll(
 }
 
 describe('POST /render buffering/extraction bound', () => {
+  it('reports the selected profile and observed runtime versions from health', async () => {
+    const jobs = createMemoryJobStore();
+    const artifacts = createMemoryArtifactStore().store;
+    const runtimeVersions = {
+      service: '0.1.0',
+      producer: '0.7.60',
+      node: 'v22.22.2',
+      chromium: 'Chromium 151.0.7922.71',
+      chromiumPath: '/usr/bin/chromium-headless-shell',
+      ffmpeg: 'ffmpeg version 5.1.9-0+deb12u1',
+      ffmpegPath: '/usr/bin/ffmpeg',
+      containerImage: 'openmaic/render-service:test',
+    };
+    const app = createApp({
+      jobs,
+      artifacts,
+      coordinator: new RenderCoordinator(succeedingExecutor, jobs, artifacts),
+      extractionGate: new Semaphore(1),
+      runtimeVersions,
+    });
+
+    const response = await app.fetch(new Request('http://test/health'));
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      resourceProfile: {
+        name: 'standard',
+        requestedCaptureMode: 'beginframe',
+        producerWorkers: 1,
+        maxConcurrency: 1,
+        minimumMemoryMiB: 10 * 1024,
+      },
+      versions: runtimeVersions,
+    });
+  });
+
   it('never lets more than the permit count into the buffering+extraction section', async () => {
     const PERMITS = 2;
     const REQUESTS = 8;

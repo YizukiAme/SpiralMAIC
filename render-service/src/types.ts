@@ -18,6 +18,26 @@ export interface RenderOptions {
   format: 'mp4';
 }
 
+export interface RuntimeVersions {
+  service: string;
+  producer: string;
+  node: string;
+  chromium: string;
+  chromiumPath: string;
+  ffmpeg: string;
+  ffmpegPath: string;
+  containerImage: string | null;
+}
+
+export interface RenderExecutionMetrics {
+  resourceProfile: 'standard' | 'low-memory';
+  requestedCaptureMode: 'beginframe' | 'screenshot';
+  actualCaptureMode: string;
+  requestedWorkers: number;
+  actualWorkers: number | null;
+  versions: RuntimeVersions;
+}
+
 /** Progress emitted by any render executor, normalized for service callers. */
 export interface RenderProgress {
   /** Fraction complete in the stable 0..1 service range. */
@@ -73,16 +93,19 @@ export type RenderExecutionResult =
   | {
       status: 'succeeded';
       performance?: RenderPerformanceSummary;
+      metrics?: RenderExecutionMetrics;
     }
   | {
       status: 'cancelled';
       failure: RenderCancelledFailure;
       performance?: RenderPerformanceSummary;
+      metrics?: RenderExecutionMetrics;
     }
   | {
       status: 'failed';
       failure: RenderFailedFailure;
       performance?: RenderPerformanceSummary;
+      metrics?: RenderExecutionMetrics;
     };
 
 /**
@@ -98,6 +121,7 @@ export interface RenderJobRecord {
   currentStage: string;
   framesRendered?: number;
   totalFrames?: number;
+  metrics?: RenderExecutionMetrics;
   error?: string;
   createdAtMs: number;
   updatedAtMs: number;

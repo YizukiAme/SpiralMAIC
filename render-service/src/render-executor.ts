@@ -14,10 +14,12 @@ import {
 } from '@hyperframes/producer';
 import { config } from './config.js';
 import type {
+  RenderExecutionMetrics,
   RenderExecutionRequest,
   RenderExecutionResult,
   RenderOptions,
   RenderPerformanceSummary,
+  RuntimeVersions,
 } from './types.js';
 
 export interface RenderExecutor {
@@ -43,12 +45,24 @@ const producerBridge: ProducerBridge = {
 export interface InProcessExecutorOptions {
   workers?: number;
   requireBeginFrame?: boolean;
+  runtimeVersions?: RuntimeVersions;
 }
+
+const UNKNOWN_RUNTIME_VERSIONS: RuntimeVersions = {
+  service: 'unknown',
+  producer: 'unknown',
+  node: process.version,
+  chromium: 'unknown',
+  chromiumPath: 'unknown',
+  ffmpeg: 'unknown',
+  ffmpegPath: 'unknown',
+  containerImage: null,
+};
 
 /** Build the engine-specific config entirely inside the production adapter. */
 export function buildProducerJobConfig(
   options: RenderOptions,
-  workers = config.producerWorkers,
+  workers: number | undefined = config.producerWorkers,
 ): RenderConfigInput {
   const producerOptions: RenderConfigInput = {
     fps: options.fps,
@@ -78,10 +92,79 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function observedFailureCapture(job: Pick<RenderJob, 'errorDetails'>): {
+  captureMode?: string;
+  workers?: number;
+} {
+  const capture = job.errorDetails?.observability?.capture;
+  const event = job.errorDetails?.observability?.events
+    .slice()
+    .reverse()
+    .find(
+      (candidate) =>
+        (candidate.phase === 'capture_disk' ||
+          candidate.phase === 'capture_streaming' ||
+          candidate.phase === 'capture_hdr_layered') &&
+        (candidate.data?.forceScreenshot === true ||
+          typeof candidate.data?.captureMode === 'string'),
+    );
+  return {
+    captureMode:
+      event?.data?.forceScreenshot === true
+        ? 'screenshot'
+        : typeof event?.data?.captureMode === 'string'
+          ? event.data.captureMode
+          : undefined,
+    workers:
+      typeof event?.data?.workerCount === 'number' ? event.data.workerCount : capture?.workerCount,
+  };
+}
+
+export function buildRenderExecutionMetrics(
+  job: Pick<RenderJob, 'perfSummary' | 'errorDetails'>,
+  versions: RuntimeVersions,
+): RenderExecutionMetrics {
+  const perfCapture = job.perfSummary?.observability?.capture;
+  const failure = observedFailureCapture(job);
+  return {
+    resourceProfile: config.resourceProfile.name,
+    requestedCaptureMode: config.resourceProfile.requestedCaptureMode,
+    actualCaptureMode:
+      job.perfSummary?.drawElement?.mode ??
+      perfCapture?.captureMode ??
+      failure.captureMode ??
+      'unknown',
+    requestedWorkers: config.producerWorkers,
+    actualWorkers: job.perfSummary?.workers ?? perfCapture?.workerCount ?? failure.workers ?? null,
+    versions,
+  };
+}
+
+function unsupportedCaptureMode(
+  metrics: RenderExecutionMetrics,
+  requireBeginFrame: boolean,
+  onlyIfObserved = false,
+): RenderExecutionResult | undefined {
+  if (!requireBeginFrame) return undefined;
+  if (onlyIfObserved && metrics.actualCaptureMode === 'unknown') return undefined;
+  if (metrics.actualCaptureMode === 'beginframe') return undefined;
+  return {
+    status: 'failed',
+    failure: {
+      code: 'unsupported_capture_mode',
+      message:
+        `Producer did not resolve beginFrame capture (actual=${metrics.actualCaptureMode}). ` +
+        'Check PRODUCER_HEADLESS_SHELL_PATH and Chromium compatibility.',
+    },
+    metrics,
+  };
+}
+
 /** In-process adapter around the current HyperFrames producer. */
 export class InProcessExecutor implements RenderExecutor {
   private readonly workers: number | undefined;
   private readonly requireBeginFrame: boolean;
+  private readonly runtimeVersions: RuntimeVersions;
 
   constructor(
     options: InProcessExecutorOptions = {},
@@ -89,6 +172,7 @@ export class InProcessExecutor implements RenderExecutor {
   ) {
     this.workers = options.workers ?? config.producerWorkers;
     this.requireBeginFrame = options.requireBeginFrame ?? config.requireBeginFrame;
+    this.runtimeVersions = options.runtimeVersions ?? UNKNOWN_RUNTIME_VERSIONS;
   }
 
   async execute(request: RenderExecutionRequest): Promise<RenderExecutionResult> {
@@ -145,11 +229,13 @@ export class InProcessExecutor implements RenderExecutor {
       );
 
       const performance = performanceSummary(job.perfSummary);
+      const metrics = buildRenderExecutionMetrics(job, this.runtimeVersions);
       if (abortCause === 'deadline') {
         return {
           status: 'failed',
           failure: { code: 'deadline_exceeded', message: 'Render exceeded the deadline' },
           ...(performance ? { performance } : {}),
+          metrics,
         };
       }
       if (abortCause === 'cancelled') {
@@ -157,26 +243,17 @@ export class InProcessExecutor implements RenderExecutor {
           status: 'cancelled',
           failure: { code: 'cancelled', message: 'Render cancelled' },
           ...(performance ? { performance } : {}),
+          metrics,
         };
       }
 
-      const captureMode = performance?.captureMode;
-      if (this.requireBeginFrame && captureMode !== 'beginframe') {
-        return {
-          status: 'failed',
-          failure: {
-            code: 'unsupported_capture_mode',
-            message:
-              `Producer did not resolve beginFrame capture (actual=${captureMode ?? 'unknown'}). ` +
-              'Check PRODUCER_HEADLESS_SHELL_PATH and Chromium compatibility.',
-          },
-          ...(performance ? { performance } : {}),
-        };
-      }
+      const mismatch = unsupportedCaptureMode(metrics, this.requireBeginFrame);
+      if (mismatch) return { ...mismatch, ...(performance ? { performance } : {}) };
 
-      return { status: 'succeeded', ...(performance ? { performance } : {}) };
+      return { status: 'succeeded', ...(performance ? { performance } : {}), metrics };
     } catch (error) {
       const performance = performanceSummary(job?.perfSummary);
+      const metrics = job ? buildRenderExecutionMetrics(job, this.runtimeVersions) : undefined;
       if (
         abortCause === 'deadline' ||
         (abortCause === null && error instanceof RenderCancelledError && error.reason === 'timeout')
@@ -185,6 +262,7 @@ export class InProcessExecutor implements RenderExecutor {
           status: 'failed',
           failure: { code: 'deadline_exceeded', message: 'Render exceeded the deadline' },
           ...(performance ? { performance } : {}),
+          ...(metrics ? { metrics } : {}),
         };
       }
       if (abortCause === 'cancelled') {
@@ -192,12 +270,18 @@ export class InProcessExecutor implements RenderExecutor {
           status: 'cancelled',
           failure: { code: 'cancelled', message: message(error) },
           ...(performance ? { performance } : {}),
+          ...(metrics ? { metrics } : {}),
         };
+      }
+      if (metrics) {
+        const mismatch = unsupportedCaptureMode(metrics, this.requireBeginFrame, true);
+        if (mismatch) return { ...mismatch, ...(performance ? { performance } : {}) };
       }
       return {
         status: 'failed',
         failure: { code: 'execution_failed', message: message(error) },
         ...(performance ? { performance } : {}),
+        ...(metrics ? { metrics } : {}),
       };
     } finally {
       clearTimeout(deadline);

@@ -12,7 +12,7 @@ describe('buildProducerJobConfig', () => {
     expect(buildProducerJobConfig(options, 1)).toEqual({ ...options, workers: 1 });
   });
 
-  it('leaves workers unset when no explicit override is supplied', () => {
-    expect(buildProducerJobConfig(options, undefined)).toEqual(options);
+  it('uses the selected profile worker count when no override is supplied', () => {
+    expect(buildProducerJobConfig(options)).toEqual({ ...options, workers: 1 });
   });
 });

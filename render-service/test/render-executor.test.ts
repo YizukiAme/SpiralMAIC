@@ -1,9 +1,19 @@
 import { createRenderJob, RenderCancelledError } from '@hyperframes/producer';
 import { describe, expect, it } from 'vitest';
 import { InProcessExecutor } from '../src/render-executor.js';
-import type { RenderExecutionRequest } from '../src/types.js';
+import type { RenderExecutionRequest, RuntimeVersions } from '../src/types.js';
 
 const options = { fps: 30, quality: 'standard', format: 'mp4' } as const;
+const runtimeVersions: RuntimeVersions = {
+  service: '0.1.0',
+  producer: '0.7.60',
+  node: 'v22.22.2',
+  chromium: 'Chromium 151.0.7922.71',
+  chromiumPath: '/usr/bin/chromium-headless-shell',
+  ffmpeg: 'ffmpeg version 5.1.9-0+deb12u1',
+  ffmpegPath: '/usr/bin/ffmpeg',
+  containerImage: 'openmaic/render-service:test',
+};
 
 function request(overrides: Partial<RenderExecutionRequest> = {}): RenderExecutionRequest {
   return {
@@ -52,7 +62,7 @@ describe('InProcessExecutor', () => {
   it('normalizes progress and maps producer performance into domain data', async () => {
     const progress = [];
     const executor = new InProcessExecutor(
-      { workers: 2, requireBeginFrame: true },
+      { workers: 2, requireBeginFrame: true, runtimeVersions },
       {
         createJob(options) {
           return createRenderJob(options);
@@ -88,6 +98,14 @@ describe('InProcessExecutor', () => {
         totalFrames: 60,
         captureMode: 'beginframe',
       },
+      metrics: {
+        resourceProfile: 'standard',
+        requestedCaptureMode: 'beginframe',
+        actualCaptureMode: 'beginframe',
+        requestedWorkers: 1,
+        actualWorkers: 2,
+        versions: runtimeVersions,
+      },
     });
   });
 
@@ -109,7 +127,7 @@ describe('InProcessExecutor', () => {
     const execution = executor.execute(request({ signal: abort.signal }));
     abort.abort();
 
-    await expect(execution).resolves.toEqual({
+    await expect(execution).resolves.toMatchObject({
       status: 'cancelled',
       failure: { code: 'cancelled', message: 'cancelled' },
     });
@@ -134,7 +152,7 @@ describe('InProcessExecutor', () => {
     const execution = executor.execute(request({ signal: abort.signal, deadlineMs: 5 }));
     abort.abort();
 
-    await expect(execution).resolves.toEqual({
+    await expect(execution).resolves.toMatchObject({
       status: 'cancelled',
       failure: { code: 'cancelled', message: 'cancelled after cleanup' },
     });
@@ -154,7 +172,7 @@ describe('InProcessExecutor', () => {
       },
     );
 
-    await expect(executor.execute(request({ deadlineMs: 1 }))).resolves.toEqual({
+    await expect(executor.execute(request({ deadlineMs: 1 }))).resolves.toMatchObject({
       status: 'failed',
       failure: { code: 'deadline_exceeded', message: 'Render exceeded the deadline' },
     });
@@ -179,5 +197,92 @@ describe('InProcessExecutor', () => {
       expect(result.failure.code).toBe('unsupported_capture_mode');
       expect(result.failure.message).toMatch(/beginFrame/i);
     }
+  });
+
+  it('does not treat request observability as actual mode on hard failure', async () => {
+    const executor = new InProcessExecutor(
+      { requireBeginFrame: true, runtimeVersions },
+      {
+        createJob(options) {
+          return createRenderJob(options);
+        },
+        async executeJob(job) {
+          job.errorDetails = {
+            message: 'Target closed',
+            elapsedMs: 1_000,
+            freeMemoryMB: 1_024,
+            observability: {
+              events: [],
+              eventCount: 1,
+              browserDiagnostics: {
+                total: 0,
+                errors: 0,
+                pageErrors: 0,
+                requestFailed: 0,
+                httpErrors: 0,
+                navigationStarts: 0,
+                navigationFailures: 0,
+                consoleErrors: 0,
+                consoleWarnings: 0,
+              },
+              capture: { forceScreenshot: false, captureMode: 'beginframe', workerCount: 1 },
+            },
+          };
+          throw new Error('Target closed');
+        },
+      },
+    );
+
+    const result = await executor.execute(request());
+    expect(result.status).toBe('failed');
+    expect(result.metrics?.actualCaptureMode).toBe('unknown');
+    if (result.status === 'failed') expect(result.failure.code).toBe('execution_failed');
+  });
+
+  it('rejects a confirmed screenshot capture on the failure path', async () => {
+    const executor = new InProcessExecutor(
+      { requireBeginFrame: true, runtimeVersions },
+      {
+        createJob(options) {
+          return createRenderJob(options);
+        },
+        async executeJob(job) {
+          job.errorDetails = {
+            message: 'Target closed',
+            elapsedMs: 1_000,
+            freeMemoryMB: 1_024,
+            observability: {
+              events: [
+                {
+                  phase: 'capture_hdr_layered',
+                  status: 'error',
+                  elapsedMs: 1_000,
+                  data: { forceScreenshot: true, captureMode: 'beginframe', workerCount: 1 },
+                },
+              ],
+              eventCount: 1,
+              browserDiagnostics: {
+                total: 0,
+                errors: 0,
+                pageErrors: 0,
+                requestFailed: 0,
+                httpErrors: 0,
+                navigationStarts: 0,
+                navigationFailures: 0,
+                consoleErrors: 0,
+                consoleWarnings: 0,
+              },
+              capture: { forceScreenshot: true, captureMode: 'screenshot', workerCount: 1 },
+            },
+          };
+          throw new Error('Target closed');
+        },
+      },
+    );
+
+    const result = await executor.execute(request());
+    expect(result.status).toBe('failed');
+    expect(result.metrics?.actualCaptureMode).toBe('screenshot');
+    if (result.status === 'failed') expect(result.failure.code).toBe('unsupported_capture_mode');
   });
 });
