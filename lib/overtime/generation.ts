@@ -1,6 +1,6 @@
 'use client';
 
-import type { AgentInfo } from '@/lib/generation/generation-pipeline';
+import type { AgentInfo } from '@openmaic/generation';
 import {
   fetchSceneActions,
   fetchSceneContent,
@@ -19,7 +19,7 @@ import { upsertLessonConcepts } from '@/lib/revisit/db';
 import type { LessonConcept } from '@/lib/revisit/types';
 import type { SceneOutline } from '@/lib/types/generation';
 import { makeScene, type Scene, type Stage } from '@/lib/types/stage';
-import { isAbortError } from '@/lib/generation/generation-retry';
+import { isAbortError } from '@openmaic/generation';
 import { getCurrentModelConfig } from '@/lib/utils/model-config';
 
 type ContentResult = Awaited<ReturnType<typeof fetchSceneContent>>;

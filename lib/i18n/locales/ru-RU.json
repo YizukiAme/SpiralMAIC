@@ -8,25 +8,6 @@
     "close": "Close",
     "retry": "Retry"
   },
-  "revisitSpike": {
-    "title": "Revisit Seat Spike",
-    "subtitle": "One-turn teacher seat wiring check for SpiralMAIC reverse challenge.",
-    "teacherLabel": "Teacher utterance",
-    "teacherPlaceholder": "Explain one concept as the human teacher...",
-    "run": "Run spike",
-    "running": "Running",
-    "currentModel": "Model: {{model}}",
-    "statusIdle": "Idle",
-    "statusRunning": "Running",
-    "statusSuccess": "Student responded",
-    "statusFailure": "Needs attention",
-    "studentResponse": "AI student response",
-    "eventLog": "Event log",
-    "noResponse": "No student response yet.",
-    "noEvents": "No events yet.",
-    "missingModelConfig": "Configure a usable chat model before running the spike.",
-    "requestFailed": "Seat spike request failed"
-  },
   "home": {
     "slogan": "Generative Learning in Multi-Agent Interactive Classroom",
     "greetingWithName": "Привет, {{name}}"
@@ -249,6 +230,7 @@
       }
     },
     "text": {
+      "toolbar": "Панель текста",
       "label": "Текст",
       "font": "Шрифт",
       "fontDefault": "По умолчанию",
@@ -262,7 +244,8 @@
       "alignLeft": "По левому краю",
       "alignCenter": "По центру",
       "alignRight": "По правому краю",
-      "bullet": "Маркированный список"
+      "bullet": "Маркированный список",
+      "colorHex": "Код цвета"
     },
     "insert": {
       "textBox": "Текстовое поле",
@@ -274,7 +257,37 @@
       "imageUrlPlaceholder": "https://…",
       "imageInsert": "Вставить",
       "expandToolbar": "Показать инструменты вставки",
-      "collapseToolbar": "Скрыть инструменты вставки"
+      "collapseToolbar": "Скрыть инструменты вставки",
+      "toolbar": "Панель вставки",
+      "line": "Линия",
+      "linePresets": {
+        "straight": "Прямая линия",
+        "dashed": "Пунктирная линия",
+        "arrow": "Линия со стрелкой",
+        "dashedArrow": "Пунктирная линия со стрелкой",
+        "dottedEnd": "Линия с точкой на конце",
+        "broken": "Ломаная линия",
+        "doubleBroken": "Линия с двойным изгибом",
+        "curve": "Кривая",
+        "cubic": "Кубическая кривая"
+      },
+      "table": "Таблица",
+      "formula": "Формула",
+      "chart": "Диаграмма",
+      "chartBar": "Столбчатая диаграмма",
+      "chartLine": "Линейная диаграмма",
+      "chartPie": "Круговая диаграмма",
+      "tableDimensions": "Таблица {{rows}} x {{columns}}",
+      "video": "Видео",
+      "videoDrop": "Перетащите видео или нажмите, чтобы выбрать файл",
+      "videoOr": "или вставьте URL видео",
+      "videoUrlPlaceholder": "https://…",
+      "videoInsert": "Вставить",
+      "audio": "Аудио",
+      "audioDrop": "Перетащите аудио или нажмите, чтобы выбрать файл",
+      "audioOr": "или вставьте URL аудио",
+      "audioUrlPlaceholder": "https://…",
+      "audioInsert": "Вставить"
     },
     "nav": {
       "addSlide": "Добавить слайд",
@@ -297,14 +310,17 @@
       "toBack": "На задний план"
     },
     "image": {
+      "toolbar": "Панель изображения",
       "replace": "Заменить изображение",
       "flipH": "Отразить по горизонтали",
-      "flipV": "Отразить по вертикали"
+      "flipV": "Отразить по вертикали",
+      "crop": "Обрезать изображение"
     },
     "background": {
       "label": "Фон",
       "solid": "Сплошной цвет",
-      "image": "Изображение"
+      "image": "Изображение",
+      "color": "Цвет"
     },
     "quiz": {
       "addQuestion": "Добавить вопрос",
@@ -354,6 +370,7 @@
       "discussion": "Обсуждение"
     },
     "element": {
+      "toolbar": "Панель элемента",
       "text": "Текст",
       "image": "Изображение",
       "shape": "Фигура",
@@ -518,6 +535,78 @@
       "removeFromClass": "Удалить из класса",
       "aiClassmates": "AI-одноклассники · {{count}}",
       "addRole": "Добавить роль"
+    },
+    "line": {
+      "toolbar": "Панель линии",
+      "kind": "Тип линии",
+      "color": "Цвет линии",
+      "width": "Толщина линии",
+      "style": "Стиль линии",
+      "start": "Начало линии",
+      "end": "Конец линии",
+      "straight": "Прямая",
+      "broken": "Ломаная",
+      "broken2": "Двойная ломаная",
+      "curve": "Кривая",
+      "cubic": "Кубическая кривая",
+      "solid": "Сплошная",
+      "dashed": "Штриховая",
+      "dotted": "Пунктирная",
+      "none": "Нет",
+      "arrow": "Стрелка",
+      "dot": "Точка"
+    },
+    "asset": {
+      "drop": "Перетащите файл или нажмите для выбора",
+      "orUrl": "или вставьте URL файла",
+      "urlPlaceholder": "https://…",
+      "insert": "Вставить",
+      "invalidType": "Неподдерживаемый тип файла",
+      "readFailed": "Не удалось прочитать файл"
+    },
+    "latex": {
+      "toolbar": "Панель формул",
+      "editFormula": "Редактировать формулу",
+      "dialog": "Редактор формул",
+      "source": "Исходный код LaTeX",
+      "preview": "Предпросмотр",
+      "symbols": "Символы",
+      "presets": "Готовые формулы",
+      "invalidSource": "Исходный код LaTeX недействителен."
+    },
+    "video": {
+      "toolbar": "Панель видео",
+      "poster": "Задать обложку"
+    },
+    "audio": {
+      "toolbar": "Панель аудио",
+      "preview": "Прослушать аудио",
+      "pause": "Приостановить прослушивание",
+      "loop": "Повтор"
+    },
+    "table": {
+      "doubleClickToEdit": "Дважды щелкните для редактирования"
+    },
+    "contextMenu": {
+      "horizontalAlignment": "Выравнивание по горизонтали",
+      "verticalAlignment": "Выравнивание по вертикали",
+      "selectAll": "Выбрать все",
+      "copy": "Копировать",
+      "cut": "Вырезать",
+      "paste": "Вставить",
+      "unlock": "Разблокировать",
+      "lock": "Заблокировать",
+      "group": "Сгруппировать",
+      "ungroup": "Разгруппировать",
+      "bringForward": "Переместить вперед",
+      "sendBackward": "Переместить назад",
+      "alignTop": "Выровнять по верхнему краю",
+      "alignMiddle": "Выровнять по центру",
+      "alignBottom": "Выровнять по нижнему краю"
+    },
+    "common": {
+      "cancel": "Отмена",
+      "confirm": "Подтвердить"
     }
   },
   "classroomComplete": {
@@ -850,7 +939,37 @@
     "searchPlaceholder": "Поиск курсов...",
     "searchAriaLabel": "Поиск курсов",
     "clearSearch": "Очистить",
-    "searchEmpty": "Курсы не найдены"
+    "searchEmpty": "Курсы не найдены",
+    "newFolderTitle": "Новая папка",
+    "newFolderDesc": "Группируйте курсы по темам для удобного доступа.",
+    "newFolderInline": "Новая папка",
+    "folderNameLabel": "Название папки",
+    "folderNamePlaceholder": "Напр.: Математика, Английский, Профильные курсы",
+    "folderNameHint": "Широкие и узкие символы допустимы; пробелы учитываются.",
+    "folderNameExists": "Папка с таким названием уже существует.",
+    "folderCountLimit": "Достигнут предел количества папок.",
+    "folderWidth": "Ширина {{width}}/{{max}}",
+    "folderCreate": "Создать",
+    "folderBadge": "Папка",
+    "folderCourseCountUnit": "курсов",
+    "deleteFolderTitle": "Удалить папку «{{name}}»",
+    "deleteFolderEmptyDesc": "Эта папка пуста. Удаление необратимо.",
+    "deleteFolderUngroupDesc": "Курсы остаются в «Мои курсы», просто без папки.",
+    "moveToFolder": "Переместить в папку",
+    "moveToFolderLabel": "Переместить в папку",
+    "ungrouped": "Без папки",
+    "searchResults": "Результаты поиска",
+    "folderCreateFailed": "Не удалось создать папку",
+    "folderRenameFailed": "Не удалось переименовать папку",
+    "folderDeleteFailed": "Не удалось удалить папку",
+    "moveFailed": "Не удалось переместить курс",
+    "emptyFolderHint": "Эта папка пуста",
+    "emptyLibraryHint": "Курсов пока нет — создайте выше или импортируйте курс.",
+    "folderNameEmpty": "Название папки не может быть пустым",
+    "deleteFolderOnly": "Удалить только папку",
+    "deleteFolderAndCourses": "Удалить папку и {{count}} курс",
+    "deleteFolderAndCourses_other": "Удалить папку и {{count}} курсов",
+    "deleteFolderConfirmRemove": "Папка и её курсы (включая историю чата) будут удалены."
   },
   "upload": {
     "pdfSizeLimit": "Поддержка PDF до 50 МБ",
@@ -1777,6 +1896,25 @@
     "title": "Введите код доступа",
     "placeholder": "Код доступа",
     "error": "Неверный код доступа. Попробуйте ещё раз."
+  },
+  "revisitSpike": {
+    "title": "Revisit Seat Spike",
+    "subtitle": "One-turn teacher seat wiring check for SpiralMAIC reverse challenge.",
+    "teacherLabel": "Teacher utterance",
+    "teacherPlaceholder": "Explain one concept as the human teacher...",
+    "run": "Run spike",
+    "running": "Running",
+    "currentModel": "Model: {{model}}",
+    "statusIdle": "Idle",
+    "statusRunning": "Running",
+    "statusSuccess": "Student responded",
+    "statusFailure": "Needs attention",
+    "studentResponse": "AI student response",
+    "eventLog": "Event log",
+    "noResponse": "No student response yet.",
+    "noEvents": "No events yet.",
+    "missingModelConfig": "Configure a usable chat model before running the spike.",
+    "requestFailed": "Seat spike request failed"
   },
   "revisit": {
     "memory": {

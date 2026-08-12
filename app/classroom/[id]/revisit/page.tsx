@@ -13,7 +13,7 @@ import { MediaStageProvider } from '@/lib/contexts/media-stage-context';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { ThemeProvider } from '@/lib/hooks/use-theme';
 import { useDiscussionTTS } from '@/lib/hooks/use-discussion-tts';
-import { isAbortError } from '@/lib/generation/generation-retry';
+import { isAbortError } from '@openmaic/generation';
 import { createLogger } from '@/lib/logger';
 import { submitRevisitAttempt } from '@/lib/revisit/client';
 import {

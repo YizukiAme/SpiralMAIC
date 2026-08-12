@@ -7,8 +7,11 @@ import {
   ArrowUp,
   Check,
   ChevronDown,
+  ChevronRight,
   Clock,
   Copy,
+  Folder,
+  FolderPlus,
   ImagePlus,
   Pencil,
   Trash2,
@@ -57,7 +60,19 @@ import {
   loadStageData,
   getFirstSlideByStages,
   revokeThumbnailSlideMediaUrls,
+  listFolders,
+  createFolder,
+  renameFolder,
+  deleteFolder,
+  setStageFolder,
+  FolderNameError,
+  type DeleteFolderMode,
 } from '@/lib/utils/stage-storage';
+import type { FolderRecord } from '@/lib/utils/database';
+import { displayNameWidth, FOLDER_NAME_MAX_WIDTH } from '@/lib/utils/folder-name-validation';
+import { FolderCard } from '@/components/discovery/folder-card';
+import { NewFolderDialog } from '@/components/discovery/folder-dialogs';
+import { MoveToFolderMenu } from '@/components/discovery/move-to-folder-menu';
 import { SlideThumbnail } from '@/components/slide-renderer/SlideThumbnail';
 import type { Slide } from '@openmaic/dsl';
 import { useMediaGenerationStore } from '@/lib/store/media-generation';
@@ -212,6 +227,21 @@ function HomePage() {
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Course folders — device-local grouping. `currentFolderId === undefined`
+  // is the root view (folders + unfiled courses); a folder id navigates into
+  // that folder's course list. Searching flattens every course regardless of
+  // folder and annotates each with its folder name.
+  const [folders, setFolders] = useState<FolderRecord[]>([]);
+  // True once the initial classroom + folder loads resolve. Guards layout
+  // selection so the hero does not flip between full-screen and compact as the
+  // two async reads land (avoids a visible layout shift on first paint).
+  const [hydrated, setHydrated] = useState(false);
+  const [currentFolderId, setCurrentFolderId] = useState<string | undefined>(undefined);
+  const [newFolderOpen, setNewFolderOpen] = useState(false);
+  // When set, the new-folder dialog is creating a folder AND moving this course
+  // into it (entered via the move-menu's "new folder" entry).
+  const [createAndMoveTarget, setCreateAndMoveTarget] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searchButtonRef = useRef<HTMLButtonElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
@@ -320,11 +350,39 @@ function HomePage() {
     stableSuccessesRequired,
   ]);
 
-  const { importing, fileInputRef, triggerFileSelect, handleFileChange } = useImportClassroom(
-    () => {
-      loadClassrooms();
-    },
-  );
+  const loadFolders = async () => {
+    try {
+      setFolders(await listFolders());
+    } catch (err) {
+      log.error('Failed to load folders:', err);
+    }
+  };
+
+  // Capture the active folder when an import starts so the imported course
+  // lands in that folder, not whichever folder is active when the async import
+  // resolves (the user may have navigated away in the meantime).
+  const importFolderRef = useRef<string | undefined>(undefined);
+  const handleImportSuccess = async (importedStageId: string) => {
+    const folderId = importFolderRef.current;
+    importFolderRef.current = undefined;
+    // File the imported course into the folder that was active when the
+    // import began, before refreshing the list so the card appears in place.
+    if (folderId) {
+      try {
+        await setStageFolder(importedStageId, folderId);
+      } catch (err) {
+        log.error('Failed to assign imported course to folder:', err);
+        toast.error(t('classroom.moveFailed'));
+      }
+    }
+    await loadClassrooms();
+  };
+  const { importing, fileInputRef, triggerFileSelect, handleFileChange } =
+    useImportClassroom(handleImportSuccess);
+  const triggerImport = () => {
+    importFolderRef.current = currentFolderId;
+    triggerFileSelect();
+  };
 
   const {
     importing: pptxImporting,
@@ -340,7 +398,10 @@ function HomePage() {
     useMediaGenerationStore.getState().revokeObjectUrls();
     useMediaGenerationStore.setState({ tasks: {} });
 
-    loadClassrooms();
+    // Read sessionStorage on the client only (avoids SSR hydration mismatch).
+    // Both reads resolve before flipping `hydrated`, so the hero layout does
+    // not thrash as each lands independently.
+    void Promise.all([loadClassrooms(), loadFolders()]).finally(() => setHydrated(true));
 
     return () => {
       revokeThumbnailSlideMediaUrls(thumbnailsRef.current);
@@ -561,6 +622,80 @@ function HomePage() {
     router.push(target);
   };
 
+  // ─── Folder handlers ────────────────────────────────────────────────
+  const handleCreateFolder = async (name: string) => {
+    const folder = await createFolder(name);
+    setFolders((prev) => [...prev, folder]);
+    // If this create came from the move-menu's "new folder" entry, move the
+    // requesting course into the freshly created folder.
+    if (createAndMoveTarget) {
+      await handleMoveCourse(createAndMoveTarget, folder.id);
+      setCreateAndMoveTarget(null);
+    }
+  };
+
+  const handleRenameFolder =
+    (folder: FolderRecord) =>
+    async (newName: string): Promise<string | null> => {
+      // Empty or unchanged input just exits editing without an error.
+      const trimmed = newName.trim();
+      if (!trimmed || trimmed === folder.name) return null;
+      try {
+        await renameFolder(folder.id, newName);
+        setFolders((prev) => prev.map((f) => (f.id === folder.id ? { ...f, name: trimmed } : f)));
+        return null;
+      } catch (err) {
+        if (err instanceof FolderNameError) {
+          if (err.kind === 'duplicate') return t('classroom.folderNameExists');
+          if (err.kind === 'tooLong')
+            return t('classroom.folderWidth', {
+              width: displayNameWidth(trimmed),
+              max: FOLDER_NAME_MAX_WIDTH,
+            });
+          return t('classroom.folderNameHint');
+        }
+        log.error('Failed to rename folder:', err);
+        return t('classroom.folderRenameFailed');
+      }
+    };
+
+  const confirmDeleteFolder = async (folder: FolderRecord, mode: DeleteFolderMode) => {
+    try {
+      await deleteFolder(folder.id, mode);
+      if (currentFolderId === folder.id) setCurrentFolderId(undefined);
+    } catch (err) {
+      log.error('Failed to delete folder:', err);
+      toast.error(t('classroom.folderDeleteFailed'));
+    } finally {
+      // Always refresh authoritative state: in 'remove' mode a partial failure
+      // may have durably deleted some courses before throwing, and the UI must
+      // reflect that rather than leaving stale cards/counts behind.
+      await Promise.all([loadFolders(), loadClassrooms()]);
+    }
+  };
+
+  const handleMoveCourse = async (stageId: string, folderId: string | undefined) => {
+    // Optimistic update for snappy UI; the persistence call follows.
+    setClassrooms((prev) => prev.map((c) => (c.id === stageId ? { ...c, folderId } : c)));
+    try {
+      await setStageFolder(stageId, folderId);
+    } catch (err) {
+      log.error('Failed to move course:', err);
+      toast.error(t('classroom.moveFailed'));
+      // Revert on failure.
+      await loadClassrooms();
+    }
+  };
+
+  // From the move-menu's "new folder" entry: remember the course, then open the
+  // folder dialog. The actual create+move happens in handleCreateFolder once the
+  // name is confirmed. (A Radix DropdownMenu is modal, so the name input cannot
+  // live inside it; the dialog is the focus surface.)
+  const handleCreateAndMove = (stageId: string) => () => {
+    setCreateAndMoveTarget(stageId);
+    setNewFolderOpen(true);
+  };
+
   const deferredSearchQuery = useDeferredValue(searchQuery);
   const filteredClassrooms = useMemo(() => {
     const q = deferredSearchQuery.trim().toLowerCase();
@@ -571,6 +706,50 @@ function HomePage() {
       return name.includes(q) || desc.includes(q);
     });
   }, [classrooms, deferredSearchQuery]);
+
+  // Folder-aware view model. Searching collapses the hierarchy: every matching
+  // course is shown flat, annotated with its folder name. Otherwise the root
+  // view shows folder tiles + unfiled courses, and a folder view shows only
+  // that folder's members.
+  const folderNameById = useMemo(() => new Map(folders.map((f) => [f.id, f.name])), [folders]);
+  const isSearching = deferredSearchQuery.trim().length > 0;
+  // The course tiles rendered in the active view: search flattens everything;
+  // a folder shows only its members; the root shows unfiled courses (folder
+  // tiles are rendered separately above them).
+  const visibleClassrooms = useMemo(() => {
+    if (isSearching) return filteredClassrooms;
+    if (currentFolderId) return filteredClassrooms.filter((c) => c.folderId === currentFolderId);
+    return filteredClassrooms.filter(
+      (c) => c.folderId === undefined || !folderNameById.has(c.folderId),
+    );
+  }, [filteredClassrooms, isSearching, currentFolderId, folderNameById]);
+  const currentFolderClassrooms = useMemo(
+    () => (currentFolderId ? classrooms.filter((c) => c.folderId === currentFolderId) : []),
+    [classrooms, currentFolderId],
+  );
+  const courseCountByFolder = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const c of classrooms) {
+      if (c.folderId) counts.set(c.folderId, (counts.get(c.folderId) ?? 0) + 1);
+    }
+    return counts;
+  }, [classrooms]);
+  // Up to 3 member course covers (first-slide thumbnails) per folder, for the
+  // folder tile's cover stack. Members are ordered by updatedAt desc so the
+  // frontmost cover is the most recently touched course.
+  const coverSlidesByFolder = useMemo(() => {
+    const byFolder = new Map<string, Slide[]>();
+    for (const c of [...classrooms].sort((a, b) => b.updatedAt - a.updatedAt)) {
+      if (!c.folderId) continue;
+      const slide = thumbnails[c.id];
+      if (!slide) continue;
+      const list = byFolder.get(c.folderId) ?? [];
+      if (list.length < 3) list.push(slide);
+      byFolder.set(c.folderId, list);
+    }
+    return byFolder;
+  }, [classrooms, thumbnails]);
+  const currentFolder = folders.find((f) => f.id === currentFolderId);
 
   const updateForm = <K extends keyof FormState>(field: K, value: FormState[K]) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -1092,7 +1271,7 @@ function HomePage() {
         {homeSurface.showPromptComposer && classrooms.length === 0 && (
           <div className="relative z-10 mt-4 flex items-center gap-4">
             <button
-              onClick={triggerFileSelect}
+              onClick={triggerImport}
               disabled={importing}
               className="flex items-center gap-1.5 text-[12px] text-muted-foreground/40 hover:text-foreground/60 transition-colors"
             >
@@ -1114,24 +1293,43 @@ function HomePage() {
       </motion.div>
 
       {/* ═══ Recent classrooms — collapsible ═══ */}
-      {classrooms.length > 0 && (
+      {/* The library action bar is always present after hydration: it carries
+          the New-folder / import / search actions, so a brand-new user with
+          zero courses and zero folders can still create the first folder or
+          import. One stable action surface across root, folder, and empty. */}
+      {hydrated && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.5 }}
           className="relative z-10 mt-10 w-full max-w-6xl flex flex-col items-center"
         >
-          {/* Trigger — divider-line with centered text */}
-          <div className="group w-full flex items-center gap-4 py-2">
+          {/* Trigger — divider-line with centered text. Fixed height keeps the
+              bar geometrically stable when the New-folder action or the folder
+              path appears/disappears (entering vs leaving a folder). */}
+          <div className="group w-full flex items-center gap-4 h-9">
             <div className="flex-1 h-px bg-border/40 group-hover:bg-border/70 transition-colors" />
             <div className="shrink-0 flex items-center gap-3 text-[13px] text-muted-foreground/60 select-none">
               <button
-                onClick={() => persistRecentOpen(!recentOpen)}
+                onClick={() => {
+                  if (currentFolderId) setCurrentFolderId(undefined);
+                  else persistRecentOpen(!recentOpen);
+                }}
                 className="flex items-center gap-2 hover:text-foreground/70 transition-colors cursor-pointer"
               >
                 <Clock className="size-3.5" />
                 {t('classroom.recentClassrooms')}
-                <span className="text-[11px] tabular-nums opacity-60">{classrooms.length}</span>
+                {currentFolder && (
+                  <>
+                    <ChevronRight className="size-3 opacity-40" />
+                    <span className="text-foreground/80 truncate max-w-[160px]">
+                      {currentFolder.name}
+                    </span>
+                  </>
+                )}
+                <span className="text-[11px] tabular-nums opacity-60">
+                  {currentFolder ? currentFolderClassrooms.length : classrooms.length}
+                </span>
                 <motion.div
                   animate={{ rotate: recentOpen ? 180 : 0 }}
                   transition={{ duration: 0.3, ease: 'easeInOut' }}
@@ -1223,7 +1421,7 @@ function HomePage() {
               </AnimatePresence>
 
               <button
-                onClick={triggerFileSelect}
+                onClick={triggerImport}
                 disabled={importing}
                 className="group/import grid grid-cols-[auto_0fr] hover:grid-cols-[auto_1fr] items-center gap-1 rounded-full px-1.5 py-0.5 text-[12px] text-muted-foreground/35 hover:text-muted-foreground/70 hover:bg-muted/50 transition-all duration-200 cursor-pointer"
               >
@@ -1244,6 +1442,21 @@ function HomePage() {
                   </span>
                 </button>
               )}
+              {/* New folder — round icon button, matches the import/upload affordances. */}
+              {!currentFolderId && !isSearching && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!recentOpen) persistRecentOpen(true);
+                    setNewFolderOpen(true);
+                  }}
+                  aria-label={t('classroom.newFolderTitle')}
+                  title={t('classroom.newFolderTitle')}
+                  className="inline-flex items-center justify-center size-7 rounded-full bg-muted/40 text-muted-foreground ring-1 ring-border/50 hover:bg-muted hover:text-foreground hover:ring-border transition-[background-color,color,box-shadow] cursor-pointer"
+                >
+                  <FolderPlus className="size-3.5" />
+                </button>
+              )}
             </div>
             <div className="flex-1 h-px bg-border/40 group-hover:bg-border/70 transition-colors" />
           </div>
@@ -1258,38 +1471,127 @@ function HomePage() {
                 transition={{ duration: 0.4, ease: [0.25, 0.1, 0.25, 1] }}
                 className="w-full overflow-hidden"
               >
-                {searchQuery.trim() && filteredClassrooms.length === 0 ? (
+                {folders.length === 0 && classrooms.length === 0 ? (
+                  <div className="pt-8 pb-2 text-center text-[13px] text-muted-foreground/60">
+                    {t('classroom.emptyLibraryHint')}
+                  </div>
+                ) : !isSearching && currentFolderId && currentFolderClassrooms.length === 0 ? (
+                  // Empty folder: hint directly below the centered path bar.
+                  <div className="pt-8 text-center">
+                    <p className="text-[14px] text-muted-foreground">
+                      {t('classroom.emptyFolderHint')}
+                    </p>
+                  </div>
+                ) : isSearching && filteredClassrooms.length === 0 ? (
                   <div className="pt-8 pb-2 text-center text-[13px] text-muted-foreground/60">
                     {t('classroom.searchEmpty')}
                   </div>
                 ) : (
-                  <div className="pt-8 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-5 gap-y-8">
-                    {filteredClassrooms.map((classroom, i) => (
+                  <div className="pt-8">
+                    {/* Breadcrumb — shown only while searching (the folder path
+                        already lives in the centered header above). */}
+                    {isSearching && (
+                      <div className="mb-4 flex items-center gap-1.5 text-[13px] text-muted-foreground">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCurrentFolderId(undefined);
+                            setSearchQuery('');
+                            setSearchOpen(false);
+                          }}
+                          className="hover:text-foreground transition-colors"
+                        >
+                          {t('classroom.recentClassrooms')}
+                        </button>
+                        <ChevronRight className="size-3.5" />
+                        <span className="text-foreground font-medium">
+                          {t('classroom.searchResults')}
+                        </span>
+                        <span className="ml-1.5 text-[12px] text-muted-foreground tabular-nums">
+                          ({filteredClassrooms.length})
+                        </span>
+                      </div>
+                    )}
+
+                    <AnimatePresence mode="wait">
                       <motion.div
-                        key={classroom.id}
-                        initial={{ opacity: 0, y: 16 }}
+                        key={
+                          isSearching
+                            ? 'search'
+                            : currentFolderId
+                              ? `folder-${currentFolderId}`
+                              : 'root'
+                        }
+                        initial={{ opacity: 0, y: 8 }}
                         animate={{ opacity: 1, y: 0 }}
-                        transition={{
-                          delay: i * 0.04,
-                          duration: 0.35,
-                          ease: 'easeOut',
-                        }}
+                        exit={{ opacity: 0, y: -8 }}
+                        transition={{ duration: 0.2 }}
+                        className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-5 gap-y-8"
                       >
-                        <ClassroomCard
-                          classroom={classroom}
-                          slide={thumbnails[classroom.id]}
-                          memorySummary={memorySummaries[classroom.id]}
-                          formatDate={formatDate}
-                          onDelete={handleDelete}
-                          onRename={handleRename}
-                          confirmingDelete={pendingDeleteId === classroom.id}
-                          onConfirmDelete={() => confirmDelete(classroom.id)}
-                          onCancelDelete={() => setPendingDeleteId(null)}
-                          onClick={() => openClassroomCard(classroom)}
-                          spiralMode={reverseChallengeEnabled}
-                        />
+                        {/* Root + non-search: render folder tiles first. */}
+                        {!isSearching &&
+                          currentFolderId === undefined &&
+                          folders.map((folder, i) => (
+                            <motion.div
+                              key={folder.id}
+                              initial={{ opacity: 0, y: 16 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ delay: i * 0.04, duration: 0.35, ease: 'easeOut' }}
+                            >
+                              <FolderCard
+                                folder={folder}
+                                courseCount={courseCountByFolder.get(folder.id) ?? 0}
+                                coverSlides={coverSlidesByFolder.get(folder.id) ?? []}
+                                onOpen={() => setCurrentFolderId(folder.id)}
+                                onRename={handleRenameFolder(folder)}
+                                onDelete={(mode) => confirmDeleteFolder(folder, mode)}
+                                onDropCourse={(stageId) => handleMoveCourse(stageId, folder.id)}
+                              />
+                            </motion.div>
+                          ))}
+
+                        {/* Course tiles for the active view. */}
+                        {visibleClassrooms.map((classroom, i) => (
+                          <motion.div
+                            key={classroom.id}
+                            initial={{ opacity: 0, y: 16 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: i * 0.04, duration: 0.35, ease: 'easeOut' }}
+                          >
+                            <ClassroomCard
+                              classroom={classroom}
+                              slide={thumbnails[classroom.id]}
+                              memorySummary={memorySummaries[classroom.id]}
+                              formatDate={formatDate}
+                              onDelete={handleDelete}
+                              onRename={handleRename}
+                              confirmingDelete={pendingDeleteId === classroom.id}
+                              onConfirmDelete={() => confirmDelete(classroom.id)}
+                              onCancelDelete={() => setPendingDeleteId(null)}
+                              onClick={() => openClassroomCard(classroom)}
+                              spiralMode={reverseChallengeEnabled}
+                              overlay={
+                                <>
+                                  <MoveToFolderMenu
+                                    folders={folders}
+                                    currentFolderId={classroom.folderId}
+                                    onMove={(folderId) => handleMoveCourse(classroom.id, folderId)}
+                                    onCreateAndMove={handleCreateAndMove(classroom.id)}
+                                  />
+                                  {/* Search view: show the owning folder as a badge. */}
+                                  {isSearching && classroom.folderId && (
+                                    <span className="absolute bottom-2 left-2 z-10 inline-flex items-center gap-1 rounded-md bg-violet-500/80 px-1.5 py-0.5 text-[10px] font-medium text-white backdrop-blur-sm pointer-events-none">
+                                      <Folder className="size-2.5" />
+                                      {folderNameById.get(classroom.folderId) ?? ''}
+                                    </span>
+                                  )}
+                                </>
+                              }
+                            />
+                          </motion.div>
+                        ))}
                       </motion.div>
-                    ))}
+                    </AnimatePresence>
                   </div>
                 )}
               </motion.div>
@@ -1333,6 +1635,18 @@ function HomePage() {
         formatDateTime={formatDateTime}
         formatSuggestedReview={formatSuggestedReview}
         dataScope={revisitPanelScope}
+      />
+
+      {/* Folder dialogs — mounted at the top level so they are reachable even
+          while the Recent section is collapsed or the course list is empty. */}
+      <NewFolderDialog
+        open={newFolderOpen}
+        onOpenChange={(open) => {
+          setNewFolderOpen(open);
+          if (!open) setCreateAndMoveTarget(null);
+        }}
+        folders={folders}
+        onCreate={handleCreateFolder}
       />
 
       {/* Footer — flows with content, at the very end */}
@@ -1658,6 +1972,7 @@ function ClassroomCard({
   slide,
   memorySummary,
   formatDate,
+  overlay,
   onDelete,
   onRename,
   confirmingDelete,
@@ -1670,6 +1985,8 @@ function ClassroomCard({
   slide?: Slide;
   memorySummary?: LessonMemorySummary;
   formatDate: (ts: number) => string;
+  /** Extra absolutely-positioned layers over the thumbnail (move menu, badges). */
+  overlay?: React.ReactNode;
   onDelete: (id: string, e: React.MouseEvent) => void;
   onRename: (id: string, newName: string) => void;
   confirmingDelete: boolean;
@@ -1740,6 +2057,16 @@ function ClassroomCard({
       role="button"
       tabIndex={confirmingDelete ? -1 : 0}
       aria-label={classroom.name}
+      draggable={!confirmingDelete && !editing}
+      onDragStart={(e) => {
+        e.dataTransfer.setData('text/stage-id', classroom.id);
+        e.dataTransfer.effectAllowed = 'move';
+      }}
+      onDragEnd={() => {
+        // Notify folder cards to clear any lingering drop highlight (Escape-
+        // cancelled drags may not fire dragleave on every target).
+        window.dispatchEvent(new CustomEvent('course-drag-end'));
+      }}
     >
       {/* Thumbnail — large radius, no border, subtle bg */}
       <div
@@ -1843,6 +2170,7 @@ function ClassroomCard({
               >
                 <Pencil className="size-3.5" />
               </Button>
+              {overlay}
             </motion.div>
           )}
         </AnimatePresence>

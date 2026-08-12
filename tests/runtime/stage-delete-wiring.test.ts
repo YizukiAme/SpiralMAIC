@@ -46,6 +46,7 @@ vi.mock('@/lib/utils/database', () => ({
   db: {
     transaction: vi.fn(async (_mode, _tables, work) => work()),
     stages: { delete: vi.fn().mockResolvedValue(undefined) },
+    stageFolders: { delete: vi.fn().mockResolvedValue(undefined) },
     playbackState: { delete: vi.fn().mockResolvedValue(undefined) },
     mediaFiles: {
       where: () => ({ equals: () => ({ toArray: vi.fn().mockResolvedValue([]) }) }),
