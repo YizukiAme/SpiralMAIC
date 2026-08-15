@@ -1165,7 +1165,11 @@ describe('embedded persistence route -- real handler boundary', () => {
     expect(first.status).not.toBe(500);
     const store = stores[0]!;
     const id = await store.put(
-      { key: 'anon:test' },
+      {
+        // The dev authenticator issues one shared asset principal for every
+        // request, so the stored entry must live under it to be readable.
+        key: 'shared',
+      },
       new Blob(['real-bytes'], { type: 'text/plain' }),
       {
         contentType: 'image/png',
@@ -1199,7 +1203,11 @@ describe('embedded persistence route -- real handler boundary', () => {
     const first = await handlePersistenceRequest(authed('/runtime/sessions'), deps);
     expect(first.status).not.toBe(500);
     const id = await stores[0]!.put(
-      { key: 'anon:test' },
+      {
+        // The dev authenticator issues one shared asset principal for every
+        // request, so the stored entry must live under it to be readable.
+        key: 'shared',
+      },
       new Blob(['real-bytes'], { type: 'text/plain' }),
       { contentType: 'image/png' },
     );
