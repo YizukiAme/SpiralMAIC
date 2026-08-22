@@ -50,6 +50,19 @@ async function waitForJob(
   throw new Error(`Timed out waiting for job ${id}`);
 }
 
+async function expectPathRemoved(path: string): Promise<void> {
+  await expect
+    .poll(async () => {
+      try {
+        await access(path);
+        return false;
+      } catch {
+        return true;
+      }
+    })
+    .toBe(true);
+}
+
 const renderOptions = { fps: 30, quality: 'standard', format: 'mp4' } as const;
 
 describe('RenderCoordinator through the RenderExecutor seam', () => {
@@ -114,7 +127,7 @@ describe('RenderCoordinator through the RenderExecutor seam', () => {
     expect(await coordinator.cancel(id)).toBe(true);
     const job = await waitForJob(jobs, id, (current) => current.status === 'cancelled');
     expect(job.failure).toEqual({ code: 'cancelled', message: 'Render cancelled' });
-    await expect(access(dir)).rejects.toThrow();
+    await expectPathRemoved(dir);
   });
 
   it('keeps deadline failure classification from a replaceable executor', async () => {
@@ -138,7 +151,7 @@ describe('RenderCoordinator through the RenderExecutor seam', () => {
       failure: { code: 'deadline_exceeded' },
     });
     expect(artifacts.paths.has(id)).toBe(false);
-    await expect(access(dir)).rejects.toThrow();
+    await expectPathRemoved(dir);
   });
 
   it('classifies unexpected executor errors and still performs cleanup', async () => {
@@ -156,6 +169,6 @@ describe('RenderCoordinator through the RenderExecutor seam', () => {
       error: 'executor unavailable',
       failure: { code: 'execution_failed', message: 'executor unavailable' },
     });
-    await expect(access(dir)).rejects.toThrow();
+    await expectPathRemoved(dir);
   });
 });
