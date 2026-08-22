@@ -5,14 +5,19 @@ const GIB = 1024 ** 3;
 
 export type ResourceProfileName = 'standard' | 'low-memory';
 export type RequestedCaptureMode = 'beginframe' | 'screenshot';
+export type CapturePolicy = 'prefer-beginframe' | 'screenshot-only';
 
 export interface ResourceProfile {
   name: ResourceProfileName;
+  capturePolicy: CapturePolicy;
   requestedCaptureMode: RequestedCaptureMode;
   requireBeginFrame: boolean;
   producerWorkers: 1;
   maxConcurrency: 1;
   maxConcurrentExtractions: 1;
+  /** Hard local chunk fan-out limits for the selected memory/CPU profile. */
+  maxChunkWorkers: number;
+  maxParallelChunks: number;
   minimumMemoryBytes: number;
 }
 
@@ -24,21 +29,28 @@ const COMMON_LIMITS = {
 
 function defineProfile(
   name: ResourceProfileName,
-  requestedCaptureMode: RequestedCaptureMode,
+  capturePolicy: CapturePolicy,
   minimumMemoryBytes: number,
+  maxParallelChunks: number,
 ): ResourceProfile {
+  const requestedCaptureMode = capturePolicy === 'screenshot-only' ? 'screenshot' : 'beginframe';
   return {
     name,
+    capturePolicy,
     requestedCaptureMode,
-    requireBeginFrame: requestedCaptureMode === 'beginframe',
+    // BeginFrame is preferred by the standard profile, but producer may select
+    // screenshot for compatibility-sensitive compositions such as iframe GenUI.
+    requireBeginFrame: false,
     ...COMMON_LIMITS,
     minimumMemoryBytes,
+    maxChunkWorkers: 1,
+    maxParallelChunks,
   };
 }
 
 const PROFILES: Record<ResourceProfileName, ResourceProfile> = {
-  standard: defineProfile('standard', 'beginframe', 10 * GIB),
-  'low-memory': defineProfile('low-memory', 'screenshot', 4 * GIB),
+  standard: defineProfile('standard', 'prefer-beginframe', 8 * GIB, 4),
+  'low-memory': defineProfile('low-memory', 'screenshot-only', 4 * GIB, 1),
 };
 
 function requiredProducerEnvironment(profile: ResourceProfile): Record<string, string> {
@@ -137,7 +149,7 @@ export function validateResourceProfileStartup(
     );
   }
 
-  if (profile.requireBeginFrame) {
+  if (profile.requestedCaptureMode === 'beginframe') {
     const headlessShellPath = options.headlessShellPath ?? process.env.PRODUCER_HEADLESS_SHELL_PATH;
     const pathExists = options.pathExists ?? existsSync;
     if (!headlessShellPath || !pathExists(headlessShellPath)) {
@@ -152,11 +164,14 @@ export function validateResourceProfileStartup(
 export function publicResourceProfile(profile: ResourceProfile) {
   return {
     name: profile.name,
+    capturePolicy: profile.capturePolicy,
     requestedCaptureMode: profile.requestedCaptureMode,
     requireBeginFrame: profile.requireBeginFrame,
     producerWorkers: profile.producerWorkers,
     maxConcurrency: profile.maxConcurrency,
     maxConcurrentExtractions: profile.maxConcurrentExtractions,
+    maxChunkWorkers: profile.maxChunkWorkers,
+    maxParallelChunks: profile.maxParallelChunks,
     minimumMemoryMiB: profile.minimumMemoryBytes / 1024 ** 2,
   } as const;
 }

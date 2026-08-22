@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import packageMetadata from '../../../package.json';
 
 import {
   CODEX_IMAGE_GENERATIONS_ENDPOINT,
@@ -122,8 +123,10 @@ describe('Codex image request contract', () => {
     expect(headers.get('authorization')).toBe('Bearer access-secret');
     expect(headers.get('chatgpt-account-id')).toBe('account-secret');
     expect(headers.get('originator')).toBe('openmaic');
-    expect(headers.get('user-agent')).toMatch(/^OpenMAIC\/0\.3\.1/);
-    expect(headers.get('version')).toBe('0.3.1');
+    expect(headers.get('user-agent')).toBe(
+      `OpenMAIC/${packageMetadata.version} (native Codex OAuth)`,
+    );
+    expect(headers.get('version')).toBe(packageMetadata.version);
     expect(headers.get('content-type')).toBe('application/json');
   });
 

@@ -5,6 +5,11 @@
  * from `@hyperframes/producer`'s internal `RenderJob` so the HTTP contract
  * (and therefore the app) stays stable if the producer's internals change.
  */
+import type {
+  CapturePolicy,
+  RequestedCaptureMode,
+  ResourceProfileName,
+} from './resource-profile.js';
 
 /** Lifecycle of a render job as the app observes it. */
 export type RenderJobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
@@ -30,8 +35,9 @@ export interface RuntimeVersions {
 }
 
 export interface RenderExecutionMetrics {
-  resourceProfile: 'standard' | 'low-memory';
-  requestedCaptureMode: 'beginframe' | 'screenshot';
+  resourceProfile: ResourceProfileName;
+  capturePolicy: CapturePolicy;
+  requestedCaptureMode: RequestedCaptureMode;
   actualCaptureMode: string;
   requestedWorkers: number;
   actualWorkers: number | null;
@@ -87,6 +93,15 @@ export interface RenderExecutionRequest {
   /** Wall-clock budget starting when execution begins. */
   deadlineMs: number;
   onProgress: (progress: RenderProgress) => void | Promise<void>;
+  /** Optional bounded local chunk execution requested by an internal caller. */
+  chunkExecution?: {
+    chunkCount?: number;
+    chunkWorkers?: number;
+    maxParallelChunks?: number;
+    chunkSizeFrames?: number;
+    targetChunkFrames?: number;
+    planDir?: string;
+  };
 }
 
 export type RenderExecutionResult =

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import packageMetadata from '../../../package.json';
 
 import {
   CODEX_COMPATIBILITY_VERSION,
@@ -420,7 +421,9 @@ describe('Codex models transport boundary', () => {
     expect(headers.get('chatgpt-account-id')).toBe('account-secret');
     expect(headers.get('originator')).toBe('openmaic');
     expect(headers.get('if-none-match')).toBe('etag-1');
-    expect(headers.get('user-agent')).toMatch(/^OpenMAIC\/0\.3\.1 /);
+    expect(headers.get('user-agent')).toBe(
+      `OpenMAIC/${packageMetadata.version} (native Codex OAuth)`,
+    );
   });
 
   it('rejects non-GET requests before credential lookup', async () => {

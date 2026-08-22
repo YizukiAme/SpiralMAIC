@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import packageMetadata from '../../../package.json';
 
 import { CODEX_RESPONSE_LIMITS } from '@/lib/server/codex/response-guard';
 import {
@@ -246,7 +247,9 @@ describe('Codex Responses transport boundary', () => {
     expect(headers.get('authorization')).toBe('Bearer access-token');
     expect(headers.get('chatgpt-account-id')).toBe('account-id');
     expect(headers.get('originator')).toBe('openmaic');
-    expect(headers.get('user-agent')).toMatch(/^OpenMAIC\/0\.3\.1/);
+    expect(headers.get('user-agent')).toBe(
+      `OpenMAIC/${packageMetadata.version} (native Codex OAuth)`,
+    );
     expect(headers.get('session-id')).toBe(expectedSessionId);
     expect(headers.get('thread-id')).toBeNull();
     expect(headers.get('content-type')).toBe('application/json');
