@@ -118,6 +118,17 @@ Optional PostgreSQL persistence and the isolated MP4 render service are availabl
 Docker Compose profiles. See the [storage guide](packages/@openmaic/storage/README.md) and
 [render-service guide](render-service/README.md).
 
+For slow networks, Docker builds accept `ALPINE_MIRROR` (an Alpine mirror hostname) and
+`NPM_REGISTRY` (a complete npm registry URL):
+
+```sh
+ALPINE_MIRROR=mirrors.tuna.tsinghua.edu.cn \
+NPM_REGISTRY=https://registry.npmmirror.com \
+docker compose up --build
+```
+
+Use public mirrors only; Docker may retain build arguments in image metadata.
+
 </details>
 
 <details>

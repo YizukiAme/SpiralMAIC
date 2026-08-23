@@ -116,6 +116,17 @@ docker compose up --build
 细节见[存储说明](packages/@openmaic/storage/README.md)和
 [渲染服务说明](render-service/README.md)。
 
+网络较慢时，可通过 `ALPINE_MIRROR`（Alpine 镜像站主机名）和 `NPM_REGISTRY`
+（完整 npm registry URL）加速 Docker 构建：
+
+```sh
+ALPINE_MIRROR=mirrors.tuna.tsinghua.edu.cn \
+NPM_REGISTRY=https://registry.npmmirror.com \
+docker compose up --build
+```
+
+只使用公共镜像地址；Docker 可能把构建参数保留在镜像元数据中。
+
 </details>
 
 <details>
