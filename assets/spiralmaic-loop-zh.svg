@@ -1,0 +1,138 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 660" role="img" aria-labelledby="title desc">
+  <title id="title">SpiralMAIC 学习闭环</title>
+  <desc id="desc">在 AI 课堂学习，等待记忆自然变淡，再把知识讲给 AI 同学，通过证据安排下一次复习。</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fbfaff" />
+      <stop offset="0.55" stop-color="#f6f8ff" />
+      <stop offset="1" stop-color="#f7fff9" />
+    </linearGradient>
+    <linearGradient id="loop" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#745de8" />
+      <stop offset="0.28" stop-color="#f09a63" />
+      <stop offset="0.56" stop-color="#3fb7ad" />
+      <stop offset="0.78" stop-color="#ef6f88" />
+      <stop offset="1" stop-color="#54ad67" />
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#2c245f" flood-opacity="0.11" />
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8d83c9" />
+    </marker>
+    <style>
+      .title { font: 800 45px Inter, "PingFang SC", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif; fill: #211b43; letter-spacing: -1.2px; }
+      .subtitle { font: 500 20px Inter, "PingFang SC", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif; fill: #625d78; }
+      .pill { font: 750 14px Inter, "PingFang SC", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif; fill: #5f4fc5; letter-spacing: 1px; }
+      .number { font: 800 15px Inter, ui-sans-serif, system-ui, sans-serif; fill: #ffffff; }
+      .label { font: 800 23px Inter, "PingFang SC", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif; fill: #26213e; letter-spacing: -0.2px; }
+      .copy { font: 500 16px Inter, "PingFang SC", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif; fill: #625d72; }
+      .return { font: 700 17px Inter, "PingFang SC", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif; fill: #5e548a; }
+      .icon { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-width: 6; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="660" rx="36" fill="url(#background)" />
+  <circle cx="1490" cy="70" r="110" fill="#ebe7ff" opacity="0.72" />
+  <circle cx="80" cy="615" r="145" fill="#e8f8ef" opacity="0.8" />
+  <path d="M121 128 C330 55 540 70 700 118" fill="none" stroke="#dcd6ff" stroke-width="3" stroke-dasharray="8 12" />
+  <circle cx="111" cy="132" r="7" fill="#745de8" />
+  <circle cx="720" cy="116" r="6" fill="#3fb7ad" />
+
+  <text x="72" y="82" class="title">学过一遍，然后把它真正变成自己的</text>
+  <text x="74" y="119" class="subtitle">SpiralMAIC 把“课程结束”改成一次又一次更聪明的回来。</text>
+  <g transform="translate(1323 57)">
+    <rect width="205" height="42" rx="21" fill="#eeeafd" stroke="#d9d1ff" />
+    <path d="M22 24c8-13 25-10 25 2 0 10-15 13-19 4-4-8 7-15 15-10" fill="none" stroke="#745de8" stroke-width="3.5" stroke-linecap="round" />
+    <text x="59" y="27" class="pill">SPIRAL 学习循环</text>
+  </g>
+
+  <path d="M308 340 C328 340 334 290 356 290" fill="none" stroke="#8d83c9" stroke-width="4" stroke-dasharray="7 8" marker-end="url(#arrow)" />
+  <path d="M608 290 C630 290 636 340 658 340" fill="none" stroke="#8d83c9" stroke-width="4" stroke-dasharray="7 8" marker-end="url(#arrow)" />
+  <path d="M908 340 C930 340 936 290 958 290" fill="none" stroke="#8d83c9" stroke-width="4" stroke-dasharray="7 8" marker-end="url(#arrow)" />
+  <path d="M1208 290 C1230 290 1236 340 1258 340" fill="none" stroke="#8d83c9" stroke-width="4" stroke-dasharray="7 8" marker-end="url(#arrow)" />
+
+  <g transform="translate(58 216) rotate(-1.5 125 130)" filter="url(#shadow)">
+    <rect width="250" height="260" rx="28" fill="#eeeaff" stroke="#d7cffd" stroke-width="2" />
+    <circle cx="38" cy="37" r="20" fill="#745de8" />
+    <text x="38" y="42" class="number" text-anchor="middle">01</text>
+    <g transform="translate(79 48)" class="icon" stroke="#745de8">
+      <rect x="0" y="0" width="92" height="62" rx="12" />
+      <path d="M38 18l24 13-24 13z" fill="#745de8" stroke="none" />
+      <path d="M31 77h30M46 62v15" />
+    </g>
+    <text x="28" y="157" class="label">先上课</text>
+    <text x="28" y="188" class="copy">AI 把一个主题，</text>
+    <text x="28" y="211" class="copy">变成一间热闹的课堂。</text>
+  </g>
+
+  <g transform="translate(358 166) rotate(1.4 125 130)" filter="url(#shadow)">
+    <rect width="250" height="260" rx="28" fill="#fff0e7" stroke="#ffd5bd" stroke-width="2" />
+    <circle cx="38" cy="37" r="20" fill="#ef9460" />
+    <text x="38" y="42" class="number" text-anchor="middle">02</text>
+    <g transform="translate(84 47)" class="icon" stroke="#ef9460">
+      <circle cx="42" cy="36" r="36" />
+      <path d="M42 15v23l17 10" />
+      <path d="M15 86h54" opacity="0.35" />
+      <path d="M25 98h34" opacity="0.2" />
+    </g>
+    <text x="28" y="157" class="label">忘一点</text>
+    <text x="28" y="188" class="copy">很正常，</text>
+    <text x="28" y="211" class="copy">记忆本来就会变淡。</text>
+  </g>
+
+  <g transform="translate(658 216) rotate(-1.2 125 130)" filter="url(#shadow)">
+    <rect width="250" height="260" rx="28" fill="#e9f9f7" stroke="#bfeae5" stroke-width="2" />
+    <circle cx="38" cy="37" r="20" fill="#37aca3" />
+    <text x="38" y="42" class="number" text-anchor="middle">03</text>
+    <g transform="translate(68 43)">
+      <circle cx="56" cy="20" r="18" fill="#37aca3" />
+      <path d="M36 58c2-20 38-20 40 0" fill="#37aca3" />
+      <path d="M20 66h72l-8 45H28z" fill="#ffffff" stroke="#37aca3" stroke-width="5" stroke-linejoin="round" />
+      <circle cx="4" cy="94" r="10" fill="#745de8" />
+      <circle cx="108" cy="94" r="10" fill="#ef6f88" />
+      <circle cx="56" cy="125" r="10" fill="#54ad67" />
+    </g>
+    <text x="28" y="175" class="label">换你来讲</text>
+    <text x="28" y="206" class="copy">不看答案，把知识</text>
+    <text x="28" y="229" class="copy">讲给 AI 同学听。</text>
+  </g>
+
+  <g transform="translate(958 166) rotate(1.2 125 130)" filter="url(#shadow)">
+    <rect width="250" height="260" rx="28" fill="#ffebef" stroke="#ffcbd5" stroke-width="2" />
+    <circle cx="38" cy="37" r="20" fill="#ef6f88" />
+    <text x="38" y="42" class="number" text-anchor="middle">04</text>
+    <g transform="translate(64 46)">
+      <path d="M0 12a12 12 0 0 1 12-12h53a12 12 0 0 1 12 12v31a12 12 0 0 1-12 12H39L22 70V55H12A12 12 0 0 1 0 43z" fill="#ffffff" stroke="#ef6f88" stroke-width="5" stroke-linejoin="round" />
+      <text x="39" y="40" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-size="34" font-weight="800" fill="#ef6f88">?</text>
+      <path d="M79 52a10 10 0 0 1 10-10h34a10 10 0 0 1 10 10v23a10 10 0 0 1-10 10h-14l-13 12V85h-7a10 10 0 0 1-10-10z" fill="#ef6f88" />
+      <path d="M94 64h24M94 73h16" stroke="#ffffff" stroke-width="4" stroke-linecap="round" />
+    </g>
+    <text x="28" y="157" class="label">同学追问</text>
+    <text x="28" y="188" class="copy">质疑、犯错，</text>
+    <text x="28" y="211" class="copy">再让你举个新例子。</text>
+  </g>
+
+  <g transform="translate(1258 216) rotate(-1.3 125 130)" filter="url(#shadow)">
+    <rect width="250" height="260" rx="28" fill="#ecf9ee" stroke="#c8ebce" stroke-width="2" />
+    <circle cx="38" cy="37" r="20" fill="#54ad67" />
+    <text x="38" y="42" class="number" text-anchor="middle">05</text>
+    <g transform="translate(74 47)">
+      <rect x="0" y="65" width="20" height="39" rx="6" fill="#b9dfc0" />
+      <rect x="36" y="44" width="20" height="60" rx="6" fill="#8dce99" />
+      <rect x="72" y="16" width="20" height="88" rx="6" fill="#54ad67" />
+      <path d="M1 42l33-17 27 6L91 0" fill="none" stroke="#317e43" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="M80 0h11v11" fill="none" stroke="#317e43" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" />
+    </g>
+    <text x="28" y="157" class="label">越记越稳</text>
+    <text x="28" y="188" class="copy">用这次表现，</text>
+    <text x="28" y="211" class="copy">安排下一次复习。</text>
+  </g>
+
+  <path d="M1384 496 C1390 600 1030 608 798 600 C555 592 206 602 182 498" fill="none" stroke="url(#loop)" stroke-width="9" stroke-linecap="round" marker-end="url(#arrow)" opacity="0.9" />
+  <g transform="translate(650 560)">
+    <rect width="300" height="48" rx="24" fill="#ffffff" stroke="#ded8f6" />
+    <circle cx="27" cy="24" r="8" fill="#745de8" />
+    <text x="49" y="30" class="return">在最合适的时候，再回来一圈</text>
+  </g>
+</svg>
