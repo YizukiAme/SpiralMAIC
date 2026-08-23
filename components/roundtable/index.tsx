@@ -840,6 +840,7 @@ export function Roundtable({
                     />
                   </div>
                   <button
+                    aria-label={t('pbl.v2.chat.send')}
                     onClick={handleSendMessage}
                     disabled={isSendCooldown}
                     className={cn(
@@ -1215,7 +1216,7 @@ export function Roundtable({
                         'max-w-[80px] truncate px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase border shadow-sm transition-all duration-300 bg-white/90 dark:bg-gray-800/90',
                         activeRole === 'teacher' && !speakingStudent
                           ? 'text-purple-600 dark:text-purple-400 border-purple-200 dark:border-purple-700'
-                          : 'text-gray-400 dark:text-gray-500 border-gray-100 dark:border-gray-700 group-hover:text-purple-500 dark:group-hover:text-purple-400 group-hover:border-purple-200 dark:group-hover:border-purple-600',
+                          : 'text-gray-600 dark:text-gray-400 border-gray-100 dark:border-gray-700 group-hover:text-purple-500 dark:group-hover:text-purple-400 group-hover:border-purple-200 dark:group-hover:border-purple-600',
                       )}
                     >
                       {teacherName}
@@ -1362,6 +1363,7 @@ export function Roundtable({
                       />
                     </div>
                     <button
+                      aria-label={t('pbl.v2.chat.send')}
                       onClick={handleSendMessage}
                       disabled={isSendCooldown}
                       className={cn(
@@ -1704,7 +1706,11 @@ export function Roundtable({
                           );
                         })()}
 
-                      <div ref={bubbleScrollRef} className="overflow-y-auto scrollbar-hide">
+                      <div
+                        ref={bubbleScrollRef}
+                        className="overflow-y-auto scrollbar-hide"
+                        tabIndex={0}
+                      >
                         {/* Agent name + audio indicator header */}
                         {bubbleRole !== 'user' && bubbleName && (
                           <div className="flex items-center gap-1 mb-0.5">
@@ -1870,6 +1876,7 @@ export function Roundtable({
           <div className="flex-none relative group/scroll">
             {/* Left arrow */}
             <button
+              aria-label={t('roundtable.previousLine')}
               onClick={() => {
                 agentScrollRef.current?.scrollBy({
                   left: -80,
@@ -2028,6 +2035,7 @@ export function Roundtable({
 
             {/* Right arrow */}
             <button
+              aria-label={t('roundtable.nextLine')}
               onClick={() => {
                 agentScrollRef.current?.scrollBy({
                   left: 80,
@@ -2097,6 +2105,7 @@ export function Roundtable({
               ) : (
                 <>
                   <button
+                    aria-label={t('roundtable.voiceInput')}
                     onClick={(e) => {
                       e.stopPropagation();
                       if (asrEnabled) handleToggleVoice();
@@ -2118,6 +2127,7 @@ export function Roundtable({
                     )}
                   </button>
                   <button
+                    aria-label={t('roundtable.textInput')}
                     onClick={(e) => {
                       e.stopPropagation();
                       handleToggleInput();

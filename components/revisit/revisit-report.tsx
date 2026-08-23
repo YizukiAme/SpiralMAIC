@@ -77,8 +77,8 @@ export function RevisitReport({ report, density, conceptLabelsById = {} }: Revis
           <Badge
             className={cn(
               report.q >= 0.75
-                ? 'bg-emerald-600 text-white hover:bg-emerald-600'
-                : 'bg-amber-500 text-white hover:bg-amber-500',
+                ? 'bg-emerald-700 text-white hover:bg-emerald-700'
+                : 'bg-amber-800 text-white hover:bg-amber-800',
             )}
           >
             {report.q >= 0.75 ? t('revisit.report.strong') : t('revisit.report.needsWork')}

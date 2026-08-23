@@ -425,7 +425,8 @@ export function streamLLM<T extends StreamTextParams>(
   // caller-supplied onFinish. totalUsage aggregates across steps.
   const usageMeta = buildUsageMeta(params, source);
   const callerOnFinish = (params as Record<string, unknown>).onFinish as
-    ((event: { totalUsage?: unknown; usage?: unknown }) => void | Promise<void>) | undefined;
+    | ((event: { totalUsage?: unknown; usage?: unknown }) => void | Promise<void>)
+    | undefined;
   const wrappedParams = {
     ...params,
     onFinish: async (event: { totalUsage?: unknown; usage?: unknown }) => {

@@ -76,7 +76,9 @@ COPY --from=deps /app/packages ./packages
 COPY . .
 COPY --from=deps /app/public/vendor ./public/vendor
 
-RUN pnpm build
+# Next's TypeScript pass can exceed Node's default ~2 GiB heap on the full
+# workspace even when the Docker builder has more memory available.
+RUN NODE_OPTIONS=--max-old-space-size=4096 pnpm build
 
 # ---- Stage 4: Runner ----
 FROM node:22-alpine AS runner

@@ -207,7 +207,7 @@ export function HeaderControls({
               ? 'border-violet-500/60 dark:border-violet-400/60'
               : 'border-gray-100/50 dark:border-gray-700/50',
             !canEdit && mode !== 'edit'
-              ? 'opacity-60 cursor-not-allowed'
+              ? 'cursor-not-allowed'
               : 'cursor-pointer hover:border-violet-400/60 dark:hover:border-violet-500/50',
           )}
           // When disabled (e.g. the course-complete placeholder), explain why
@@ -226,7 +226,7 @@ export function HeaderControls({
               'text-[11px] font-bold uppercase tracking-[0.14em] tabular-nums select-none transition-colors duration-200',
               mode === 'edit'
                 ? 'text-violet-600 dark:text-violet-300'
-                : 'text-gray-500 dark:text-gray-400',
+                : 'text-gray-600 dark:text-gray-400',
             )}
           >
             {t('edit.proMode')}

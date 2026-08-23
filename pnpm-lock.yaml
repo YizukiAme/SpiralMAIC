@@ -386,6 +386,9 @@ importers:
         specifier: ^5.0.10
         version: 5.0.11(@types/react@19.2.14)(immer@11.1.4)(react@19.2.8)(use-sync-external-store@1.6.0(react@19.2.8))
     devDependencies:
+      '@axe-core/playwright':
+        specifier: ^4.13.0
+        version: 4.13.0(playwright-core@1.62.1)
       '@eslint/compat':
         specifier: 2.1.0
         version: 2.1.0(eslint@10.9.0(jiti@2.7.0))
@@ -456,8 +459,8 @@ importers:
         specifier: 0.7.60
         version: 0.7.60(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.3.6))
       prettier:
-        specifier: 3.9.6
-        version: 3.9.6
+        specifier: 3.8.5
+        version: 3.8.5
       rollup:
         specifier: ^4.35.0
         version: 4.59.0
@@ -1503,6 +1506,11 @@ packages:
   '@aws/lambda-invoke-store@0.3.0':
     resolution: {integrity: sha512-sl4Bm6yiMNYrZKkqqDFWN0UfnWhlS8ivKxrYl+6t0gCLrqr8y3B2IqZZbFRkfaVVp7C/baApyh71P+LeE1A2sQ==}
     engines: {node: '>=18.0.0'}
+
+  '@axe-core/playwright@4.13.0':
+    resolution: {integrity: sha512-6YLx+kxXu5GJceG4ozFg+33a2EMTdjYwWGloJ3sb9Kta5pp+ZNS53uxGVog5JetIY8s++P5UrtX+cri+u0VAVg==}
+    peerDependencies:
+      playwright-core: '>= 1.0.0'
 
   '@babel/code-frame@7.29.0':
     resolution: {integrity: sha512-9NhCeYjq9+3uxgdtp20LSiJXJvN0FeCtNGpJxuMFZ1Kv3cWUNb6DOhJwUvcVCzKGR66cw4njwM6hrJLqgOwbcw==}
@@ -10905,8 +10913,8 @@ packages:
     engines: {node: '>=4'}
     hasBin: true
 
-  prettier@3.9.6:
-    resolution: {integrity: sha512-OpN0zzVdiaiAhxpuuj5efpIS4sY9j7bY6uR5mnj5yPzGkdkjNKSJeUThPb60Jw29QuAZgA4o+/iB49kFiaBX6g==}
+  prettier@3.8.5:
+    resolution: {integrity: sha512-zxcTTCedNGJM4R8sj/Cq/F0W/c4iE0afWBcBwMTRtw4WHYP9TWkYjdiH3npPRUYsXQCPR0hTU9yjovOu+E6EQA==}
     engines: {node: '>=14'}
     hasBin: true
 
@@ -14052,6 +14060,11 @@ snapshots:
   '@aws/lambda-invoke-store@0.2.4': {}
 
   '@aws/lambda-invoke-store@0.3.0': {}
+
+  '@axe-core/playwright@4.13.0(playwright-core@1.62.1)':
+    dependencies:
+      axe-core: 4.13.0
+      playwright-core: 1.62.1
 
   '@babel/code-frame@7.29.0':
     dependencies:
@@ -22128,7 +22141,7 @@ snapshots:
       onnxruntime-node: 1.23.2
       open: 10.2.0
       postcss: 8.5.23
-      prettier: 3.9.6
+      prettier: 3.8.5
       puppeteer-core: 25.5.0
       sharp: 0.34.5
     optionalDependencies:
@@ -24638,7 +24651,7 @@ snapshots:
 
   prettier@1.19.1: {}
 
-  prettier@3.9.6: {}
+  prettier@3.8.5: {}
 
   pretty-format@23.6.0:
     dependencies:

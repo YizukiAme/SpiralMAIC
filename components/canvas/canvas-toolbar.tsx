@@ -184,7 +184,7 @@ export function CanvasToolbar({
             <LayoutList className="w-3.5 h-3.5" />
           </button>
         )}
-        <span className="text-[11px] text-gray-400 dark:text-gray-500 tabular-nums select-none font-medium">
+        <span className="text-[11px] text-gray-600 dark:text-gray-400 tabular-nums select-none font-medium">
           {currentSceneIndex + 1}
           <span className="opacity-35 mx-px">/</span>
           {scenesCount}
@@ -241,6 +241,7 @@ export function CanvasToolbar({
                     {Math.round(effectiveVolume * 100)}
                   </span>
                   <input
+                    aria-label={t('toolbar.ttsTitle')}
                     type="range"
                     min={0}
                     max={1}

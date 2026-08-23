@@ -963,7 +963,11 @@ export default function RevisitChallengePage() {
           : allPagesPassed;
   const canvasOverlay =
     tailView === 'report' && report ? (
-      <div className="absolute inset-0 z-[130] overflow-auto bg-background p-6">
+      <div
+        className="absolute inset-0 z-[130] overflow-auto bg-background p-6"
+        aria-label={t('revisit.challenge.report')}
+        tabIndex={0}
+      >
         <RevisitReport
           report={report}
           density="full"
@@ -989,7 +993,7 @@ export default function RevisitChallengePage() {
       <>
         {currentPageState?.passed ? (
           <div className="absolute left-4 top-4 z-[120]">
-            <Badge className="gap-1 bg-emerald-600 text-white">
+            <Badge className="gap-1 bg-emerald-700 text-white">
               <CheckCircle2 className="size-3.5" />
               {t('revisit.challenge.gate.pass')}
             </Badge>

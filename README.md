@@ -74,7 +74,7 @@ exports. SpiralMAIC simply refuses to let all of that disappear after “Complet
 
 ## Run it
 
-You need Node.js `>= 20.9.0`, pnpm 10, and one model provider (cloud or local).
+You need Node.js `>= 22.13 < 23`, pnpm 10, and one model provider (cloud or local).
 
 ```bash
 git clone https://github.com/YizukiAme/SpiralMAIC.git
@@ -118,6 +118,10 @@ Optional PostgreSQL persistence and the isolated MP4 render service are availabl
 Docker Compose profiles. See the [storage guide](packages/@openmaic/storage/README.md) and
 [render-service guide](render-service/README.md).
 
+Shared deployments should set `ACCESS_CODE`. Local instances remain open when it is unset;
+when enabled, a verified browser stays signed in for up to seven days before asking again.
+See [the v0.4 upgrade guide](UPGRADING-v0.4.md) for compatibility and rollback notes.
+
 For slow networks, Docker builds accept `ALPINE_MIRROR` (an Alpine mirror hostname) and
 `NPM_REGISTRY` (a complete npm registry URL):
 
@@ -149,7 +153,8 @@ Useful checks:
 ```bash
 pnpm check
 pnpm lint
-npx tsc --noEmit
+pnpm typecheck
+pnpm typecheck:e2e
 pnpm check:i18n-keys
 pnpm test
 pnpm build

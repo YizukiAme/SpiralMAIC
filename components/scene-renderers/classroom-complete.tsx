@@ -377,6 +377,7 @@ export function ClassroomCompletePage({
       <section
         className="absolute inset-0 z-[105] overflow-auto"
         aria-label={t('classroomComplete.title')}
+        tabIndex={0}
       >
         {/* Single-shot announcement for screen readers — replaces the noisy
             outer aria-live region that used to wrap the live-updating counters. */}
