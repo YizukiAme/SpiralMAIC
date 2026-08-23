@@ -1,4 +1,5 @@
 import { defineConfig, globalIgnores } from 'eslint/config';
+import { fixupConfigRules } from '@eslint/compat';
 import nextVitals from 'eslint-config-next/core-web-vitals';
 import nextTs from 'eslint-config-next/typescript';
 
@@ -24,8 +25,8 @@ const AI_SDK_DYNAMIC_IMPORT_BAN = [
 ];
 
 const eslintConfig = defineConfig([
-  ...nextVitals,
-  ...nextTs,
+  ...fixupConfigRules(nextVitals),
+  ...fixupConfigRules(nextTs),
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:
@@ -49,8 +50,6 @@ const eslintConfig = defineConfig([
     '.superpowers/**',
     '.worktrees/**',
     '.scratch/**',
-    // Playwright e2e tests (not React code):
-    'e2e/**',
     // Isolated MP4 render service: its own package, tsconfig, and Node-only
     // deps (@hyperframes/producer). Linted/typechecked under render-service/.
     'render-service/**',
@@ -79,6 +78,13 @@ const eslintConfig = defineConfig([
           destructuredArrayIgnorePattern: '^_',
         },
       ],
+    },
+  },
+  {
+    files: ['e2e/**/*.ts'],
+    rules: {
+      // Playwright's route callback is named `use`; it is not a React hook.
+      'react-hooks/rules-of-hooks': 'off',
     },
   },
   // Package boundary (machine-enforced): @openmaic/renderer is a standalone,

@@ -221,7 +221,7 @@ describe('local bounded chunk executor', () => {
       executeRenderChunks(
         { ...paths, options, chunkCount: 3, maxParallelChunks: 2 },
         deps({
-          renderChunk: async (_planDir, index, outputPath) => {
+          renderChunk: async (_planDir, index, _outputPath) => {
             if (index === 0) throw new Error('injected failure');
             await new Promise((resolve) => setTimeout(resolve, 10));
             siblingSettled = true;

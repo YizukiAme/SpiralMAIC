@@ -54,7 +54,8 @@
     "access": "public"
   },
   "devDependencies": {
-    "typescript": "^5",
-    "vitest": "^4.1.8"
+    "@types/node": "^22",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vitest": "^4.1.11"
   }
 }

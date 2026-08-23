@@ -129,6 +129,9 @@ jobs:
             'tsc' 'npx tsc --noEmit' \
             'i18n' 'pnpm check:i18n-keys'
 
+      - name: E2E TypeScript
+        run: pnpm typecheck:e2e
+
       # Keep these sequential. Running root vitest alongside the storage
       # package on a 4-core runner made 5s-timeout tests flake (CPU
       # contention, not a product regression).
@@ -213,6 +216,10 @@ jobs:
       - name: TypeScript
         working-directory: render-service
         run: npm run typecheck
+
+      - name: ESLint
+        working-directory: render-service
+        run: npm run lint
 
       - name: Unit Tests
         working-directory: render-service
