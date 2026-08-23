@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 /**
  * POST /api/pbl/v2/instructor
  *
@@ -35,7 +36,7 @@ interface InstructorRequest {
   phase?: InstructorPhase;
 }
 
-export async function POST(req: NextRequest) {
+async function POSTHandler(req: NextRequest) {
   let body: InstructorRequest;
   try {
     body = (await req.json()) as InstructorRequest;
@@ -74,3 +75,5 @@ export async function POST(req: NextRequest) {
     { signal: req.signal },
   );
 }
+
+export const POST = withAccessCode(POSTHandler);

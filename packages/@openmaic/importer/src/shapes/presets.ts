@@ -8,8 +8,6 @@
  * (so 50000 = 50%).
  */
 
-import { shapeArc } from './shapeArc';
-
 type PresetShapeGenerator = (w: number, h: number, adjustments?: Map<string, number>) => string;
 
 /** Helper: get adjustment value or default, converting from 100000ths to fraction. */

@@ -16,7 +16,6 @@ export type TextShimmerProps = {
   spread?: number;
 };
 
-/* eslint-disable react-hooks/refs -- Ref-based cache for motion.create component identity */
 const ShimmerComponent = ({
   children,
   as: Component = 'p',
@@ -62,6 +61,5 @@ const ShimmerComponent = ({
     </MotionComponent>
   );
 };
-/* eslint-enable react-hooks/refs */
 
 export const Shimmer = memo(ShimmerComponent);

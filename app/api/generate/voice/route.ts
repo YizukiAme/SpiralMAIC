@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 /**
  * Auto-voice registration API (provider-neutral).
  *
@@ -35,7 +36,7 @@ const log = createLogger('Voice Registration API');
 
 export const maxDuration = 30;
 
-export async function POST(req: NextRequest) {
+async function POSTHandler(req: NextRequest) {
   let providerId: string | undefined;
   let voiceId: string | undefined;
   try {
@@ -151,3 +152,5 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
+export const POST = withAccessCode(POSTHandler);

@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 /**
  * Web Search API
  *
@@ -28,7 +29,7 @@ import { resolveWebSearchRouteBaseUrl } from '@/lib/server/web-search-config';
 
 const log = createLogger('WebSearch');
 
-export async function POST(req: NextRequest) {
+async function POSTHandler(req: NextRequest) {
   let query: string | undefined;
   try {
     const body = await req.json();
@@ -199,3 +200,5 @@ function getWebSearchEnvKey(providerId: WebSearchProviderId): string {
       return 'TAVILY_API_KEY';
   }
 }
+
+export const POST = withAccessCode(POSTHandler);

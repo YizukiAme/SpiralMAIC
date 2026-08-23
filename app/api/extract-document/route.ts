@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 import { NextRequest } from 'next/server';
 import {
   isServerConfiguredProvider,
@@ -104,7 +105,7 @@ function formatTimestamp(ms: number): string {
   return h > 0 ? `${String(h).padStart(2, '0')}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
-export async function POST(req: NextRequest) {
+async function POSTHandler(req: NextRequest) {
   let fileName: string | undefined;
   let resolvedProviderId: string | undefined;
   try {
@@ -341,3 +342,5 @@ export async function POST(req: NextRequest) {
     return apiError('PARSE_FAILED', 500, error instanceof Error ? error.message : 'Unknown error');
   }
 }
+
+export const POST = withAccessCode(POSTHandler);

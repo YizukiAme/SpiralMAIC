@@ -54,7 +54,7 @@ export function TextElement({ elementInfo, selectElement }: TextElementProps) {
           id: elementInfo.id,
           props: { height: realHeightCache },
         });
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- DOM measurement requires effect
+
         setRealHeightCache(-1);
       }
       if (elementInfo.vertical && realWidthCache !== -1) {

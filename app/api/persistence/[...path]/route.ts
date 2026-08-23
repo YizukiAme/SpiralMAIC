@@ -15,6 +15,7 @@ import {
   type PersistencePoolFactory,
 } from '@/lib/persistence/server-provider';
 import { APP_RUNTIME_PAYLOAD_VALIDATORS } from '@/lib/runtime/payload-validators';
+import { withAccessCode } from '@/lib/server/with-access-code';
 
 export const runtime = 'nodejs';
 
@@ -302,8 +303,8 @@ export async function handlePersistenceRequest(
   }
 }
 
-export const GET = (request: Request) => handlePersistenceRequest(request);
-export const POST = (request: Request) => handlePersistenceRequest(request);
-export const PUT = (request: Request) => handlePersistenceRequest(request);
-export const PATCH = (request: Request) => handlePersistenceRequest(request);
-export const DELETE = (request: Request) => handlePersistenceRequest(request);
+export const GET = withAccessCode((request: Request) => handlePersistenceRequest(request));
+export const POST = withAccessCode((request: Request) => handlePersistenceRequest(request));
+export const PUT = withAccessCode((request: Request) => handlePersistenceRequest(request));
+export const PATCH = withAccessCode((request: Request) => handlePersistenceRequest(request));
+export const DELETE = withAccessCode((request: Request) => handlePersistenceRequest(request));

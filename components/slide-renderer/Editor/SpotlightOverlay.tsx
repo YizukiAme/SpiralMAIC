@@ -77,7 +77,6 @@ export function SpotlightOverlay({ domIdPrefix = 'screen-element-' }: SpotlightO
   }, [spotlightElementId, domIdPrefix]);
 
   useLayoutEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- DOM measurement requires effect
     measure();
   }, [measure, elements]);
 

@@ -485,7 +485,6 @@ function SpeechClip({
 
   useEffect(() => {
     if (document.activeElement !== ref.current || !dirtyRef.current) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- sync external text in only when not mid-edit
       setVal(text);
       dirtyRef.current = false;
     }
@@ -604,11 +603,9 @@ function DiscussionClip({
   const topicDirty = useRef(false);
   const promptDirty = useRef(false);
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- adopt external topic only when not mid-edit
     if (!topicDirty.current) setTopicVal(topic);
   }, [topic]);
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- adopt external prompt only when not mid-edit
     if (!promptDirty.current) setPromptVal(prompt);
   }, [prompt]);
 

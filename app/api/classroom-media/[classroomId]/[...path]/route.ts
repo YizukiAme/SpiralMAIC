@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 import { promises as fs, createReadStream } from 'fs';
 import path from 'path';
 import { NextRequest, NextResponse } from 'next/server';
@@ -20,7 +21,7 @@ const MIME_TYPES: Record<string, string> = {
   '.aac': 'audio/aac',
 };
 
-export async function GET(
+async function GETHandler(
   _req: NextRequest,
   { params }: { params: Promise<{ classroomId: string; path: string[] }> },
 ) {
@@ -93,3 +94,5 @@ export async function GET(
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });
   }
 }
+
+export const GET = withAccessCode(GETHandler);

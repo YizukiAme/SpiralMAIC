@@ -1232,7 +1232,7 @@ function usePacedText(raw: string, opts: { readonly active: boolean }): string {
     rawRef.current = raw;
     if (!opts.active) {
       visibleRef.current = raw;
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional derived-state sync for paced text streaming
+
       setVisible(raw);
       return;
     }

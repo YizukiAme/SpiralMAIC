@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 /**
  * Scene Content Generation API
  *
@@ -32,7 +33,7 @@ const log = createLogger('Scene Content API');
 
 export const maxDuration = 300;
 
-export async function POST(req: NextRequest) {
+async function POSTHandler(req: NextRequest) {
   let outlineTitle: string | undefined;
   let resolvedModelString: string | undefined;
   try {
@@ -208,3 +209,5 @@ export async function POST(req: NextRequest) {
     return llmApiError(error);
   }
 }
+
+export const POST = withAccessCode(POSTHandler);

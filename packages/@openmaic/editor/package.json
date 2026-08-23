@@ -74,6 +74,8 @@
     "jsdom": "^29.1.1",
     "rollup": "^4.35.0",
     "rollup-plugin-preserve-directives": "^0.4.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
     "typescript": "^5",
     "vitest": "^4.1.8"
   }

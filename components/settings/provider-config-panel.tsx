@@ -88,7 +88,6 @@ export function ProviderConfigPanel({
 
   // Update local state when provider changes or initial values change
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- Sync local state from props on provider change
     setApiKey(initialApiKey);
 
     setBaseUrl(initialBaseUrl);

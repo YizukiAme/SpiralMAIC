@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 import { apiSuccess } from '@/lib/server/api-response';
 import { checkRenderServiceHealth } from '@/lib/server/render-service';
 
@@ -10,7 +11,9 @@ export const dynamic = 'force-dynamic';
  * disabled and the menu shows only "Download ZIP" rather than advertising an
  * MP4 export that would then fail. Never leaks the service URL to the client.
  */
-export async function GET() {
+async function GETHandler() {
   const enabled = await checkRenderServiceHealth();
   return apiSuccess({ enabled });
 }
+
+export const GET = withAccessCode(GETHandler);

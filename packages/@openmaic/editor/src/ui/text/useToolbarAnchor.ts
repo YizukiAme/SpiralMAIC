@@ -69,7 +69,6 @@ export function useToolbarAnchor(
 
   useLayoutEffect(() => {
     if (!elementId || typeof document === 'undefined') {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing a removed anchor is a layout lifecycle update.
       measure();
       return;
     }

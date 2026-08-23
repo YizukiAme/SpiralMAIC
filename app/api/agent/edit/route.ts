@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 /**
  * MAIC Agent — SSE transport endpoint.
  *
@@ -83,7 +84,7 @@ function toHistoryMessages(history: AgentEditBody['history']): AgentMessage[] {
   );
 }
 
-export async function POST(req: NextRequest) {
+async function POSTHandler(req: NextRequest) {
   if (!isMaicEditorEnabled()) {
     return new Response('Not found', { status: 404 });
   }
@@ -215,3 +216,5 @@ export async function POST(req: NextRequest) {
     },
   });
 }
+
+export const POST = withAccessCode(POSTHandler);

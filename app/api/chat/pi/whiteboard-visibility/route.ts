@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 import { NextRequest } from 'next/server';
 
 import { settleWhiteboardVisibility } from '@/lib/chat/pi/whiteboard-visibility';
@@ -28,7 +29,7 @@ function validBody(value: unknown): value is {
   );
 }
 
-export async function POST(req: NextRequest): Promise<Response> {
+async function POSTHandler(req: NextRequest): Promise<Response> {
   const principal = authenticatePersistenceHeaders(req.headers);
   if (!principal?.learnerKey) {
     return apiError('INVALID_CREDENTIALS', 401, 'Invalid persistence development binding');
@@ -54,3 +55,5 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
   return new Response(null, { status: 204 });
 }
+
+export const POST = withAccessCode(POSTHandler);

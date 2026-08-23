@@ -253,20 +253,15 @@ function buildDiagramGroup(
   }
 
   const CHILD_TAGS = new Set(['sp', 'pic', 'grpSp', 'graphicFrame', 'cxnSp']);
-  // Circular presets need isotropic scaling; tree/org-chart style diagrams should keep native axis scaling.
-  const CIRCULAR_PRESETS = new Set(['pie', 'arc', 'blockArc', 'donut', 'circularArrow']);
   const children: SafeXmlNode[] = [];
   let minX = Infinity;
   let minY = Infinity;
   let maxRight = -Infinity;
   let maxBottom = -Infinity;
-  let hasCircularPreset = false;
 
   for (const child of spTree.allChildren()) {
     if (CHILD_TAGS.has(child.localName)) {
       children.push(child);
-      const prst = child.child('spPr').child('prstGeom').attr('prst');
-      if (prst && CIRCULAR_PRESETS.has(prst)) hasCircularPreset = true;
       const b = readShapeBounds(child);
       if (b) {
         minX = Math.min(minX, b.x);
@@ -279,14 +274,6 @@ function buildDiagramGroup(
 
   const hasBounds =
     minX !== Infinity && minY !== Infinity && maxRight !== -Infinity && maxBottom !== -Infinity;
-
-  // Check if shapes extend significantly beyond the diagram frame (negative offsets or huge extents).
-  // When decorative shapes (e.g. blockArc) have large negative coordinates, including them in
-  // the bounding box distorts the layout. Fall back to frame-based coordinates in that case.
-  const bboxSpansNegative = hasBounds && (minX < 0 || minY < 0);
-  const bboxMuchLargerThanFrame =
-    hasBounds && (maxRight - minX > base.size.w * 2 || maxBottom - minY > base.size.h * 2);
-  const useFrameCoords = bboxSpansNegative || bboxMuchLargerThanFrame;
 
   // Use the graphicFrame's own dimensions as the child coordinate space.
   // Diagram shapes are positioned in the frame's coordinate space (EMU converted to px).

@@ -96,7 +96,7 @@ export function Canvas(_props: CanvasProps) {
   useEffect(() => {
     const newElements = elements ? JSON.parse(JSON.stringify(elements)) : [];
     elementListRef.current = newElements;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- Sync store elements to local state
+
     setElementList(newElements);
   }, [elements]);
 

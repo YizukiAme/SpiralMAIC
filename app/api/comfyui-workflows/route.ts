@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 /**
  * GET /api/comfyui-workflows
  *
@@ -13,7 +14,7 @@
 import { NextResponse } from 'next/server';
 import { listComfyuiWorkflows } from '@/lib/media/comfyui-workflows';
 
-export async function GET() {
+async function GETHandler() {
   try {
     return NextResponse.json({ workflows: await listComfyuiWorkflows() });
   } catch (err) {
@@ -21,3 +22,5 @@ export async function GET() {
     return NextResponse.json({ workflows: [] });
   }
 }
+
+export const GET = withAccessCode(GETHandler);

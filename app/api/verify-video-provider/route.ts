@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 /**
  * Verify Video Provider API
  *
@@ -28,7 +29,7 @@ import { validateUrlForSSRF } from '@/lib/server/ssrf-guard';
 
 const log = createLogger('VerifyVideoProvider');
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
   try {
     const providerId = (request.headers.get('x-video-provider') || 'seedance') as VideoProviderId;
     const model = request.headers.get('x-video-model') || undefined;
@@ -71,3 +72,5 @@ export async function POST(request: NextRequest) {
     return apiError('INTERNAL_ERROR', 500, `Connectivity test error: ${err}`);
   }
 }
+
+export const POST = withAccessCode(POSTHandler);

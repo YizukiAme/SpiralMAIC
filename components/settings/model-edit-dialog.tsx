@@ -49,7 +49,6 @@ export function ModelEditDialog({
   // Reset test status when dialog closes
   useEffect(() => {
     if (!open) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- Reset state when dialog closes
       setTestStatus('idle');
 
       setTestMessage('');

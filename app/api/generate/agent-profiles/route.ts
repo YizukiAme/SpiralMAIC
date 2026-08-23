@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 /**
  * Agent Profiles Generation API
  *
@@ -42,7 +43,7 @@ function stripCodeFences(text: string): string {
   return cleaned.trim();
 }
 
-export async function POST(req: NextRequest) {
+async function POSTHandler(req: NextRequest) {
   let stageName: string | undefined;
   let modelString: string | undefined;
   try {
@@ -279,3 +280,5 @@ Return a JSON object with this exact structure:
     return apiError('INTERNAL_ERROR', 500, error instanceof Error ? error.message : String(error));
   }
 }
+
+export const POST = withAccessCode(POSTHandler);

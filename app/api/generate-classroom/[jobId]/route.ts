@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 import { type NextRequest } from 'next/server';
 import { apiError, apiSuccess } from '@/lib/server/api-response';
 import {
@@ -11,7 +12,7 @@ const log = createLogger('ClassroomJob API');
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: NextRequest, context: { params: Promise<{ jobId: string }> }) {
+async function GETHandler(req: NextRequest, context: { params: Promise<{ jobId: string }> }) {
   let resolvedJobId: string | undefined;
   try {
     const { jobId } = await context.params;
@@ -52,3 +53,5 @@ export async function GET(req: NextRequest, context: { params: Promise<{ jobId: 
     );
   }
 }
+
+export const GET = withAccessCode(GETHandler);

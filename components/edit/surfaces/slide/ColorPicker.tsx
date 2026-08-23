@@ -76,7 +76,6 @@ export function ColorPicker({
     return () => channels.forEach((ev) => window.removeEventListener(ev, onUp));
   }, []);
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!isDragging.current) setColor(value);
   }, [value]);
 

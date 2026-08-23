@@ -61,7 +61,6 @@ export function SpotlightOverlay({
   }, [spotlightElementId, elementIdPrefix]);
 
   useLayoutEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- DOM measurement requires effect
     measure();
 
     const container = containerRef.current;

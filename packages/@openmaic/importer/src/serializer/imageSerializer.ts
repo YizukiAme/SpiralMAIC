@@ -28,14 +28,6 @@ function isUnsupportedFormat(path: string): boolean {
 }
 
 /**
- * Check if a file path is an EMF image.
- */
-function isEmfFormat(path: string): boolean {
-  const ext = path.split('.').pop()?.toLowerCase() || '';
-  return ext === 'emf';
-}
-
-/**
  * Pull the endpoint of every path-op child of <a:path> (moveTo/lnTo/cubicBezTo/
  * quadBezTo) into a flat [x, y] list. The endpoint is always the LAST <a:pt>
  * child of the op. arcTo / close contribute no useful endpoint so are skipped.

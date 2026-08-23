@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 import {
   getServerProviders,
   getServerTTSProviders,
@@ -27,7 +28,7 @@ function noStore(response: Response): Response {
   return response;
 }
 
-export async function GET() {
+async function GETHandler() {
   try {
     const providers: Record<
       string,
@@ -86,3 +87,5 @@ export async function GET() {
     );
   }
 }
+
+export const GET = withAccessCode(GETHandler);

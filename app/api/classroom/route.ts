@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 import { type NextRequest } from 'next/server';
 import { randomUUID } from 'crypto';
 import { apiSuccess, apiError, API_ERROR_CODES } from '@/lib/server/api-response';
@@ -11,7 +12,7 @@ import { createLogger } from '@/lib/logger';
 
 const log = createLogger('Classroom API');
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
   let stageId: string | undefined;
   let sceneCount: number | undefined;
   try {
@@ -48,7 +49,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function GET(request: NextRequest) {
+async function GETHandler(request: NextRequest) {
   try {
     const id = request.nextUrl.searchParams.get('id');
 
@@ -83,3 +84,6 @@ export async function GET(request: NextRequest) {
     );
   }
 }
+
+export const POST = withAccessCode(POSTHandler);
+export const GET = withAccessCode(GETHandler);
