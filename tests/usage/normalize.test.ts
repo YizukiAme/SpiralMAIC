@@ -72,26 +72,6 @@ describe('normalizeUsage', () => {
     });
   });
 
-  it('falls back to deprecated cachedInputTokens / reasoningTokens flat fields', () => {
-    // Some providers populate the deprecated flat fields rather than the nested details.
-    const usage = {
-      inputTokens: 30,
-      outputTokens: 12,
-      totalTokens: 42,
-      inputTokenDetails: {
-        noCacheTokens: undefined,
-        cacheReadTokens: undefined,
-        cacheWriteTokens: undefined,
-      },
-      outputTokenDetails: { textTokens: undefined, reasoningTokens: undefined },
-      cachedInputTokens: 7,
-      reasoningTokens: 3,
-    } as LanguageModelUsage;
-    const result = normalizeUsage(usage);
-    expect(result.cacheReadTokens).toBe(7);
-    expect(result.reasoningTokens).toBe(3);
-  });
-
   it('tolerates a null/undefined usage object', () => {
     expect(normalizeUsage(undefined)).toEqual({
       inputTokens: 0,

@@ -20,12 +20,10 @@ function num(value: number | undefined | null): number {
 }
 
 /**
- * Extracts the four-class token shape from an AI SDK v6 `LanguageModelUsage`.
+ * Extracts the four-class token shape from an AI SDK v7 `LanguageModelUsage`.
  *
- * Prefers the nested `inputTokenDetails` / `outputTokenDetails` fields and
- * falls back to the deprecated flat `cachedInputTokens` / `reasoningTokens`
- * for providers that only populate those. Any missing field becomes 0, so a
- * partial or absent usage object yields an all-zero record rather than NaN.
+ * Any missing field becomes 0, so a partial or absent usage object yields an
+ * all-zero record rather than NaN.
  */
 export function normalizeUsage(usage: LanguageModelUsage | undefined | null): NormalizedUsage {
   if (!usage) {
@@ -38,9 +36,9 @@ export function normalizeUsage(usage: LanguageModelUsage | undefined | null): No
     };
   }
 
-  const cacheRead = num(usage.inputTokenDetails?.cacheReadTokens) || num(usage.cachedInputTokens);
+  const cacheRead = num(usage.inputTokenDetails?.cacheReadTokens);
   const cacheCreation = num(usage.inputTokenDetails?.cacheWriteTokens);
-  const reasoning = num(usage.outputTokenDetails?.reasoningTokens) || num(usage.reasoningTokens);
+  const reasoning = num(usage.outputTokenDetails?.reasoningTokens);
 
   return {
     inputTokens: num(usage.inputTokens),

@@ -5,7 +5,7 @@
  */
 
 import { generateText, streamText } from 'ai';
-import type { GenerateTextResult, JSONValue, LanguageModel, StreamTextResult } from 'ai';
+import type { JSONValue, LanguageModel } from 'ai';
 import { createLogger } from '@/lib/logger';
 import { PROVIDERS } from './providers';
 import { thinkingContext } from './thinking-context';
@@ -27,6 +27,8 @@ export type { ThinkingConfig } from '@/lib/types/provider';
 // Re-export the parameter types accepted by AI SDK
 type GenerateTextParams = Parameters<typeof generateText>[0];
 type StreamTextParams = Parameters<typeof streamText>[0];
+type GenerateTextResponse = Awaited<ReturnType<typeof generateText>>;
+type StreamTextResponse = ReturnType<typeof streamText>;
 
 function _extractRequestInfo(params: GenerateTextParams | StreamTextParams) {
   const tools = params.tools ? Object.keys(params.tools as Record<string, unknown>) : undefined;
@@ -346,13 +348,11 @@ export async function callLLM<T extends GenerateTextParams>(
   source: string,
   retryOptions?: LLMRetryOptions,
   thinking?: ThinkingConfig,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-): Promise<GenerateTextResult<any, any>> {
+): Promise<GenerateTextResponse> {
   const maxAttempts = (retryOptions?.retries ?? 0) + 1;
   const validate = retryOptions?.validate ?? (maxAttempts > 1 ? DEFAULT_VALIDATE : undefined);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let lastResult: GenerateTextResult<any, any> | undefined;
+  let lastResult: GenerateTextResponse | undefined;
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -417,8 +417,7 @@ export function streamLLM<T extends StreamTextParams>(
   params: T,
   source: string,
   thinking?: ThinkingConfig,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-): StreamTextResult<any, any> {
+): StreamTextResponse {
   // Resolve effective thinking config and wrap in thinkingContext
   const effectiveThinking = thinking ?? getGlobalThinkingConfig();
 
@@ -426,8 +425,7 @@ export function streamLLM<T extends StreamTextParams>(
   // caller-supplied onFinish. totalUsage aggregates across steps.
   const usageMeta = buildUsageMeta(params, source);
   const callerOnFinish = (params as Record<string, unknown>).onFinish as
-    | ((event: { totalUsage?: unknown; usage?: unknown }) => void | Promise<void>)
-    | undefined;
+    ((event: { totalUsage?: unknown; usage?: unknown }) => void | Promise<void>) | undefined;
   const wrappedParams = {
     ...params,
     onFinish: async (event: { totalUsage?: unknown; usage?: unknown }) => {

@@ -24,6 +24,10 @@ const nextConfig: NextConfig = {
   ],
   experimental: {
     proxyClientMaxBodySize: '200mb',
+    // Next still discovers the CLI through the `typescript` API package.
+    // Keep its built-in check on the TS 6 API companion; `pnpm typecheck`
+    // independently runs the TypeScript 7 CLI used by CI and local gates.
+    useTypeScriptCli: false,
   },
   async headers() {
     const extraAncestors = process.env.ALLOWED_FRAME_ANCESTORS?.trim();
