@@ -1,5 +1,5 @@
 import Dexie, { type EntityTable, type Table } from 'dexie';
-import { DSL_VERSION } from '@openmaic/dsl';
+import { migrate } from '@openmaic/dsl';
 import type {
   Scene,
   SceneType,
@@ -20,7 +20,6 @@ import type {
 import type { SceneOutline } from '@/lib/types/generation';
 import type { VoiceDesign } from '@/lib/audio/voice-design';
 import type { UIMessage } from 'ai';
-import type { AgentEditSessionRecord } from '@/lib/agent/client/agent-edit-session-types';
 import type { OvertimeExtension, OvertimeSceneProvenance } from '@/lib/overtime/types';
 import { createLogger } from '@/lib/logger';
 import { beginStageRuntimeDeletionSafely, getRuntimeStore } from '@/lib/runtime/store';
@@ -179,6 +178,18 @@ export interface ChatSessionRecord {
   lastActionIndex?: number;
 }
 
+/** Compatibility-only shape for the retired editor right-rail table. The
+ * table remains in the Dexie schema so deleting a course can clean up rows
+ * created by older clients; no runtime writes or reads it anymore. */
+interface LegacyAgentEditSessionRecord {
+  id: string;
+  stageId: string;
+  title: string;
+  messages: unknown[];
+  createdAt: number;
+  updatedAt: number;
+}
+
 /**
  * PlaybackState table - Playback state snapshot (at most one per stage)
  */
@@ -309,7 +320,7 @@ class MAICDatabase extends Dexie {
   generatedAgents!: EntityTable<GeneratedAgentRecord, 'id'>;
   voiceProfiles!: EntityTable<VoiceProfileRecord, 'id'>;
   autoVoiceCache!: EntityTable<AutoVoiceCacheRecord, 'voiceId'>;
-  agentEditSessions!: EntityTable<AgentEditSessionRecord, 'id'>;
+  agentEditSessions!: EntityTable<LegacyAgentEditSessionRecord, 'id'>;
   overtimeExtensions!: EntityTable<OvertimeExtension, 'id'>;
   folders!: EntityTable<FolderRecord, 'id'>;
   stageFolders!: EntityTable<StageFolderMembership, 'stageId'>;
@@ -693,11 +704,15 @@ export async function exportDatabase(chatOptions: ChatStorageOptions = {}): Prom
           const snapshot = await getLegacyDocumentStore().read(stage.id);
           if (!snapshot) return null;
           const { stage: canonicalStage } = canonicalizeLegacyStage(snapshot.stage);
-          const document: AppDocument = {
+          // Leave the document unstamped and let the ladder stamp it: the
+          // stamp must be earned by actually running the migrations. A
+          // hand-assigned DSL_VERSION on a payload the ladder never walked
+          // reads as current on restore and permanently skips real payload
+          // transforms (the 0.3.0 legacy-line strip was the first).
+          const document: AppDocument = migrate({
             stage: canonicalStage,
             scenes: snapshot.scenes.map(canonicalizeLegacyScene).sort((a, b) => a.order - b.order),
-            dslVersion: DSL_VERSION,
-          };
+          }) as AppDocument;
           if (snapshot.outline) document.outline = canonicalizeLegacyOutline(snapshot.outline);
           return document;
         }),

@@ -12,9 +12,13 @@ import { cn } from '@/lib/utils';
 import { useStageStore } from '@/lib/store/stage';
 import { useSettingsStore } from '@/lib/store/settings';
 import { useAgentRegistry } from '@/lib/orchestration/registry/store';
-import { getEnabledProvidersWithVoices } from '@/lib/audio/voice-resolver';
+import {
+  getEnabledProvidersWithVoices,
+  resolveNarratorVoiceForGeneration,
+} from '@/lib/audio/voice-resolver';
+import { isQwenCloneVoice, resolveTTSModelForVoice } from '@/lib/audio/constants';
 import { isTTSProviderEnabled } from '@/lib/audio/provider-enablement';
-import { useVoxCPMVoiceProfiles } from '@/lib/audio/voxcpm-voices';
+import { useAllVoiceProfiles } from '@/lib/audio/voxcpm-voices';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import {
   fetchSceneActions,
@@ -30,6 +34,7 @@ import {
   storeImages,
 } from '@/lib/utils/image-storage';
 import { buildModelRequestHeaders, getCurrentModelConfig } from '@/lib/utils/model-config';
+import { resolveSessionDocumentSources } from '@/lib/document/session-sources';
 import { MAX_VISION_IMAGES } from '@/lib/constants/generation';
 import {
   MAX_DOCUMENT_BUNDLE_FILES,
@@ -91,22 +96,6 @@ type ParsedDocumentResponseImage = {
   height?: number;
 };
 
-function legacySourceFromSession(session: GenerationSessionState): SessionDocumentSource[] {
-  if (session.documentSources?.length) return session.documentSources;
-  if (!session.pdfStorageKey) return [];
-  return [
-    {
-      id: 'source_1',
-      name: session.pdfFileName || 'document.pdf',
-      size: 0,
-      mimeType: session.documentMimeType || 'application/pdf',
-      order: 1,
-      storageKey: session.pdfStorageKey,
-      providerId: session.pdfProviderId,
-    },
-  ];
-}
-
 function validateDocumentSources(
   sources: SessionDocumentSource[],
   t: (key: string, values?: Record<string, unknown>) => string,
@@ -144,7 +133,7 @@ function GenerationPreviewContent() {
   // Combined with `reviewOutlineEnabled` to decide whether the post-stream timer fires.
   const outlineReviewIntentRef = useRef(false);
   const allowRevisitAutoStartRef = useRef(false);
-  const { profiles: voxcpmProfiles } = useVoxCPMVoiceProfiles();
+  const { profiles: voiceProfiles } = useAllVoiceProfiles();
 
   const [session, setSession] = useState<GenerationSessionState | null>(null);
   const [sessionLoaded, setSessionLoaded] = useState(false);
@@ -346,14 +335,35 @@ function GenerationPreviewContent() {
 
   const getAvailableVoicesForAgentGeneration = () => {
     const settings = useSettingsStore.getState();
-    const providers = getEnabledProvidersWithVoices(settings.ttsProvidersConfig, voxcpmProfiles);
+    const providers = getEnabledProvidersWithVoices(settings.ttsProvidersConfig, voiceProfiles);
     return providers.flatMap((provider) =>
-      provider.voices.map((voice) => ({
-        providerId: provider.providerId,
-        voiceId: voice.id,
-        voiceName: voice.name,
-        voiceLanguage: voice.language,
-      })),
+      provider.voices.map((voice) => {
+        const cloneModelGroup =
+          provider.providerId === 'qwen-tts' && isQwenCloneVoice(voice.id)
+            ? provider.modelGroups.find((group) =>
+                group.voices.some((groupVoice) => groupVoice.id === voice.id),
+              )
+            : undefined;
+        const modelId = cloneModelGroup
+          ? resolveTTSModelForVoice(provider.providerId, voice.id, cloneModelGroup.modelId)
+          : undefined;
+        return {
+          providerId: provider.providerId,
+          ...(modelId ? { modelId } : {}),
+          voiceId: voice.id,
+          voiceName: voice.name,
+          voiceLanguage: voice.language,
+        };
+      }),
+    );
+  };
+
+  const getNarratorVoiceForAgentGeneration = () => {
+    const settings = useSettingsStore.getState();
+    return resolveNarratorVoiceForGeneration(
+      settings.ttsProviderId,
+      settings.ttsVoice,
+      settings.ttsProvidersConfig[settings.ttsProviderId],
     );
   };
 
@@ -617,7 +627,7 @@ function GenerationPreviewContent() {
       }
 
       // Determine if we need the document analysis step
-      const documentSources = legacySourceFromSession(currentSession);
+      const documentSources = resolveSessionDocumentSources(currentSession);
       const hasPdfToAnalyze = documentSources.length > 0 && !currentSession.pdfText;
       // If no document to analyze, skip to the next available step
       if (!hasPdfToAnalyze) {
@@ -632,27 +642,6 @@ function GenerationPreviewContent() {
         const sortedDocumentSources = [...documentSources].sort((a, b) => a.order - b.order);
         const parsedParts = await Promise.all(
           sortedDocumentSources.map(async (source): Promise<ParsedDocumentPart> => {
-            const documentBlob = await loadDocumentBlob(source.storageKey);
-            if (!documentBlob) {
-              throw new Error(t('generation.courseMaterialLoadFailed'));
-            }
-
-            if (!(documentBlob instanceof Blob) || documentBlob.size === 0) {
-              log.error('Invalid course material blob:', {
-                source: source.name,
-                type: typeof documentBlob,
-                size: documentBlob instanceof Blob ? documentBlob.size : 'N/A',
-              });
-              throw new Error(t('generation.courseMaterialLoadFailed'));
-            }
-
-            const documentFile = new File([documentBlob], source.name || 'document.pdf', {
-              type: source.mimeType || documentBlob.type || 'application/pdf',
-            });
-
-            const parseFormData = new FormData();
-            parseFormData.append('file', documentFile);
-
             const providerId = source.providerId || currentSession.pdfProviderId;
             const legacySourceConfig = (
               source as SessionDocumentSource & {
@@ -665,38 +654,38 @@ function GenerationPreviewContent() {
               }
             ).providerConfig;
             const providerConfig = currentSession.pdfProviderConfig || legacySourceConfig;
+            const documentBlob = await loadDocumentBlob(source.storageKey);
+            if (!(documentBlob instanceof Blob) || documentBlob.size === 0) {
+              throw new Error(t('generation.courseMaterialLoadFailed'));
+            }
+            const documentFile = new File([documentBlob], source.name || 'document.pdf', {
+              type: source.mimeType || documentBlob.type || 'application/pdf',
+            });
+            const parseFormData = new FormData();
+            parseFormData.append('file', documentFile);
             if (providerId) parseFormData.append('providerId', providerId);
-            if (providerConfig?.apiKey?.trim()) {
+            if (providerConfig?.apiKey?.trim())
               parseFormData.append('apiKey', providerConfig.apiKey);
-            }
-            if (providerConfig?.baseUrl?.trim()) {
+            if (providerConfig?.baseUrl?.trim())
               parseFormData.append('baseUrl', providerConfig.baseUrl);
-            }
-            // AliDocMind uses AK/SK instead of a single apiKey.
             if (providerConfig?.accessKeyId?.trim()) {
               parseFormData.append('accessKeyId', providerConfig.accessKeyId);
             }
             if (providerConfig?.accessKeySecret?.trim()) {
               parseFormData.append('accessKeySecret', providerConfig.accessKeySecret);
             }
-
             const parseResponse = await fetch('/api/extract-document', {
               method: 'POST',
               body: parseFormData,
               signal,
             });
-
-            if (!parseResponse.ok) {
-              const errorData = await parseResponse.json();
-              throw new Error(errorData.error || t('generation.courseMaterialParseFailed'));
-            }
-
+            if (!parseResponse.ok) throw new Error(t('generation.courseMaterialParseFailed'));
             const parseResult = await parseResponse.json();
             if (!parseResult.success || !parseResult.data) {
               throw new Error(t('generation.courseMaterialParseFailed'));
             }
-
-            const rawImages = parseResult.data.metadata?.pdfImages;
+            const parseData = parseResult.data;
+            const rawImages = parseData.metadata?.pdfImages;
             const images = rawImages
               ? rawImages.map((img: ParsedDocumentResponseImage) => ({
                   id: img.id,
@@ -706,7 +695,7 @@ function GenerationPreviewContent() {
                   width: img.width,
                   height: img.height,
                 }))
-              : ((parseResult.data.images as string[] | undefined) ?? []).map((src, i) => ({
+              : ((parseData.images as string[] | undefined) ?? []).map((src, i) => ({
                   id: `img_${i + 1}`,
                   src,
                   pageNumber: 1,
@@ -722,9 +711,9 @@ function GenerationPreviewContent() {
                 order: source.order,
                 providerId,
               },
-              text: parseResult.data.text as string,
-              rawTextLength: (parseResult.data.text as string).length,
-              pageCount: parseResult.data.metadata?.pageCount,
+              text: parseData.text as string,
+              rawTextLength: (parseData.text as string).length,
+              pageCount: parseData.metadata?.pageCount,
               images,
             };
           }),
@@ -831,7 +820,7 @@ function GenerationPreviewContent() {
         activeSteps = getActiveSteps(currentSession);
       }
 
-      // Load imageMapping early (needed for both outline and scene generation)
+      // Load imageMapping early (needed for both outline and scene generation).
       let imageMapping: ImageMapping = {};
       if (currentSession.imageStorageIds && currentSession.imageStorageIds.length > 0) {
         log.debug('Loading images from IndexedDB');
@@ -1075,6 +1064,7 @@ function GenerationPreviewContent() {
                   languageDirective:
                     languageDirective || 'Teach in the language that matches the user requirement.',
                   availableVoices: getAvailableVoicesForAgentGeneration(),
+                  narratorVoice: getNarratorVoiceForAgentGeneration(),
                 }),
               ),
             ),

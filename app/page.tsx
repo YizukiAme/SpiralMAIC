@@ -27,6 +27,7 @@ import {
   X,
   Presentation,
   BrainCircuit,
+  Loader2,
 } from 'lucide-react';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { LanguageSwitcher } from '@/components/language-switcher';
@@ -43,7 +44,10 @@ import { useTheme } from '@/lib/hooks/use-theme';
 import { nanoid } from 'nanoid';
 import { deleteDocumentBlob, storeDocumentBlob } from '@/lib/utils/image-storage';
 import { normalizeDocumentMimeType } from '@/lib/document/mime';
-import { dedupeCourseMaterialFiles } from '@/lib/document/course-materials';
+import {
+  courseMaterialFingerprint,
+  dedupeCourseMaterialFiles,
+} from '@/lib/document/course-materials';
 import type {
   SelectedCourseMaterial,
   SessionDocumentSource,
@@ -81,7 +85,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useDraftCache } from '@/lib/hooks/use-draft-cache';
 import { SpeechButton } from '@/components/audio/speech-button';
 import { useImportClassroom } from '@/lib/import/use-import-classroom';
-import { isPptxImportEnabled, shouldShowVocationalTestUi } from '@/lib/config/feature-flags';
+import {
+  isProWorkbenchEnabled,
+  isPptxImportEnabled,
+  shouldShowVocationalTestUi,
+} from '@/lib/config/feature-flags';
 import { useImportPptx } from '@/lib/import/use-import-pptx';
 import { loadLessonMemorySummaries } from '@/lib/revisit/client';
 import type { LessonMemorySummary } from '@/lib/revisit/types';
@@ -111,6 +119,12 @@ import { RevisitReviewPanel as SpiralReviewPanel } from '@/components/revisit/re
 import { createOrGetRevisitAttempt, listRevisitAttempts } from '@/lib/revisit/attempt-store';
 import { resolveActiveRevisitScope } from '@/lib/revisit/clock';
 import { serializeRevisitScope } from '@/lib/revisit/scope';
+import { ProBadge } from '@/components/workbench/ProBadge';
+import { arrivedByProSwap, startProSwap } from '@/lib/workbench/pro-swap';
+import {
+  readLastWorkspaceSessionId,
+  workspaceResumeHref,
+} from '@/lib/workbench/workspace-session-memory';
 
 const log = createLogger('Home');
 
@@ -122,6 +136,9 @@ const INTERACTIVE_MODE_STORAGE_KEY = 'interactiveModeEnabled';
 // yet, so the flow only logs the parsed slides. Hide the entry point behind a
 // flag until it's wired end-to-end, so the UI doesn't expose a no-op button.
 const PPTX_IMPORT_ENABLED = isPptxImportEnabled();
+
+/** The configured runtime probe result, retained across client navigations. */
+let workbenchRuntimeCache: boolean | null = null;
 
 interface FormState {
   courseMaterials: SelectedCourseMaterial[];
@@ -143,7 +160,39 @@ function HomePage() {
   const { t } = useI18n();
   const { theme, setTheme } = useTheme();
   const router = useRouter();
+  // Do not replay the classic hero's entrance after the route handoff already
+  // carried the lockup and composer into place.
+  const [swapped] = useState(arrivedByProSwap);
+  const heroEnter = (from: Record<string, number>) => (swapped ? false : from);
   const showVocationalTestUi = shouldShowVocationalTestUi();
+  const workbenchBuildEnabled = isProWorkbenchEnabled();
+  const [workbenchRuntimeEnabled, setWorkbenchRuntimeEnabled] = useState(
+    workbenchRuntimeCache === true,
+  );
+  useEffect(() => {
+    if (!workbenchBuildEnabled || workbenchRuntimeCache !== null) return;
+    let cancelled = false;
+    fetch('/api/agent/runtime')
+      .then((response) => (response.ok ? response.json() : null))
+      .then((body) => {
+        workbenchRuntimeCache = body?.enabled === true;
+        if (!cancelled) setWorkbenchRuntimeEnabled(workbenchRuntimeCache);
+      })
+      .catch(() => {
+        // A failed probe keeps the entry hidden and allows a later visit to retry.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workbenchBuildEnabled]);
+  const workbenchEntryEnabled = workbenchBuildEnabled && workbenchRuntimeEnabled;
+  const enterWorkbench = () => {
+    const href = workspaceResumeHref(readLastWorkspaceSessionId());
+    startProSwap(href, (next) => router.push(next));
+  };
+  useEffect(() => {
+    if (workbenchEntryEnabled) router.prefetch('/workspace');
+  }, [router, workbenchEntryEnabled]);
   const [form, setForm] = useState<FormState>(initialFormState);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<
@@ -215,6 +264,12 @@ function HomePage() {
 
   const [themeOpen, setThemeOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // True while the Generate click drains upload-time ingests and builds the
+  // generation session. Doubles as the guard flag that freezes the course
+  // material set for the duration of prep and as the switch that disables the
+  // toolbar's add/remove affordances, so the session is always built from a
+  // set that cannot change under it.
+  const [preparingGenerate, setPreparingGenerate] = useState(false);
   const [classrooms, setClassrooms] = useState<StageListItem[]>([]);
   const [memorySummaries, setMemorySummaries] = useState<Record<string, LessonMemorySummary>>({});
   const [revisitPanelOpen, setRevisitPanelOpen] = useState(false);
@@ -764,26 +819,45 @@ function HomePage() {
   };
 
   const addCourseMaterials = (files: File[]) => {
-    setForm((prev) => {
-      const dedupedFiles = dedupeCourseMaterialFiles(prev.courseMaterials, files);
-      const startOrder = prev.courseMaterials.length + 1;
-      const additions = dedupedFiles.map((file, index) => ({
-        id: nanoid(8),
-        file,
-        name: file.name,
-        size: file.size,
-        lastModified: file.lastModified,
-        type: file.type,
-        order: startOrder + index,
-      }));
+    // The set is frozen for the duration of generate-prep: adding is inert
+    // while `preparingGenerate` is set (the toolbar affordance is disabled
+    // via the same state), so nothing can slip into the set mid-prep.
+    if (preparingGenerate) return;
+    const dedupedFiles = dedupeCourseMaterialFiles(form.courseMaterials, files);
+    const startOrder = form.courseMaterials.length + 1;
+    const additions = dedupedFiles.map((file, index) => ({
+      id: nanoid(8),
+      file,
+      name: file.name,
+      size: file.size,
+      lastModified: file.lastModified,
+      type: file.type,
+      order: startOrder + index,
+    }));
 
-      return additions.length > 0
-        ? { ...prev, courseMaterials: [...prev.courseMaterials, ...additions] }
-        : prev;
+    if (additions.length === 0) return;
+    setForm((prev) => {
+      // Pure updater: drop any addition the latest state already carries — by
+      // id (a replayed or superseded update) or by content fingerprint (two
+      // addCourseMaterials calls in one render batch both dedupe against the
+      // same stale closure list, so the same file could otherwise enter twice
+      // under two ids and ingest/extract twice) — then append the rest.
+      const missing = additions.filter((addition) => {
+        if (prev.courseMaterials.some((item) => item.id === addition.id)) return false;
+        return !prev.courseMaterials.some(
+          (item) => courseMaterialFingerprint(item) === courseMaterialFingerprint(addition),
+        );
+      });
+      if (missing.length === 0) return prev;
+      return { ...prev, courseMaterials: [...prev.courseMaterials, ...missing] };
     });
   };
 
   const removeCourseMaterial = (id: string) => {
+    // The set is frozen for the duration of generate-prep: removing is inert
+    // while `preparingGenerate` is set (the toolbar affordance is disabled
+    // via the same state), so nothing can slip out of the set mid-prep.
+    if (preparingGenerate) return;
     setForm((prev) => ({
       ...prev,
       courseMaterials: prev.courseMaterials
@@ -797,6 +871,7 @@ function HomePage() {
     // (requires a usable provider), and under the #580 invariant a usable
     // provider always has a concrete model. State A (no usable provider)
     // surfaces through the toolbar's single Configure-Provider affordance.
+    if (preparingGenerate) return;
     if (!form.requirement.trim()) {
       setError(t('upload.requirementRequired'));
       return;
@@ -804,6 +879,30 @@ function HomePage() {
 
     setError(null);
 
+    // The material list and the extractor provider config are frozen for the
+    // duration of prep: `preparingGenerate` makes add/remove inert and
+    // disables the toolbar affordances (including the extractor Select and the
+    // web-search toggle), so neither can change under the session build below.
+    // Capture both at click time and build the session from this snapshot,
+    // never from live form state or live store state.
+    const frozenMaterials = [...form.courseMaterials].sort((a, b) => a.order - b.order);
+    const settingsSnapshot = useSettingsStore.getState();
+    const frozenPdfProviderId = settingsSnapshot.pdfProviderId;
+    const frozenPdfProviderConfig = settingsSnapshot.pdfProvidersConfig?.[
+      settingsSnapshot.pdfProviderId
+    ]
+      ? {
+          apiKey: settingsSnapshot.pdfProvidersConfig[settingsSnapshot.pdfProviderId].apiKey,
+          baseUrl: settingsSnapshot.pdfProvidersConfig[settingsSnapshot.pdfProviderId].baseUrl,
+          accessKeyId:
+            settingsSnapshot.pdfProvidersConfig[settingsSnapshot.pdfProviderId].accessKeyId,
+          accessKeySecret:
+            settingsSnapshot.pdfProvidersConfig[settingsSnapshot.pdfProviderId].accessKeySecret,
+        }
+      : undefined;
+
+    // Flip the generating UI state before material bytes are copied locally.
+    setPreparingGenerate(true);
     try {
       const userProfile = useUserProfileStore.getState();
       const requirements: UserRequirements = {
@@ -821,24 +920,16 @@ function HomePage() {
         | { apiKey?: string; baseUrl?: string; accessKeyId?: string; accessKeySecret?: string }
         | undefined;
 
-      if (form.courseMaterials.length > 0) {
-        const settings = useSettingsStore.getState();
-        pdfProviderId = settings.pdfProviderId;
-        const providerCfg = settings.pdfProvidersConfig?.[settings.pdfProviderId];
-        if (providerCfg) {
-          pdfProviderConfig = {
-            apiKey: providerCfg.apiKey,
-            baseUrl: providerCfg.baseUrl,
-            accessKeyId: providerCfg.accessKeyId,
-            accessKeySecret: providerCfg.accessKeySecret,
-          };
-        }
+      if (frozenMaterials.length > 0) {
+        // The session is built from the click-time snapshot (frozen above),
+        // never from live store state.
+        pdfProviderId = frozenPdfProviderId;
+        pdfProviderConfig = frozenPdfProviderConfig;
 
         const storedDocumentKeys: string[] = [];
         try {
           documentSources = [];
-          const orderedMaterials = [...form.courseMaterials].sort((a, b) => a.order - b.order);
-          for (const [index, item] of orderedMaterials.entries()) {
+          for (const [index, item] of frozenMaterials.entries()) {
             const storageKey = await storeDocumentBlob(item.file);
             storedDocumentKeys.push(storageKey);
             documentSources.push({
@@ -883,6 +974,10 @@ function HomePage() {
     } catch (err) {
       log.error('Error preparing generation:', err);
       setError(err instanceof Error ? err.message : t('upload.generateFailed'));
+    } finally {
+      // Unfreeze the set once prep settles (navigation unmounts this page, so
+      // this is normally a no-op on the way out).
+      setPreparingGenerate(false);
     }
   };
 
@@ -919,7 +1014,7 @@ function HomePage() {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
       e.preventDefault();
-      if (canGenerate) handleGenerate();
+      if (canGenerate && !preparingGenerate) handleGenerate();
     }
   };
 
@@ -1056,7 +1151,7 @@ function HomePage() {
 
       {/* ═══ Hero section: title + input (centered, wider) ═══ */}
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
+        initial={heroEnter({ opacity: 0, y: 20 })}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6, ease: 'easeOut' }}
         className={cn(
@@ -1069,42 +1164,52 @@ function HomePage() {
         )}
       >
         {/* ── Logo ── */}
-        <motion.div
-          role="img"
-          aria-label={homeSurface.showSpiralLogo ? 'SpiralMAIC' : 'OpenMAIC'}
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{
-            delay: 0.1,
-            type: 'spring',
-            stiffness: 200,
-            damping: 20,
-          }}
-          className="relative h-12 md:h-16 aspect-[1232/269] mb-2 -ml-2 md:-ml-3"
-        >
-          <motion.img
-            src="/logo-horizontal.png"
-            alt=""
-            aria-hidden="true"
-            initial={false}
-            animate={{ opacity: homeSurface.showSpiralLogo ? 0 : 1 }}
-            transition={{ duration: 0.45, ease: 'easeInOut' }}
-            className="absolute inset-0 size-full object-contain"
-          />
-          <motion.img
-            src="/spiralmaic-logo-horizontal.png"
-            alt=""
-            aria-hidden="true"
-            initial={false}
-            animate={{ opacity: homeSurface.showSpiralLogo ? 1 : 0 }}
-            transition={{ duration: 0.45, ease: 'easeInOut' }}
-            className="absolute inset-0 size-full object-contain"
-          />
-        </motion.div>
+        <div className="relative" data-pro-morph="lockup">
+          <motion.div
+            role="img"
+            aria-label={homeSurface.showSpiralLogo ? 'SpiralMAIC' : 'OpenMAIC'}
+            initial={heroEnter({ opacity: 0, scale: 0.9 })}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{
+              delay: 0.1,
+              type: 'spring',
+              stiffness: 200,
+              damping: 20,
+            }}
+            className="relative h-12 md:h-16 aspect-[1232/269] mb-2 -ml-2 md:-ml-3"
+          >
+            <motion.img
+              src="/logo-horizontal.png"
+              alt=""
+              aria-hidden="true"
+              initial={false}
+              animate={{ opacity: homeSurface.showSpiralLogo ? 0 : 1 }}
+              transition={{ duration: 0.45, ease: 'easeInOut' }}
+              className="absolute inset-0 size-full object-contain"
+            />
+            <motion.img
+              src="/spiralmaic-logo-horizontal.png"
+              alt=""
+              aria-hidden="true"
+              initial={false}
+              animate={{ opacity: homeSurface.showSpiralLogo ? 1 : 0 }}
+              transition={{ duration: 0.45, ease: 'easeInOut' }}
+              className="absolute inset-0 size-full object-contain"
+            />
+          </motion.div>
+          {workbenchEntryEnabled ? (
+            <div
+              className="absolute left-full top-0 ml-1.5 mt-[10px] md:ml-2 md:mt-[14px]"
+              data-pro-morph="badge"
+            >
+              <ProBadge active={false} onToggle={enterWorkbench} />
+            </div>
+          ) : null}
+        </div>
 
         {/* ── Slogan ── */}
         <motion.p
-          initial={{ opacity: 0 }}
+          initial={heroEnter({ opacity: 0 })}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.25 }}
           className="text-sm text-muted-foreground/60 mb-8"
@@ -1122,7 +1227,10 @@ function HomePage() {
               transition={{ delay: 0.05, duration: 0.28, ease: [0.25, 0.1, 0.25, 1] }}
               className="w-full overflow-hidden"
             >
-              <div className="w-full rounded-2xl border border-border/60 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl shadow-xl shadow-black/[0.03] dark:shadow-black/20 transition-shadow focus-within:shadow-2xl focus-within:shadow-violet-500/[0.06]">
+              <div
+                data-pro-morph="composer"
+                className="w-full rounded-2xl border border-border/60 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl shadow-xl shadow-black/[0.03] dark:shadow-black/20 transition-shadow focus-within:shadow-2xl focus-within:shadow-violet-500/[0.06]"
+              >
                 {/* ── Greeting + Profile + Agents ── */}
                 <div className="relative z-20 flex items-start justify-between">
                   <GreetingBar />
@@ -1156,6 +1264,7 @@ function HomePage() {
                       onCourseMaterialsAdd={addCourseMaterials}
                       onCourseMaterialRemove={removeCourseMaterial}
                       onPdfError={setError}
+                      materialsLocked={preparingGenerate}
                     />
                   </div>
 
@@ -1188,16 +1297,22 @@ function HomePage() {
                   {/* Send button */}
                   <button
                     onClick={handleGenerate}
-                    disabled={!canGenerate}
+                    disabled={!canGenerate || preparingGenerate}
                     className={cn(
                       'shrink-0 h-8 rounded-lg flex items-center justify-center gap-1.5 transition-all px-3',
-                      canGenerate
+                      canGenerate && !preparingGenerate
                         ? 'bg-primary text-primary-foreground hover:opacity-90 shadow-sm cursor-pointer'
                         : 'bg-muted text-muted-foreground/40 cursor-not-allowed',
                     )}
                   >
-                    <span className="text-xs font-medium">{t('toolbar.enterClassroom')}</span>
-                    <ArrowUp className="size-3.5" />
+                    <span className="text-xs font-medium">
+                      {preparingGenerate ? t('stage.generating') : t('toolbar.enterClassroom')}
+                    </span>
+                    {preparingGenerate ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <ArrowUp className="size-3.5" />
+                    )}
                   </button>
                 </div>
               </div>

@@ -139,9 +139,15 @@ interface PlaybackChromeRootProps {
   readonly onRetryOutline?: (outlineId: string) => Promise<void>;
   /** Whether the Pro Switch in Header should be enabled. */
   readonly canEnterProMode?: boolean;
-  /** Pro Switch click handler — parent coordinates editLock + teardown. */
+  /** Pro Switch click handler — parent coordinates teardown + mode flip. */
   readonly onEnterProMode?: () => void;
   readonly revisitConfig?: RevisitPlaybackConfig;
+  readonly proModeActive?: boolean;
+  readonly headerBackControl?: ReactNode;
+  readonly hideHeaderBackControl?: boolean;
+  readonly hideHeader?: boolean;
+  readonly hideHeaderGlobalControls?: boolean;
+  readonly hideHeaderCourseActions?: boolean;
 }
 
 /**
@@ -153,7 +159,18 @@ interface PlaybackChromeRootProps {
  */
 export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackChromeRootProps>(
   function PlaybackChromeRoot(
-    { onRetryOutline, canEnterProMode, onEnterProMode, revisitConfig },
+    {
+      onRetryOutline,
+      canEnterProMode,
+      onEnterProMode,
+      revisitConfig,
+      proModeActive,
+      headerBackControl,
+      hideHeaderBackControl,
+      hideHeader,
+      hideHeaderGlobalControls,
+      hideHeaderCourseActions,
+    },
     ref,
   ) {
     const { t } = useI18n();
@@ -1981,7 +1998,7 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
     // non-'edit' here since the parent Stage unmounts this component
     // when entering Pro mode.
     const sceneViewerHeight = (() => {
-      const headerHeight = isPresenting ? 0 : 80;
+      const headerHeight = isPresenting || hideHeader ? 0 : 80;
       const roundtableHeight = mode === 'playback' && !isPresenting ? 192 : 0;
       return `calc(100% - ${headerHeight + roundtableHeight}px)`;
     })();
@@ -2010,10 +2027,9 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
         {/* Main Content Area */}
         <div className="flex-1 flex flex-col overflow-hidden min-w-0 relative">
           {/* Header — playback only. The Pro Switch fires `onEnterProMode`
-            (passed by the parent Stage) which acquires the cross-tab
-            edit lock and then awaits our `teardown()` before flipping
-            mode to 'edit'. */}
-          {!isPresenting && (
+            (passed by the parent Stage) which awaits our `teardown()`
+            before the parent flips mode to 'edit'. */}
+          {!isPresenting && !hideHeader && (
             <Header
               currentSceneTitle={
                 currentTailPage?.title ||
@@ -2025,6 +2041,11 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
               onToggleEditMode={onEnterProMode}
               rightSlot={revisitConfig?.headerSlot}
               onBack={revisitConfig?.onExit}
+              proModeActive={proModeActive}
+              backControl={headerBackControl}
+              hideBackControl={hideHeaderBackControl}
+              hideGlobalControls={hideHeaderGlobalControls}
+              hideCourseActions={hideHeaderCourseActions}
             />
           )}
 

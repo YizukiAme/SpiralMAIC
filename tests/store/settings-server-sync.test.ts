@@ -267,11 +267,11 @@ interface MockServerResponse {
     { models?: string[]; fastModels?: string[]; modelCatalog?: ModelInfo[]; baseUrl?: string }
   >;
   tts?: Record<string, { baseUrl?: string; disabled?: boolean }>;
-  asr?: Record<string, { baseUrl?: string }>;
+  asr?: Record<string, { baseUrl?: string; disabled?: boolean }>;
   pdf?: Record<string, { baseUrl?: string }>;
-  image?: Record<string, { baseUrl?: string; models?: string[] }>;
-  video?: Record<string, { baseUrl?: string }>;
-  webSearch?: Record<string, { baseUrl?: string }>;
+  image?: Record<string, { baseUrl?: string; models?: string[]; disabled?: boolean }>;
+  video?: Record<string, { baseUrl?: string; disabled?: boolean }>;
+  webSearch?: Record<string, { baseUrl?: string; disabled?: boolean }>;
 }
 
 function fullServerResponse(overrides: MockServerResponse = {}) {
@@ -1290,6 +1290,20 @@ describe('fetchServerProviders — ASR stale selection', () => {
 
     expect(store.getState().asrProviderId).toBe('openai-whisper');
   });
+
+  it('marks a force-disabled ASR provider and re-points the stale selection', async () => {
+    const store = await getStore();
+    store.setState({ asrProviderId: 'openai-whisper' });
+    mockServerResponse({ asr: { 'openai-whisper': { disabled: true } } });
+
+    await store.getState().fetchServerProviders();
+
+    expect(store.getState().asrProvidersConfig['openai-whisper']).toMatchObject({
+      isServerConfigured: false,
+      serverDisabled: true,
+    });
+    expect(store.getState().asrProviderId).toBe('browser-native');
+  });
 });
 
 describe('fetchServerProviders — Web Search provider sync', () => {
@@ -1363,6 +1377,22 @@ describe('fetchServerProviders — Web Search provider sync', () => {
     });
     await store.getState().fetchServerProviders();
 
+    expect(store.getState().webSearchProviderId).toBe('bocha');
+  });
+
+  it('marks a force-disabled web-search provider and re-points the stale selection', async () => {
+    const store = await getStore();
+    store.setState({ webSearchProviderId: 'tavily' });
+    mockServerResponse({
+      webSearch: { tavily: { disabled: true }, bocha: {} },
+    });
+
+    await store.getState().fetchServerProviders();
+
+    expect(store.getState().webSearchProvidersConfig.tavily).toMatchObject({
+      isServerConfigured: false,
+      serverDisabled: true,
+    });
     expect(store.getState().webSearchProviderId).toBe('bocha');
   });
 
@@ -1510,6 +1540,20 @@ describe('fetchServerProviders — Image stale selection', () => {
 
     expect(store.getState().imageProviderId).toBe('qwen-image');
     expect(store.getState().imageModelId).toBe('qwen-image-max');
+  });
+
+  it('marks a force-disabled image provider and re-points the stale selection', async () => {
+    const store = await getStore();
+    store.setState({ imageProviderId: 'seedream' });
+    mockServerResponse({ image: { seedream: { disabled: true }, 'qwen-image': {} } });
+
+    await store.getState().fetchServerProviders();
+
+    expect(store.getState().imageProvidersConfig.seedream).toMatchObject({
+      isServerConfigured: false,
+      serverDisabled: true,
+    });
+    expect(store.getState().imageProviderId).toBe('qwen-image');
   });
 
   it('auto-selects provider and model when server adds image provider after empty state', async () => {
@@ -2056,6 +2100,20 @@ describe('fetchServerProviders — Video stale selection', () => {
 
     expect(store.getState().videoProviderId).toBe('kling');
     expect(store.getState().videoModelId).toBe('kling-v2-6');
+  });
+
+  it('marks a force-disabled video provider and re-points the stale selection', async () => {
+    const store = await getStore();
+    store.setState({ videoProviderId: 'seedance' });
+    mockServerResponse({ video: { seedance: { disabled: true }, kling: {} } });
+
+    await store.getState().fetchServerProviders();
+
+    expect(store.getState().videoProvidersConfig.seedance).toMatchObject({
+      isServerConfigured: false,
+      serverDisabled: true,
+    });
+    expect(store.getState().videoProviderId).toBe('kling');
   });
 
   it('auto-selects provider and model when server adds video provider after empty state', async () => {

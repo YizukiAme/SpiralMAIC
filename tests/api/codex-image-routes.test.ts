@@ -11,7 +11,10 @@ const mocks = vi.hoisted(() => ({
   genericConnectivity: vi.fn(),
   resolveKey: vi.fn(),
   resolveBaseUrl: vi.fn(),
+  resolveModel: vi.fn(),
+  resolveServerProvider: vi.fn(),
   isServerConfigured: vi.fn(),
+  isServerDisabled: vi.fn(),
   validateUrl: vi.fn(),
   recordUsage: vi.fn(),
   log: {
@@ -55,8 +58,11 @@ vi.mock('@/lib/media/image-providers', () => ({
 
 vi.mock('@/lib/server/provider-config', () => ({
   isServerConfiguredProvider: mocks.isServerConfigured,
+  isServerProviderDisabled: mocks.isServerDisabled,
   resolveImageApiKey: mocks.resolveKey,
   resolveImageBaseUrl: mocks.resolveBaseUrl,
+  resolveImageModel: mocks.resolveModel,
+  resolveServerImageProviderId: mocks.resolveServerProvider,
 }));
 
 vi.mock('@/lib/server/ssrf-guard', () => ({
@@ -107,6 +113,9 @@ describe('/api/generate/image Codex branch', () => {
     mocks.getAvailability.mockResolvedValue({ available: true });
     mocks.transport.mockResolvedValue({ base64: 'image-data', width: 1536, height: 864 });
     mocks.recordUsage.mockResolvedValue(undefined);
+    mocks.isServerDisabled.mockReturnValue(false);
+    mocks.resolveServerProvider.mockReturnValue(undefined);
+    mocks.resolveModel.mockImplementation((_providerId, clientModel) => clientModel);
   });
 
   it('uses only the server OAuth transport and records fixed-model usage', async () => {

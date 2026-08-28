@@ -51,6 +51,7 @@ export const AGENT_AVATAR_CATALOG = [
 
 export interface AvailableAgentVoice {
   providerId: string;
+  modelId?: string;
   voiceId: string;
   voiceName: string;
   voiceLanguage?: string;
@@ -62,6 +63,7 @@ export function buildAgentProfileRequestBody(args: {
   sceneOutlines: Array<{ title: string; description?: string }>;
   languageDirective: string;
   availableVoices: AvailableAgentVoice[];
+  narratorVoice?: { providerId: string; voiceId: string; modelId?: string };
 }) {
   return {
     mode: args.mode,
@@ -71,5 +73,6 @@ export function buildAgentProfileRequestBody(args: {
     availableAvatars: AGENT_AVATAR_CATALOG.map((avatar) => avatar.path),
     avatarDescriptions: AGENT_AVATAR_CATALOG.map((avatar) => ({ ...avatar })),
     availableVoices: args.availableVoices,
+    ...(args.narratorVoice ? { narratorVoice: args.narratorVoice } : {}),
   };
 }
