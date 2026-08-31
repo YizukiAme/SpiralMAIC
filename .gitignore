@@ -5,6 +5,8 @@ CLAUDE.local.md
 /CLAUDE.md
 .claude
 .superpowers
+/.agents/
+/.codex/
 
 # dependencies
 /node_modules

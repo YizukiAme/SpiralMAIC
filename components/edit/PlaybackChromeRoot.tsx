@@ -93,6 +93,27 @@ function markOvertimeSceneLearned(scene: Scene): void {
     console.error('[Overtime] Failed to record the page learning completion.', error);
   });
 }
+import type { PPTElement } from '@openmaic/dsl';
+import type { SlideElementReference } from '@/lib/types/chat';
+import { isPiChatEnabled } from '@/lib/config/feature-flags';
+import {
+  getSlideElementPresentation,
+  getSlideElementTypeLabel,
+} from '@/components/canvas/slide-element-pick-overlay';
+import { shouldClearDraftElementReference } from '@/components/chat/element-reference-receipt';
+
+type DraftSlideElementReference = {
+  reference: SlideElementReference;
+  selectionVersion: number;
+  sceneOrder?: number;
+  elementType: PPTElement['type'];
+  displaySummary: string;
+};
+
+type ElementReferenceSendSnapshot = Pick<
+  DraftSlideElementReference,
+  'reference' | 'selectionVersion'
+>;
 
 /**
  * Imperative handle exposed via `ref` so the parent (`Stage`) can tear
@@ -189,6 +210,21 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
     const generationComplete = useStageStore.use.generationComplete();
 
     const currentScene = getCurrentScene();
+    const piChatEnabled = isPiChatEnabled();
+    const [elementPickActive, setElementPickActive] = useState(false);
+    const [draftElementReference, setDraftElementReferenceState] =
+      useState<DraftSlideElementReference | null>(null);
+    const draftElementReferenceRef = useRef<DraftSlideElementReference | null>(null);
+    const elementReferenceSceneIdRef = useRef(currentSceneId);
+    const selectionVersionRef = useRef(0);
+    const pendingInterruptElementReferenceRef = useRef<ElementReferenceSendSnapshot | undefined>(
+      undefined,
+    );
+
+    const setDraftElementReference = useCallback((next: DraftSlideElementReference | null) => {
+      draftElementReferenceRef.current = next;
+      setDraftElementReferenceState(next);
+    }, []);
 
     // Layout state from settings store (persisted via localStorage)
     const sidebarCollapsed = useSettingsStore((s) => s.sidebarCollapsed);
@@ -524,6 +560,32 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
     const stageRef = useRef<HTMLDivElement>(null);
     // Guard to prevent double flash when manual stop triggers onDiscussionEnd
     const manualStopRef = useRef(false);
+    const sendMessageWithElementReference = useCallback(
+      (text: string, snapshot?: ElementReferenceSendSnapshot) => {
+        return chatAreaRef.current?.sendMessage(
+          text,
+          snapshot
+            ? {
+                elementReference: snapshot.reference,
+                onResponseAccepted: (response) => {
+                  const current = draftElementReferenceRef.current;
+                  if (
+                    !shouldClearDraftElementReference(
+                      response,
+                      snapshot.selectionVersion,
+                      current?.selectionVersion,
+                    )
+                  ) {
+                    return;
+                  }
+                  setDraftElementReference(null);
+                },
+              }
+            : undefined,
+        );
+      },
+      [setDraftElementReference],
+    );
     const updateCurrentPlaybackActionIndex = useCallback((actionIndex: number | null) => {
       currentPlaybackActionIndexRef.current = actionIndex;
       setCurrentPlaybackActionIndex(actionIndex);
@@ -1384,7 +1446,9 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
           },
           onUserInterrupt: (text) => {
             // User interrupted → start a discussion via chat
-            chatAreaRef.current?.sendMessage(text);
+            const snapshot = pendingInterruptElementReferenceRef.current;
+            pendingInterruptElementReferenceRef.current = undefined;
+            void sendMessageWithElementReference(text, snapshot);
           },
           isAgentSelected: (agentId) => {
             const ids = useSettingsStore.getState().selectedAgentIds;
@@ -1810,6 +1874,51 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
     const totalScenesCount = revisitConfig?.tailPages
       ? scenes.length + revisitConfig.tailPages.length
       : scenes.length + (canAdvanceToPendingSlot ? 1 : 0);
+    const showElementReference = !revisitConfig && piChatEnabled && mode === 'playback';
+    const canPickSlideElement = Boolean(
+      showElementReference &&
+      !whiteboardOpen &&
+      currentScene?.type === 'slide' &&
+      currentScene.content.type === 'slide',
+    );
+
+    const handlePickElement = useCallback(
+      (element: PPTElement) => {
+        if (currentScene?.type !== 'slide' || currentScene.content.type !== 'slide') return;
+        const selectionVersion = selectionVersionRef.current + 1;
+        selectionVersionRef.current = selectionVersion;
+        const { displaySummary } = getSlideElementPresentation(element, t);
+        setDraftElementReference({
+          reference: {
+            kind: 'slide_element',
+            sceneId: currentScene.id,
+            elementId: element.id,
+          },
+          selectionVersion,
+          sceneOrder: currentSceneIndex >= 0 ? currentSceneIndex : currentScene.order,
+          elementType: element.type,
+          displaySummary,
+        });
+        setElementPickActive(false);
+      },
+      [currentScene, currentSceneIndex, setDraftElementReference, t],
+    );
+
+    const handleToggleElementPick = useCallback(() => {
+      if (!canPickSlideElement) return;
+      setElementPickActive((active) => !active);
+    }, [canPickSlideElement]);
+
+    useEffect(() => {
+      if (whiteboardOpen || !canPickSlideElement) setElementPickActive(false);
+    }, [canPickSlideElement, whiteboardOpen]);
+
+    useEffect(() => {
+      const previousSceneId = elementReferenceSceneIdRef.current;
+      elementReferenceSceneIdRef.current = currentSceneId;
+      if (previousSceneId === currentSceneId) return;
+      setDraftElementReference(null);
+    }, [currentSceneId, setDraftElementReference]);
 
     // get action information
     const totalActions = currentScene?.actions?.length || 0;
@@ -1844,6 +1953,7 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
 
     // whiteboard toggle
     const handleWhiteboardToggle = () => {
+      if (!whiteboardOpen) setElementPickActive(false);
       setWhiteboardOpenManually(!whiteboardOpen);
     };
 
@@ -2101,6 +2211,12 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
               }
               onStopDiscussion={handleStopDiscussion}
               onContinueDiscussion={handleContinueDiscussion}
+              showElementReference={showElementReference}
+              canPickSlideElement={canPickSlideElement}
+              elementPickActive={elementPickActive}
+              onToggleElementPick={handleToggleElementPick}
+              onPickElement={handlePickElement}
+              onCancelElementPick={() => setElementPickActive(false)}
               hideToolbar={mode === 'playback' || (isPresenting && !controlsVisible)}
               isPendingScene={isPendingScene}
               isCourseComplete={isCourseComplete}
@@ -2204,6 +2320,13 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
                     await revisitConfig.onMessageSend(msg);
                     return;
                   }
+                  const draft = draftElementReferenceRef.current;
+                  const elementReferenceSnapshot: ElementReferenceSendSnapshot | undefined = draft
+                    ? {
+                        reference: draft.reference,
+                        selectionVersion: draft.selectionVersion,
+                      }
+                    : undefined;
                   // Always clear Level-1 pause state — the closure may hold a stale
                   // isDiscussionPaused value (e.g. voice input's onTranscription callback
                   // captures onMessageSend before React re-renders with the updated state).
@@ -2232,9 +2355,14 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
                     engineRef.current &&
                     (engineMode === 'playing' || engineMode === 'live' || engineMode === 'paused')
                   ) {
-                    engineRef.current.handleUserInterrupt(msg);
+                    pendingInterruptElementReferenceRef.current = elementReferenceSnapshot;
+                    try {
+                      engineRef.current.handleUserInterrupt(msg);
+                    } finally {
+                      pendingInterruptElementReferenceRef.current = undefined;
+                    }
                   } else {
-                    chatAreaRef.current?.sendMessage(msg);
+                    void sendMessageWithElementReference(msg, elementReferenceSnapshot);
                   }
                   // Auto-switch to chat tab when user sends a message
                   chatAreaRef.current?.switchToTab('chat');
@@ -2317,6 +2445,22 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
                 onPresentationInteractionChange={setIsPresentationInteractionActive}
                 hidePlaybackControls={Boolean(revisitConfig)}
                 fullscreenContainerRef={stageRef}
+                showElementReference={showElementReference}
+                canPickSlideElement={canPickSlideElement}
+                elementPickActive={elementPickActive}
+                onToggleElementPick={handleToggleElementPick}
+                elementReferencePill={
+                  draftElementReference
+                    ? {
+                        sceneLabel: t('chat.lectureNotes.pageLabel', {
+                          n: (draftElementReference.sceneOrder ?? 0) + 1,
+                        }),
+                        elementType: getSlideElementTypeLabel(draftElementReference.elementType, t),
+                        displaySummary: draftElementReference.displaySummary,
+                      }
+                    : undefined
+                }
+                onClearElementReference={() => setDraftElementReference(null)}
               />
             </div>
           )}

@@ -18,6 +18,8 @@ import {
 } from '@/components/scene-renderers/classroom-complete';
 import { ContainBox } from '@/components/edit/ContainBox';
 import { useInWorkbenchPanel } from '@/lib/workbench/panel-context';
+import type { PPTElement } from '@openmaic/dsl';
+import { SlideElementPickOverlay } from '@/components/canvas/slide-element-pick-overlay';
 
 interface CanvasAreaProps extends CanvasToolbarProps {
   readonly currentScene: Scene | null;
@@ -30,6 +32,9 @@ interface CanvasAreaProps extends CanvasToolbarProps {
   readonly overlay?: ReactNode;
   readonly completionAction?: ClassroomCompleteAction;
   readonly hidePlaybackControls?: boolean;
+  readonly elementPickActive?: boolean;
+  readonly onPickElement?: (element: PPTElement) => void;
+  readonly onCancelElementPick?: () => void;
 }
 
 export function CanvasArea({
@@ -65,6 +70,9 @@ export function CanvasArea({
   overlay,
   completionAction,
   hidePlaybackControls,
+  elementPickActive,
+  onPickElement,
+  onCancelElementPick,
 }: CanvasAreaProps) {
   const { t } = useI18n();
   const inWorkbenchPanel = useInWorkbenchPanel();
@@ -149,6 +157,18 @@ export function CanvasArea({
               </SceneProvider>
             </div>
           )}
+
+          {elementPickActive &&
+            onPickElement &&
+            onCancelElementPick &&
+            currentScene?.type === 'slide' &&
+            currentScene.content.type === 'slide' && (
+              <SlideElementPickOverlay
+                scene={currentScene}
+                onPick={onPickElement}
+                onCancel={onCancelElementPick}
+              />
+            )}
 
           {/* Pending Scene Loading / Completion Overlay */}
           <AnimatePresence>
