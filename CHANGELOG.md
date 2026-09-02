@@ -60,7 +60,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- Require Node.js `>= 22.13 < 23` and pnpm 10; upgrade to Next.js 16, React 19, ESLint 10, the TypeScript 7 CLI, and AI SDK 7 with provider types contained at the existing AI boundary.
+- Require Node.js `>= 22.19 < 23` and pnpm 10; upgrade to Next.js 16, React 19, ESLint 10, the TypeScript 7 CLI, and AI SDK 7 with provider types contained at the existing AI boundary.
 - Keep the v0.3.2 IndexedDB, asset, runtime, revisit, and PostgreSQL contracts unchanged so the release remains data-compatible and rollback-safe.
 ## [0.3.2] - 2026-08-14
 

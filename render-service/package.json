@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Isolated Node 22 + Chromium + FFmpeg service that renders exported Hyperframes projects to MP4 (OpenMAIC issue #866).",
   "engines": {
-    "node": ">=22.13.0 <23"
+    "node": ">=22.19.0 <23"
   },
   "scripts": {
     "dev": "tsx watch src/main.ts",

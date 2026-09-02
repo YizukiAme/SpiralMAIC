@@ -6,7 +6,7 @@ and PostgreSQL data created by v0.3.2 remain readable.
 
 ## Before upgrading
 
-- Use Node.js `>= 22.13 < 23` and pnpm 10.
+- Use Node.js `>= 22.19 < 23` and pnpm 10.
 - Keep the existing data volume or PostgreSQL database attached.
 - Preserve your current environment variables and provider configuration.
 

@@ -93,6 +93,9 @@ jobs:
       - name: Production dependency audit
         run: pnpm audit:prod
 
+      - name: Node engine contract
+        run: pnpm check:node-engine
+
       # `postinstall` builds all five @openmaic packages, and some of them
       # generate tracked, publishable files (renderer's fonts.css and its KaTeX
       # font snapshot). The publish workflow refuses to release when the build

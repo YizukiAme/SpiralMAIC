@@ -73,7 +73,7 @@
 
 ## 跑起来
 
-准备 Node.js `>= 22.13 < 23`、pnpm 10，再选一个云端或本地模型服务。
+准备 Node.js `>= 22.19 < 23`、pnpm 10，再选一个云端或本地模型服务。
 
 ```bash
 git clone https://github.com/YizukiAme/SpiralMAIC.git

@@ -74,7 +74,7 @@ exports. SpiralMAIC simply refuses to let all of that disappear after “Complet
 
 ## Run it
 
-You need Node.js `>= 22.13 < 23`, pnpm 10, and one model provider (cloud or local).
+You need Node.js `>= 22.19 < 23`, pnpm 10, and one model provider (cloud or local).
 
 ```bash
 git clone https://github.com/YizukiAme/SpiralMAIC.git
