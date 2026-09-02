@@ -606,7 +606,7 @@ export function createNativeSkillReadTool(
       }
       const canonical = await assertAllowed(resolve(skillsDir, params.path));
       await access(canonical, constants.R_OK);
-      const text = await readFile(canonical, 'utf8');
+      const text = await readFile(/* turbopackIgnore: true */ canonical, 'utf8');
       const lines = text.split(/\r?\n/);
       const offset = Math.max(1, Math.floor(params.offset ?? 1));
       const limit = Math.max(1, Math.floor(params.limit ?? NATIVE_READ_DEFAULT_LINE_LIMIT));

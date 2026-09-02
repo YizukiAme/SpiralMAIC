@@ -161,11 +161,9 @@ export function ClassroomSurface({
   useEffect(() => {
     // Reset loading state on course switch to unmount Stage during transition,
     // preventing stale data from syncing back to the new course
-    /* eslint-disable react-hooks/set-state-in-effect -- Course switch must hide stale Stage before async load */
     setLoading(true);
     setError(null);
     setNotFound(false);
-    /* eslint-enable react-hooks/set-state-in-effect */
     generationStartedRef.current = false;
 
     // Clear previous classroom's media tasks to prevent cross-classroom contamination.

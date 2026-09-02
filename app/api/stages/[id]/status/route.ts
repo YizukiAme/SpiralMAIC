@@ -1,3 +1,5 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
+
 /**
  * GET /api/stages/[id]/status
  *
@@ -15,10 +17,11 @@ import { isAgentRuntimeConfigured } from '@/lib/config/feature-flags';
 import { resolveStageAccess } from '@/lib/server/stage-access';
 
 export const runtime = 'nodejs';
+export const GET = withAccessCode(GETHandler);
 
 type Params = { params: Promise<{ id: string }> };
 
-export async function GET(_req: NextRequest, { params }: Params) {
+async function GETHandler(_req: NextRequest, { params }: Params) {
   if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
 
   const { id } = await params;

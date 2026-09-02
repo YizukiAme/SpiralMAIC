@@ -1,3 +1,5 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
+
 /**
  * GET /api/stages/[id]/manifest — freshness manifest for one course (the
  * reference's `stages/:id/manifest`, ported onto the owner-bound store).
@@ -22,10 +24,11 @@ import { ownerJson, ownerNotFound } from '@/lib/server/agent-runtime/route-respo
 import { withRequestOwnerId } from '@/lib/server/agent-runtime/with-owner';
 
 export const runtime = 'nodejs';
+export const GET = withAccessCode(GETHandler);
 
 type Params = { params: Promise<{ id: string }> };
 
-export async function GET(req: NextRequest, { params }: Params) {
+async function GETHandler(req: NextRequest, { params }: Params) {
   if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
 
   return withRequestOwnerId(req, async (ownerId, responseHeaders) => {

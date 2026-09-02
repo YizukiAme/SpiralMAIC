@@ -1,3 +1,5 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
+
 /**
  * GET/POST /api/folders — the workbench's course-folder API (server-side
  * counterpart of the local `lib/utils/stage-storage.ts` folder API; the
@@ -32,6 +34,8 @@ import { createFolderForOwner, listFoldersForOwner } from '@/lib/server/folder-p
 import { validateFolderName } from '@/lib/utils/folder-name-validation';
 
 export const runtime = 'nodejs';
+export const GET = withAccessCode(GETHandler);
+export const POST = withAccessCode(POSTHandler);
 
 /**
  * The wire shape is the reference's `FolderItem`: the owner id the folder
@@ -49,7 +53,7 @@ function jsonError(status: number, code: string, message: string, headers?: Head
 }
 
 // GET /api/folders — list the caller's folders, ordered by `order` asc.
-export async function GET(req: NextRequest) {
+async function GETHandler(req: NextRequest) {
   if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
 
   return withRequestOwnerId(req, async (ownerId, responseHeaders) => {
@@ -73,7 +77,7 @@ export async function GET(req: NextRequest) {
 // Validation happens before owner resolution, like the stage routes: a
 // malformed body must not mint an anonymous cookie partition for a request
 // that will not proceed.
-export async function POST(req: NextRequest) {
+async function POSTHandler(req: NextRequest) {
   if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
 
   let body: unknown;

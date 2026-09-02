@@ -10,6 +10,34 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./generation-retry": {
+      "types": "./dist/generation-retry.d.ts",
+      "import": "./dist/generation-retry.js"
+    },
+    "./outline-type": {
+      "types": "./dist/outline-type.d.ts",
+      "import": "./dist/outline-type.js"
+    },
+    "./pbl/kernel/engagement": {
+      "types": "./dist/pbl/operations/kernel/engagement.d.ts",
+      "import": "./dist/pbl/operations/kernel/engagement.js"
+    },
+    "./pbl/kernel/proficiency": {
+      "types": "./dist/pbl/operations/kernel/proficiency.d.ts",
+      "import": "./dist/pbl/operations/kernel/proficiency.js"
+    },
+    "./pbl/kernel/progress": {
+      "types": "./dist/pbl/operations/kernel/progress.d.ts",
+      "import": "./dist/pbl/operations/kernel/progress.js"
+    },
+    "./pbl/kernel/runtime-events": {
+      "types": "./dist/pbl/operations/kernel/runtime-events.d.ts",
+      "import": "./dist/pbl/operations/kernel/runtime-events.js"
+    },
+    "./pbl/kernel/task-completion": {
+      "types": "./dist/pbl/operations/kernel/task-completion.d.ts",
+      "import": "./dist/pbl/operations/kernel/task-completion.js"
     }
   },
   "files": [

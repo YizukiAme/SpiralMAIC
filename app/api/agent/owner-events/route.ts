@@ -3,9 +3,9 @@
  * A degraded caught_up is not authoritative: clients should schedule one full
  * reconciliation and may later receive a non-degraded caught_up on recovery.
  *
- * Access model: there is no per-route auth challenge. Every request is
- * granted an anonymous cookie identity, and every store read is scoped to
- * that identity.
+ * Access model: the deployment access-code guard runs first when configured.
+ * Every accepted request is then granted an anonymous cookie identity, and
+ * every store read is scoped to that identity.
  */
 import type { PersistedOwnerSessionEvent } from '@openmaic/storage';
 import type { NextRequest } from 'next/server';
@@ -14,6 +14,7 @@ import { isAgentRuntimeConfigured } from '@/lib/config/feature-flags';
 import { subscribeAgentEventWakeup } from '@/lib/server/agent-runtime/event-notify-bus';
 import { resolveRequestOwnerId } from '@/lib/server/agent-runtime/owner';
 import { getAgentSessionStore } from '@/lib/server/agent-runtime/store';
+import { withAccessCode } from '@/lib/server/with-access-code';
 
 export const runtime = 'nodejs';
 // Self-hosted `next start` ignores maxDuration; Vercel's adapter can still use
@@ -36,7 +37,7 @@ function parseLastEventId(value: string | null): bigint {
   }
 }
 
-export async function GET(req: NextRequest) {
+async function GETHandler(req: NextRequest) {
   if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
 
   // Identity belongs to the request, not the URL. EventSource reconnects to
@@ -321,3 +322,5 @@ export async function GET(req: NextRequest) {
   responseHeaders.set('Connection', 'keep-alive');
   return new Response(stream, { headers: responseHeaders });
 }
+
+export const GET = withAccessCode(GETHandler);

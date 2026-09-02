@@ -1,3 +1,5 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
+
 /**
  * GET /api/materials/[id]?sessionId= — one owned session's material, in the
  * same public projection the list and the agent's `list_materials` tool use.
@@ -24,10 +26,11 @@ import { ownerJson, ownerNotFound } from '@/lib/server/agent-runtime/route-respo
 import { withRequestOwnerId } from '@/lib/server/agent-runtime/with-owner';
 
 export const runtime = 'nodejs';
+export const GET = withAccessCode(GETHandler);
 
 type Params = { params: Promise<{ id: string }> };
 
-export async function GET(req: NextRequest, { params }: Params) {
+async function GETHandler(req: NextRequest, { params }: Params) {
   if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
 
   const sessionId = new URL(req.url).searchParams.get('sessionId')?.trim();

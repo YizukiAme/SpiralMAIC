@@ -1,3 +1,5 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
+
 /**
  * PATCH /api/folders/[id] — rename { name }
  * DELETE /api/folders/[id]?mode=ungroup|remove — delete a folder
@@ -24,6 +26,8 @@ import { folderNameErrorResponse } from '@/lib/server/folder-name-errors';
 import { validateFolderName } from '@/lib/utils/folder-name-validation';
 
 export const runtime = 'nodejs';
+export const PATCH = withAccessCode(PATCHHandler);
+export const DELETE = withAccessCode(DELETEHandler);
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -37,7 +41,7 @@ function jsonError(status: number, code: string, message: string, headers?: Head
 }
 
 // PATCH /api/folders/[id] — rename { name }.
-export async function PATCH(req: NextRequest, { params }: Params) {
+async function PATCHHandler(req: NextRequest, { params }: Params) {
   if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
 
   let body: unknown;
@@ -98,7 +102,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 }
 
 // DELETE /api/folders/[id]?mode=ungroup|remove
-export async function DELETE(req: NextRequest, { params }: Params) {
+async function DELETEHandler(req: NextRequest, { params }: Params) {
   if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
 
   const modeParam = req.nextUrl.searchParams.get('mode');

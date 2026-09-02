@@ -1,3 +1,5 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
+
 /**
  * POST /api/folders/members — set which folder a course belongs to.
  *
@@ -26,13 +28,14 @@ import { ownerJson } from '@/lib/server/agent-runtime/route-response';
 import { withRequestOwnerId } from '@/lib/server/agent-runtime/with-owner';
 
 export const runtime = 'nodejs';
+export const POST = withAccessCode(POSTHandler);
 
 function jsonError(status: number, code: string, message: string, headers?: Headers): NextResponse {
   return NextResponse.json({ error: { code, message } }, { status, headers });
 }
 
 // POST /api/folders/members
-export async function POST(req: NextRequest) {
+async function POSTHandler(req: NextRequest) {
   if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
 
   let body: unknown;

@@ -1,3 +1,5 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
+
 /**
  * Agent runtime control plane — the session event stream (SSE).
  *
@@ -41,6 +43,7 @@ import { resolveRequestOwnerId } from '@/lib/server/agent-runtime/owner';
 import { getAgentSessionStore } from '@/lib/server/agent-runtime/store';
 
 export const runtime = 'nodejs';
+export const GET = withAccessCode(GETHandler);
 // Self-hosted `next start` does not enforce maxDuration; it remains useful to
 // Vercel's build adapter. EventSource resumes durable events with Last-Event-ID.
 // The 25s heartbeat prevents idle intermediaries from ending the stream early.
@@ -59,7 +62,7 @@ const HEARTBEAT_INTERVAL_MS = 25_000;
 /** Same default as `readEventsAfter`. A full page means more backlog remains. */
 const BACKLOG_PAGE = 500;
 
-export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+async function GETHandler(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   if (!isAgentRuntimeConfigured()) {
     return new Response('Not found', { status: 404 });
   }

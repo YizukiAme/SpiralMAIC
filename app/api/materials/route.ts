@@ -1,3 +1,5 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
+
 /**
  * /api/materials — the workbench's material list and upload face.
  *
@@ -66,6 +68,8 @@ import {
 } from '@/lib/workbench/material-upload-policy';
 
 export const runtime = 'nodejs';
+export const GET = withAccessCode(GETHandler);
+export const POST = withAccessCode(POSTHandler);
 
 const DOCUMENT_UPLOAD_LIMIT = Math.min(
   agentRuntimeConfig.maxDocumentBytes,
@@ -107,7 +111,7 @@ function parseLimit(raw: string | null): { limit?: number } | { invalid: true } 
 
 // GET /api/materials?sessionId=&limit=&before= — list one owned session's
 // materials, newest first, keyset-paged (the agent-tools list surface).
-export async function GET(req: NextRequest) {
+async function GETHandler(req: NextRequest) {
   if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
 
   const url = new URL(req.url);
@@ -142,7 +146,7 @@ export async function GET(req: NextRequest) {
 // POST /api/materials — upload a source file into the caller's durable
 // material library. The raw bytes ride the body; `content-type` is the MIME
 // type and `x-material-filename` the display name.
-export async function POST(req: NextRequest) {
+async function POSTHandler(req: NextRequest) {
   const requestId = materialUploadRequestId(req);
   const startedAt = Date.now();
   let phase = 'feature_gate';

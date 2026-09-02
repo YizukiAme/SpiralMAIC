@@ -51,7 +51,7 @@ async function importFreshExtras(): Promise<
   return await import('@/components/workbench/compose-extras');
 }
 
-function mount(children: ReactNode): Root {
+function mount(): Root {
   const host = document.createElement('div');
   document.body.appendChild(host);
   const root = createRoot(host);
@@ -140,7 +140,7 @@ describe('entry point 2 — the composer attach control', () => {
       vi.fn(async () => Response.json({ enabled: true, runtimeEnabled: true })),
     );
     const { AttachButton } = await importFreshExtras();
-    const root = mount(null);
+    const root = mount();
     await act(async () => {
       root.render(createElement(AttachButton, { onFiles: () => undefined, label: 'attach' }));
     });
@@ -156,7 +156,7 @@ describe('entry point 2 — the composer attach control', () => {
       vi.fn(async () => Response.json({ enabled: false })),
     );
     const { AttachButton } = await importFreshExtras();
-    const root = mount(null);
+    const root = mount();
     await act(async () => {
       root.render(createElement(AttachButton, { onFiles: () => undefined, label: 'attach' }));
     });

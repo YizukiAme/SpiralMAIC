@@ -1,3 +1,7 @@
+import type { NextRequest } from 'next/server';
+
+import { withAccessCode } from '@/lib/server/with-access-code';
+
 /**
  * Server-side agent runtime status probe.
  *
@@ -14,8 +18,9 @@
 import { isAgentRuntimeConfigured, isAgentRuntimeEnabled } from '@/lib/config/feature-flags';
 
 export const runtime = 'nodejs';
+export const GET = withAccessCode(GETHandler);
 
-export async function GET() {
+async function GETHandler(_req?: NextRequest) {
   // Intentionally no materials flag: isAgentMaterialsEnabled does not exist in
   // this repo (the materials routes gate on the runtime, like the stages).
   return Response.json({

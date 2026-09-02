@@ -361,7 +361,9 @@ export class FileCodexModelCatalogStore implements CodexModelCatalogStore {
   private readonly effectiveUid = process.getuid?.();
 
   constructor(options: FileCodexModelCatalogStoreOptions = {}) {
-    this.baseDir = resolve(options.baseDir ?? join(process.cwd(), 'data'));
+    this.baseDir = resolve(
+      /* turbopackIgnore: true */ options.baseDir ?? join(process.cwd(), 'data'),
+    );
     this.cacheDir = join(this.baseDir, 'cache');
     this.cachePath = join(this.cacheDir, CODEX_MODEL_CACHE_FILE_NAME);
     this.coordinationKey = `file:${resolve(this.cachePath)}`;

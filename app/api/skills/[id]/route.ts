@@ -1,3 +1,5 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
+
 /** Download the OpenMAIC skill, a builtin agent skill, or one owner skill as zip. */
 import type { NextRequest } from 'next/server';
 
@@ -12,6 +14,7 @@ import {
 } from '@/lib/server/skill-export';
 
 export const runtime = 'nodejs';
+export const GET = withAccessCode(GETHandler);
 
 function zipResponse(id: string, zip: Buffer, headers = new Headers()): Response {
   headers.set('Content-Type', 'application/zip');
@@ -20,7 +23,7 @@ function zipResponse(id: string, zip: Buffer, headers = new Headers()): Response
   return new Response(new Uint8Array(zip), { headers });
 }
 
-export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+async function GETHandler(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
   const { id } = await params;
   if (!isSafeSkillId(id)) return new Response('Invalid skill id', { status: 400 });

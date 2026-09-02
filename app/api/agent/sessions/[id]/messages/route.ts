@@ -1,3 +1,5 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
+
 /** Agent runtime control plane for durable follow-up messages. */
 import { AgentSessionAccessError } from '@openmaic/storage';
 import type { NextRequest } from 'next/server';
@@ -16,8 +18,9 @@ import {
 } from '@/lib/server/agent-runtime/session-materials';
 
 export const runtime = 'nodejs';
+export const POST = withAccessCode(POSTHandler);
 
-export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+async function POSTHandler(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   if (!isAgentRuntimeConfigured()) {
     return new Response('Not found', { status: 404 });
   }

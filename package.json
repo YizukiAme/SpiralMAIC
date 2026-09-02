@@ -39,7 +39,7 @@
     "eval:orchestration:answer-content": "tsx eval/orchestration/answer-content-runner.ts"
   },
   "dependencies": {
-    "@ai-sdk/amazon-bedrock": "^5.0.61",
+    "@ai-sdk/amazon-bedrock": "5.0.61",
     "@ai-sdk/anthropic": "^4.0.41",
     "@ai-sdk/azure": "^4.0.48",
     "@ai-sdk/google": "^4.0.50",
@@ -50,7 +50,7 @@
     "@alicloud/openapi-client": "^0.4.15",
     "@alicloud/tea-util": "^1.4.11",
     "@aws-sdk/client-s3": "^3.1048.0",
-    "@aws-sdk/credential-providers": "^3.1045.0",
+    "@aws-sdk/credential-providers": "3.1045.0",
     "@aws-sdk/s3-request-presigner": "^3.1048.0",
     "@base-ui/react": "^1.1.0",
     "@earendil-works/pi-agent-core": "0.78.0",

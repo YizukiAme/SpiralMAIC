@@ -1668,7 +1668,7 @@ describe('fetchServerProviders — Image stale selection', () => {
     expect(store.getState().imageProvidersConfig['codex-image'].isServerConfigured).toBe(true);
   });
 
-  it('does not replace an enabled credential-free image provider when Codex connects', async () => {
+  it('does not replace a configured credential-free image provider when Codex connects', async () => {
     const store = await getStore();
     store.setState({
       imageProviderId: 'lemonade',
@@ -1677,6 +1677,7 @@ describe('fetchServerProviders — Image stale selection', () => {
         ...store.getState().imageProvidersConfig,
         lemonade: {
           ...store.getState().imageProvidersConfig.lemonade,
+          baseUrl: 'http://localhost:13305/v1',
           enabled: true,
         },
       },

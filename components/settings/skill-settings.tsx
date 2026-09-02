@@ -214,7 +214,6 @@ function useUserSkillContent(id: string | null): SkillContentState & { retry: ()
     let cancelled = false;
     // The dialog re-opens per skill: reset synchronously so the previous
     // skill's body never flashes under the new one's loading state.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setState({ loading: true, failed: false, content: null });
     fetch(`/api/agent/skills/${encodeURIComponent(id)}`)
       .then(async (res) => {
@@ -353,6 +352,7 @@ export function SkillSettings() {
   ].filter((skill) => !hiddenSkillIds.has(skill.id));
   const userSkills = visibleSkills.filter((skill) => skill.source === 'user');
   const builtinSkills = visibleSkills.filter((skill) => skill.source === 'builtin');
+  const detailSkillId = detailSkill?.id;
 
   const openDetails = useCallback((skill: AgentSkillInfo) => setDetailSkill(skill), []);
 
@@ -367,14 +367,14 @@ export function SkillSettings() {
       if (!response.ok) throw new Error(`skill delete request failed: ${response.status}`);
       setHiddenSkillIds((current) => new Set(current).add(deleteSkill.id));
       setDeleteSkill(null);
-      if (detailSkill?.id === deleteSkill.id) setDetailSkill(null);
+      if (detailSkillId === deleteSkill.id) setDetailSkill(null);
       await reload().catch(() => {});
     } catch {
       setActionError('deleteFailed');
     } finally {
       setDeleting(false);
     }
-  }, [deleteSkill, deleting, detailSkill?.id, reload]);
+  }, [deleteSkill, deleting, detailSkillId, reload]);
 
   const uploadSkill = useCallback(
     async (file: File) => {

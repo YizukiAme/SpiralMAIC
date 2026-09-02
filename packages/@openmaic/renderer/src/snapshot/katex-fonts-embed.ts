@@ -1,6 +1,6 @@
 /**
  * GENERATED FILE — do not edit by hand.
- * Source: KaTeX 0.16.38 @font-face rules with woff2 inlined as data URLs.
+ * Source: KaTeX 0.16.47 @font-face rules with woff2 inlined as data URLs.
  * Regenerate with `pnpm run gen-katex-fonts`.
  *
  * 20 faces. Prepended to the foreignObject font-embed CSS in slideToPng

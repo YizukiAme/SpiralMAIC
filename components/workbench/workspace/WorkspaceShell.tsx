@@ -428,7 +428,6 @@ function WorkspaceShellController({ initialPanes }: { readonly initialPanes: Wor
           ? courseTabs
           : NO_COURSE_TABS;
       if (reconciled !== courseTabs) {
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- browser history is an external system being reconciled into the local tab model
         setCourseTabs(reconciled);
         writeCourseTabsMemory(reconciled);
       }
@@ -738,7 +737,6 @@ function WorkspaceShellController({ initialPanes }: { readonly initialPanes: Wor
       closedCourseIds: courseTabs.closedCourseIds ?? [],
       replaying: attachedSessionReplaying,
     });
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- a durable library write is the external event being synchronized into URL/tab state
     if (open.length > 0) openCourses(open);
   }, [
     attachedSessionId,
@@ -1137,11 +1135,9 @@ function usePaneCollapse(): PaneCollapseState {
   const [classroom, setClassroom] = useState(false);
 
   useLayoutEffect(() => {
-    /* eslint-disable react-hooks/set-state-in-effect -- storage is client-only; see the block comment above */
     setNav(parseCollapsed(readFlag(NAV_COLLAPSED_STORAGE_KEY)));
     setChat(parseCollapsed(readFlag(CHAT_COLLAPSED_STORAGE_KEY)));
     setClassroom(parseCollapsed(readFlag(CLASSROOM_COLLAPSED_STORAGE_KEY)));
-    /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
 
   const value = useMemo(() => ({ nav, chat, classroom }), [nav, chat, classroom]);
@@ -1286,7 +1282,6 @@ function useChatWidth(): DraggableWidth & { readonly value: number } {
   useLayoutEffect(() => {
     const restored = parseChatWidth(readFlag(CHAT_WIDTH_STORAGE_KEY));
     widthRef.current = restored;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- storage is client-only
     if (restored !== CHAT_WIDTH_DEFAULT) setValue(restored);
   }, []);
 

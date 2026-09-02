@@ -1,3 +1,5 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
+
 /**
  * GET /api/stages/[id]/freshness — volatile freshness SSE for one course (the
  * reference's `stages/:id/freshness`, ported onto the owner-bound store).
@@ -30,6 +32,7 @@ import { getOwnerScopedDocumentStore } from '@/lib/server/agent-runtime/owner-sc
 import { ownerNotFound } from '@/lib/server/agent-runtime/route-response';
 
 export const runtime = 'nodejs';
+export const GET = withAccessCode(GETHandler);
 // Self-hosted `next start` ignores maxDuration; Vercel's adapter can still use
 // it. The 25s heartbeat keeps this sparse stream active through idle periods.
 export const maxDuration = 300;
@@ -43,7 +46,7 @@ export const STAGE_FRESHNESS_RETRY_MS = 3_000;
 
 type Params = { params: Promise<{ id: string }> };
 
-export async function GET(req: NextRequest, { params }: Params) {
+async function GETHandler(req: NextRequest, { params }: Params) {
   if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
 
   const responseHeaders = new Headers();

@@ -186,8 +186,6 @@ function makeStore(meta: ClaimedAgentSession, options: { cancelRequested?: () =>
   };
 }
 
-type FakeStore = ReturnType<typeof makeStore>;
-
 async function makeEntryTree(): Promise<Session> {
   const repo = new InMemorySessionRepo();
   return repo.create({ id: SESSION_ID });

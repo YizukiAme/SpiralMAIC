@@ -80,8 +80,8 @@ next-env.d.ts
 # docs
 /docs
 
-# SpiralMAIC private planning docs
-/community/spiralmaic/
+# Private product and planning docs
+/community/
 # Eval results
 eval/whiteboard-layout/results/
 eval/outline-language/results/

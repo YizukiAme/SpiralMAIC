@@ -13,13 +13,11 @@
  * the asset registry; the lifecycle only coordinates which worker may turn a
  * source asset into a text-bearing derivative.
  */
-import { randomBytes } from 'node:crypto';
-
 const CROCKFORD_BASE32 = '0123456789abcdefghjkmnpqrstvwxyz';
 
 /** Allocate a private material id from 128 random bits. */
 export function createMaterialId(): string {
-  const bytes = randomBytes(16);
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
   let bits = 0;
   let value = 0;
   let encoded = '';

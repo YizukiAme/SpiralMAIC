@@ -1,3 +1,5 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
+
 /**
  * Agent runtime control plane for session creation and listing.
  *
@@ -21,6 +23,8 @@ import { buildRequestOrigin, isValidClassroomId } from '@/lib/server/classroom-s
 import { decodeCourseRefs } from '@/lib/workbench/course-refs';
 
 export const runtime = 'nodejs';
+export const GET = withAccessCode(GETHandler);
+export const POST = withAccessCode(POSTHandler);
 
 interface CreateSessionBody {
   prompt?: string;
@@ -34,7 +38,7 @@ interface CreateSessionBody {
   courseRefs?: unknown;
 }
 
-export async function POST(req: NextRequest) {
+async function POSTHandler(req: NextRequest) {
   if (!isAgentRuntimeConfigured()) {
     return new Response('Not found', { status: 404 });
   }
@@ -183,7 +187,7 @@ export async function POST(req: NextRequest) {
   });
 }
 
-export async function GET(req: NextRequest) {
+async function GETHandler(req: NextRequest) {
   if (!isAgentRuntimeConfigured()) {
     return new Response('Not found', { status: 404 });
   }

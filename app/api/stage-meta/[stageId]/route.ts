@@ -1,3 +1,5 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
+
 /**
  * GET /api/stage-meta/[stageId] — the per-viewer facts a document does not carry
  * (the reference's stage-meta sidecar, ported onto this branch's owner model).
@@ -32,10 +34,11 @@ import { withRequestOwnerId } from '@/lib/server/agent-runtime/with-owner';
 // never be cached, by Next or by anything in front of it.
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+export const GET = withAccessCode(GETHandler);
 
 type Params = { params: Promise<{ stageId: string }> };
 
-export async function GET(req: NextRequest, { params }: Params) {
+async function GETHandler(req: NextRequest, { params }: Params) {
   if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
 
   return withRequestOwnerId(req, async (ownerId, responseHeaders) => {

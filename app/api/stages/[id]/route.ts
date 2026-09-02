@@ -1,3 +1,5 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
+
 /**
  * /api/stages/[id] — read, rename, save, and delete one owned course document.
  *
@@ -29,6 +31,10 @@ import { withRequestOwnerId } from '@/lib/server/agent-runtime/with-owner';
 import { STAGE_NAME_MAX_LENGTH } from '@/lib/server/agent-runtime/stage-limits';
 
 export const runtime = 'nodejs';
+export const GET = withAccessCode(GETHandler);
+export const PATCH = withAccessCode(PATCHHandler);
+export const PUT = withAccessCode(PUTHandler);
+export const DELETE = withAccessCode(DELETEHandler);
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -62,7 +68,7 @@ function mapSaveError(error: unknown, headers: Headers) {
 }
 
 // GET /api/stages/[id] — the full document.
-export async function GET(req: NextRequest, { params }: Params) {
+async function GETHandler(req: NextRequest, { params }: Params) {
   if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
 
   return withRequestOwnerId(req, async (ownerId, responseHeaders) => {
@@ -75,7 +81,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 }
 
 // PATCH /api/stages/[id] — rename the course (owner-only).
-export async function PATCH(req: NextRequest, { params }: Params) {
+async function PATCHHandler(req: NextRequest, { params }: Params) {
   if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
 
   let body: unknown;
@@ -115,7 +121,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 }
 
 // PUT /api/stages/[id] — save a whole document.
-export async function PUT(req: NextRequest, { params }: Params) {
+async function PUTHandler(req: NextRequest, { params }: Params) {
   if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
 
   let body: unknown;
@@ -177,7 +183,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
 }
 
 // DELETE /api/stages/[id] — remove the course and its scenes/outline.
-export async function DELETE(req: NextRequest, { params }: Params) {
+async function DELETEHandler(req: NextRequest, { params }: Params) {
   if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
 
   return withRequestOwnerId(req, async (ownerId, responseHeaders) => {

@@ -25,7 +25,7 @@ import {
 import { computeLessonMemory, computeLessonMemoryFromCompletion } from '@/lib/revisit/memory';
 import type { RevisitMessage } from '@/lib/revisit/session';
 import { buildModelRequestHeaders, getCurrentModelConfig } from '@/lib/utils/model-config';
-import { isAbortError } from '@openmaic/generation';
+import { isAbortError } from '@openmaic/generation/generation-retry';
 import { FORMAL_REVISIT_SCOPE, type RevisitDataScope } from '@/lib/revisit/scope';
 
 interface ModelConfig {

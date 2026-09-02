@@ -1,3 +1,5 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
+
 /**
  * Agent runtime control plane — the installed skills.
  *
@@ -22,8 +24,10 @@ import {
 } from '@/lib/server/skill-export';
 
 export const runtime = 'nodejs';
+export const GET = withAccessCode(GETHandler);
+export const POST = withAccessCode(POSTHandler);
 
-export async function GET(req: NextRequest) {
+async function GETHandler(req: NextRequest) {
   if (!isAgentRuntimeConfigured()) {
     return new Response('Not found', { status: 404 });
   }
@@ -44,7 +48,7 @@ export async function GET(req: NextRequest) {
 }
 
 /** Upload one owner Skill as the exporter zip or a bare canonical SKILL.md. */
-export async function POST(req: NextRequest) {
+async function POSTHandler(req: NextRequest) {
   if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
   return withRequestOwnerId(req, async (ownerId, responseHeaders) => {
     try {

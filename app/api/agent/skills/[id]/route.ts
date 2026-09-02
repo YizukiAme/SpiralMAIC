@@ -1,3 +1,5 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
+
 /**
  * One user-owned Skill body, without bloating the global picker payload.
  */
@@ -13,8 +15,10 @@ import {
 import { withRequestOwnerId } from '@/lib/server/agent-runtime/with-owner';
 
 export const runtime = 'nodejs';
+export const GET = withAccessCode(GETHandler);
+export const DELETE = withAccessCode(DELETEHandler);
 
-export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+async function GETHandler(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
   return withRequestOwnerId(req, async (ownerId, responseHeaders) => {
     const { id } = await params;
@@ -27,7 +31,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   });
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+async function DELETEHandler(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
   return withRequestOwnerId(req, async (ownerId, responseHeaders) => {
     const { id } = await params;

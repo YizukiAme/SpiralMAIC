@@ -1,3 +1,5 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
+
 /**
  * /api/stages — the workbench's course-document index and create face.
  *
@@ -25,6 +27,8 @@ import { STAGE_NAME_MAX_LENGTH } from '@/lib/server/agent-runtime/stage-limits';
 import { withRequestOwnerId } from '@/lib/server/agent-runtime/with-owner';
 
 export const runtime = 'nodejs';
+export const GET = withAccessCode(GETHandler);
+export const POST = withAccessCode(POSTHandler);
 
 /** Mint a fresh, collision-free course id in the same `stage-` family as the agent tools. */
 function createStageId(): string {
@@ -32,7 +36,7 @@ function createStageId(): string {
 }
 
 // GET /api/stages — list every stage document owned by the caller.
-export async function GET(req: NextRequest) {
+async function GETHandler(req: NextRequest) {
   if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
 
   return withRequestOwnerId(req, async (ownerId, responseHeaders) => {
@@ -47,7 +51,7 @@ export async function GET(req: NextRequest) {
 // Validation happens before owner resolution, like the agent session routes:
 // a malformed body must not mint an anonymous cookie partition for a request
 // that will not proceed.
-export async function POST(req: NextRequest) {
+async function POSTHandler(req: NextRequest) {
   if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
 
   let body: unknown;

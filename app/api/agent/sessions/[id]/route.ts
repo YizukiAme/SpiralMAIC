@@ -1,3 +1,5 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
+
 /** Agent runtime control plane for reading and updating an owned session title. */
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
@@ -9,8 +11,10 @@ import { withRequestOwnerId } from '@/lib/server/agent-runtime/with-owner';
 import { normalizeSessionTitleOverride } from '@/lib/workbench/session-title';
 
 export const runtime = 'nodejs';
+export const GET = withAccessCode(GETHandler);
+export const PATCH = withAccessCode(PATCHHandler);
 
-export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+async function GETHandler(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   if (!isAgentRuntimeConfigured()) {
     return new Response('Not found', { status: 404 });
   }
@@ -26,7 +30,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   });
 }
 
-export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+async function PATCHHandler(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   if (!isAgentRuntimeConfigured()) {
     return new Response('Not found', { status: 404 });
   }

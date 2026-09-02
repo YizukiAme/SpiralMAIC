@@ -1,3 +1,5 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
+
 /**
  * GET /api/stages/[id]/scenes?ids=a,b,c — batch scene read (reference
  * `stages/:id/scenes`, ported onto the owner-bound document store).
@@ -28,6 +30,7 @@ import { ownerJson, ownerNotFound } from '@/lib/server/agent-runtime/route-respo
 import { withRequestOwnerId } from '@/lib/server/agent-runtime/with-owner';
 
 export const runtime = 'nodejs';
+export const GET = withAccessCode(GETHandler);
 
 /** Upper bound on `ids` — see the file header. */
 export const MAX_BATCH_SCENE_IDS = 200;
@@ -45,7 +48,7 @@ function isQueryableSceneId(sceneId: string): boolean {
 
 type Params = { params: Promise<{ id: string }> };
 
-export async function GET(req: NextRequest, { params }: Params) {
+async function GETHandler(req: NextRequest, { params }: Params) {
   if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
 
   const rawIds = new URL(req.url).searchParams.get('ids');

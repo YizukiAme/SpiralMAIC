@@ -257,21 +257,22 @@ export function Stage({
    * recent conversation, or an empty composer whose first message creates one), so
    * this is now a plain navigation with no request behind it.
    */
+  const activeStageId = stage?.id;
   const handleEnterWorkbench = useCallback(() => {
-    if (!stage?.id || enteringWorkbench.current) return;
+    if (!activeStageId || enteringWorkbench.current) return;
     enteringWorkbench.current = true;
     try {
       setPanelOpen(true, true);
-      router.replace(workspaceHref({ sessionId: null, courseId: stage.id }));
+      router.replace(workspaceHref({ sessionId: null, courseId: activeStageId }));
     } finally {
       enteringWorkbench.current = false;
     }
-  }, [router, setPanelOpen, stage?.id]);
+  }, [activeStageId, router, setPanelOpen]);
 
   const handleExitWorkbench = useCallback(async () => {
-    if (!stage?.id) return;
+    if (!activeStageId) return;
     await exitProPlaybackToStandalone({
-      stageId: stage.id,
+      stageId: activeStageId,
       teardown: () => playbackRef.current?.teardown(),
       // Hosted playback is view state and may be masking a stale standalone
       // `edit` mode. Commit playback before leaving the workspace so the
@@ -280,7 +281,7 @@ export function Stage({
       replace: (href) => router.replace(href),
       onTeardownError: (error) => console.error('[Stage] workbench exit teardown failed', error),
     });
-  }, [router, setMode, stage?.id]);
+  }, [activeStageId, router, setMode]);
 
   // The embedded pane is already Pro-locked, so it has no switch. Full-screen
   // learning exposes an active switch whose off transition exits the workspace
