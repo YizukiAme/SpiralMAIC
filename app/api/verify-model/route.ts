@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 import { NextRequest } from 'next/server';
 import { createLogger } from '@/lib/logger';
 import { apiError, apiSuccess } from '@/lib/server/api-response';
@@ -38,7 +39,7 @@ function codexErrorResponse(error: unknown) {
   return apiError('UPSTREAM_ERROR', status, 'Codex connection failed');
 }
 
-export async function POST(req: NextRequest) {
+async function POSTHandler(req: NextRequest) {
   let model: string | undefined;
   try {
     const body = await req.json();
@@ -119,3 +120,5 @@ export async function POST(req: NextRequest) {
     return apiError('INTERNAL_ERROR', 500, errorMessage);
   }
 }
+
+export const POST = withAccessCode(POSTHandler);

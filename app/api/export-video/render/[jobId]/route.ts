@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 import { type NextRequest } from 'next/server';
 import { apiError, apiSuccess } from '@/lib/server/api-response';
 import { proxyFetch } from '@/lib/server/proxy-fetch';
@@ -9,7 +10,7 @@ const log = createLogger('ExportVideo Job API');
 export const dynamic = 'force-dynamic';
 
 /** Relay a render job's status. Polled by the client while a render runs. */
-export async function GET(req: NextRequest, context: { params: Promise<{ jobId: string }> }) {
+async function GETHandler(req: NextRequest, context: { params: Promise<{ jobId: string }> }) {
   const { jobId } = await context.params;
   const resolved = resolveRenderServiceUrl();
   if ('error' in resolved) {
@@ -34,7 +35,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ jobId: 
 }
 
 /** Cancel a queued/running render job. */
-export async function DELETE(req: NextRequest, context: { params: Promise<{ jobId: string }> }) {
+async function DELETEHandler(req: NextRequest, context: { params: Promise<{ jobId: string }> }) {
   const { jobId } = await context.params;
   const resolved = resolveRenderServiceUrl();
   if ('error' in resolved) {
@@ -55,3 +56,6 @@ export async function DELETE(req: NextRequest, context: { params: Promise<{ jobI
     return apiError('UPSTREAM_ERROR', 502, 'Failed to reach render service');
   }
 }
+
+export const GET = withAccessCode(GETHandler);
+export const DELETE = withAccessCode(DELETEHandler);

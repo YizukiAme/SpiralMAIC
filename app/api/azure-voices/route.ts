@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 import { NextRequest } from 'next/server';
 import { createLogger } from '@/lib/logger';
 import { validateUrlForSSRF } from '@/lib/server/ssrf-guard';
@@ -10,7 +11,7 @@ export const maxDuration = 30;
  * Azure TTS Voice List API
  * Fetches available voices from Azure Speech Services
  */
-export async function POST(req: NextRequest) {
+async function POSTHandler(req: NextRequest) {
   let baseUrl: string | undefined;
   try {
     const body = await req.json();
@@ -67,3 +68,5 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
+export const POST = withAccessCode(POSTHandler);

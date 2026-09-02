@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 /**
  * Quiz Grading API
  *
@@ -25,7 +26,7 @@ interface GradeResponse {
   comment: string;
 }
 
-export async function POST(req: NextRequest) {
+async function POSTHandler(req: NextRequest) {
   let questionSnippet: string | undefined;
   let resolvedPoints: number | undefined;
   try {
@@ -111,3 +112,5 @@ ${commentPrompt ? `Grading guidance: ${commentPrompt}\n` : ''}Student answer: ${
     return apiError('INTERNAL_ERROR', 500, 'Failed to grade answer');
   }
 }
+
+export const POST = withAccessCode(POSTHandler);

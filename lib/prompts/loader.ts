@@ -8,6 +8,8 @@
  * - Variable interpolation via {{variable}} syntax
  */
 
+import 'server-only';
+
 import fs from 'fs';
 import path from 'path';
 import type { PromptId, LoadedPrompt, SnippetId } from './types';

@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures/base';
+import { openHomeAndWaitForDatabase } from '../fixtures/indexed-db';
 import { ClassroomPage } from '../pages/classroom.page';
 import { createSettingsStorage } from '../fixtures/test-data/settings';
 import { defaultTheme } from '../fixtures/test-data/scene-content';
@@ -15,9 +16,8 @@ async function seedDatabase(page: import('@playwright/test').Page) {
     localStorage.setItem('locale', 'en-US');
   }, SETTINGS_STORAGE);
 
-  // Navigate to home page first — this causes Dexie to open/create the DB at v8
-  // with the correct schema. We wait for network idle to ensure Dexie is done.
-  await page.goto('/', { waitUntil: 'networkidle' });
+  // Let Dexie create the current schema before opening the database directly.
+  await openHomeAndWaitForDatabase(page, 'MAIC-Database', ['stages', 'scenes', 'stageOutlines']);
 
   // Now seed data by opening the DB at its current version (no upgrade).
   // Opening without a version number returns the current version without triggering

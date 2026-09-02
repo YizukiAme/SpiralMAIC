@@ -1,4 +1,5 @@
 import { promises as fs, createReadStream, type ReadStream } from 'fs';
+import { withAccessCode } from '@/lib/server/with-access-code';
 import path from 'path';
 import { NextRequest, NextResponse } from 'next/server';
 import { CLASSROOMS_DIR, isValidClassroomId } from '@/lib/server/classroom-storage';
@@ -37,7 +38,7 @@ function toWebStream(stream: ReadStream): ReadableStream {
   });
 }
 
-export async function GET(
+async function GETHandler(
   req: NextRequest,
   { params }: { params: Promise<{ classroomId: string; path: string[] }> },
 ) {
@@ -129,3 +130,5 @@ export async function GET(
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });
   }
 }
+
+export const GET = withAccessCode(GETHandler);

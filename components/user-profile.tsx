@@ -36,7 +36,7 @@ export function UserProfileCard() {
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    setHydrated(true); // eslint-disable-line react-hooks/set-state-in-effect -- Store hydration on mount
+    setHydrated(true);
   }, []);
 
   useEffect(() => {

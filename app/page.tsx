@@ -1058,6 +1058,8 @@ function HomePage() {
           {/* Theme Selector */}
           <div className="relative">
             <button
+              type="button"
+              aria-label={t('settings.theme')}
               onClick={() => {
                 setThemeOpen(!themeOpen);
               }}
@@ -1120,6 +1122,8 @@ function HomePage() {
           {/* Settings Button */}
           <div className="relative">
             <button
+              type="button"
+              aria-label={t('settings.title')}
               onClick={() => setSettingsOpen(true)}
               className="p-2 rounded-full text-gray-400 dark:text-gray-500 hover:bg-white dark:hover:bg-gray-700 hover:text-gray-800 dark:hover:text-gray-200 hover:shadow-sm transition-all group"
             >
@@ -2160,18 +2164,8 @@ function ClassroomCard({
 
   return (
     <div
-      className="group cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      className="group relative cursor-pointer"
       onClick={confirmingDelete ? undefined : onClick}
-      onKeyDown={(event) => {
-        if (confirmingDelete || event.target !== event.currentTarget) return;
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          onClick();
-        }
-      }}
-      role="button"
-      tabIndex={confirmingDelete ? -1 : 0}
-      aria-label={classroom.name}
       draggable={!confirmingDelete && !editing}
       onDragStart={(e) => {
         e.dataTransfer.setData('text/stage-id', classroom.id);
@@ -2183,6 +2177,16 @@ function ClassroomCard({
         window.dispatchEvent(new CustomEvent('course-drag-end'));
       }}
     >
+      <button
+        type="button"
+        aria-label={classroom.name}
+        disabled={confirmingDelete}
+        className="pointer-events-none absolute inset-0 z-10 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        onClick={(event) => {
+          event.stopPropagation();
+          onClick();
+        }}
+      />
       {/* Thumbnail — large radius, no border, subtle bg */}
       <div
         ref={thumbRef}

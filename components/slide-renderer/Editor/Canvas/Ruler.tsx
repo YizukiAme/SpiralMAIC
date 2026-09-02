@@ -22,7 +22,6 @@ export function Ruler({ viewportStyles, elementList }: RulerProps) {
   useEffect(() => {
     const els = elementList.filter((el) => activeElementIdList.includes(el.id));
     if (!els.length) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- DOM measurement requires effect
       setElementListRange(null);
     } else {
       setElementListRange(getElementListRange(els));

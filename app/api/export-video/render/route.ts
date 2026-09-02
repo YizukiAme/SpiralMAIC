@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 import { type NextRequest } from 'next/server';
 import { apiError, apiSuccess } from '@/lib/server/api-response';
 import { proxyFetch } from '@/lib/server/proxy-fetch';
@@ -43,7 +44,7 @@ function clientIdentity(req: NextRequest): string {
  * `202 { jobId }`. Returns 501 when the service is not configured so the client
  * can degrade to a local ZIP download.
  */
-export async function POST(req: NextRequest) {
+async function POSTHandler(req: NextRequest) {
   const resolved = resolveRenderServiceUrl();
   if ('error' in resolved) {
     return apiError('PROVIDER_DISABLED', 501, 'Render service is not configured');
@@ -111,3 +112,5 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
+export const POST = withAccessCode(POSTHandler);

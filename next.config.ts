@@ -12,6 +12,8 @@ const nextConfig: NextConfig = {
   typescript: {
     tsconfigPath: process.env.NODE_ENV === 'production' ? 'tsconfig.build.json' : 'tsconfig.json',
   },
+  // Keep framework-owned dev controls out of product accessibility scans.
+  devIndicators: false,
   transpilePackages: ['mathml2omml', 'pptxgenjs', '@openmaic/importer'],
   // These agent packages do a runtime `import(specifier)` with a computed
   // specifier (to lazily load node:fs/os/path without breaking browser/Vite
@@ -34,6 +36,10 @@ const nextConfig: NextConfig = {
   ],
   experimental: {
     proxyClientMaxBodySize: '200mb',
+    // Next still discovers the CLI through the `typescript` API package.
+    // Keep its built-in check on the TS 6 API companion; `pnpm typecheck`
+    // independently runs the TypeScript 7 CLI used by CI and local gates.
+    useTypeScriptCli: false,
   },
   async headers() {
     const extraAncestors = process.env.ALLOWED_FRAME_ANCESTORS?.trim();

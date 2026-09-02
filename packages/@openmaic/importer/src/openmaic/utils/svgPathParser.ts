@@ -21,7 +21,6 @@ export interface PathRange {
   maxY: number;
 }
 
-const NUMBER_RE = /-?\d*\.?\d+(?:[eE]-?\d+)?/g;
 const COMMAND_RE = /[MLHVCSQTAZmlhvcsqtaz]/;
 
 export function getSvgPathRange(path: string | undefined | null): PathRange {

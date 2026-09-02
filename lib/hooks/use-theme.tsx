@@ -19,7 +19,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const resolvedTheme = theme === 'system' ? systemTheme : theme;
 
   // Hydrate from localStorage after mount (avoids SSR mismatch)
-  /* eslint-disable react-hooks/set-state-in-effect -- Hydration from localStorage must happen in effect */
+
   useEffect(() => {
     const stored = localStorage.getItem('theme') as Theme | null;
     if (stored && ['light', 'dark', 'system'].includes(stored)) {
@@ -27,7 +27,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }
     setSystemTheme(window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
   }, []);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Apply theme to document
   useEffect(() => {

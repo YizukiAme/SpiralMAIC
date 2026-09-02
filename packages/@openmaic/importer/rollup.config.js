@@ -28,8 +28,10 @@ const createConfig = (output) => ({
   plugins,
 });
 
-export default [
+const configs = [
   createConfig({ file: 'dist/index.umd.js', format: 'umd', name: 'pptxtojsonPro' }),
   createConfig({ file: 'dist/index.cjs', format: 'cjs' }),
   createConfig({ file: 'dist/index.js', format: 'es' }),
 ];
+
+export default configs;

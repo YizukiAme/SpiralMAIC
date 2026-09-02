@@ -5,11 +5,12 @@
   "type": "module",
   "description": "Isolated Node 22 + Chromium + FFmpeg service that renders exported Hyperframes projects to MP4 (OpenMAIC issue #866).",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13.0 <23"
   },
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "start": "tsx src/main.ts",
+    "lint": "eslint --max-warnings=0 src test",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
@@ -21,9 +22,13 @@
     "tsx": "^4.19.2"
   },
   "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@typescript/native": "npm:typescript@7.0.2",
     "@types/node": "^22.10.2",
-    "typescript": "^5.7.2",
-    "vitest": "^4.1.10"
+    "eslint": "10.9.0",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "typescript-eslint": "8.67.0",
+    "vitest": "4.1.11"
   },
   "overrides": {
     "esbuild": "0.28.1"

@@ -26,7 +26,6 @@ export function useDraftCache<T>({
   const pendingValueRef = useRef<T | undefined>(undefined);
   const keyRef = useRef(key);
 
-  /* eslint-disable react-hooks/set-state-in-effect -- Hydration from localStorage must happen in effect (SSR-safe) */
   useEffect(() => {
     keyRef.current = key;
     try {
@@ -40,7 +39,6 @@ export function useDraftCache<T>({
       /* ignore parse errors */
     }
   }, [key]);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   const flushPending = useCallback(() => {
     if (timerRef.current !== null) {

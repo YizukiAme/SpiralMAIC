@@ -121,7 +121,6 @@ export function PBLV2Sidebar({
   }, [isScenario, project.milestones]);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional derived-state sync on milestone changes
     setExpandedIds((prev) => {
       const validIds = new Set(project.milestones.map((milestone) => milestone.id));
       const next = new Set([...prev].filter((id) => validIds.has(id)));

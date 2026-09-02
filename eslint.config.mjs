@@ -1,4 +1,5 @@
 import { defineConfig, globalIgnores } from 'eslint/config';
+import { fixupConfigRules } from '@eslint/compat';
 import nextVitals from 'eslint-config-next/core-web-vitals';
 import nextTs from 'eslint-config-next/typescript';
 
@@ -24,8 +25,8 @@ const AI_SDK_DYNAMIC_IMPORT_BAN = [
 ];
 
 const eslintConfig = defineConfig([
-  ...nextVitals,
-  ...nextTs,
+  ...fixupConfigRules(nextVitals),
+  ...fixupConfigRules(nextTs),
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:
@@ -49,8 +50,6 @@ const eslintConfig = defineConfig([
     '.superpowers/**',
     '.worktrees/**',
     '.scratch/**',
-    // Playwright e2e tests (not React code):
-    'e2e/**',
     // Isolated MP4 render service: its own package, tsconfig, and Node-only
     // deps (@hyperframes/producer). Linted/typechecked under render-service/.
     'render-service/**',
@@ -60,6 +59,14 @@ const eslintConfig = defineConfig([
       // Dynamic AI-generated image URLs from various providers are incompatible
       // with next/image (requires known dimensions and whitelisted domains).
       '@next/next/no-img-element': 'off',
+      // Next 16.3 enables React Compiler migration rules in its recommended
+      // preset. Adopting those rules requires broad component rewrites and is
+      // intentionally separate from this dependency/security upgrade. Keep the
+      // established hooks rules (including exhaustive-deps) as the lint gate.
+      'react-hooks/immutability': 'off',
+      'react-hooks/purity': 'off',
+      'react-hooks/refs': 'off',
+      'react-hooks/set-state-in-effect': 'off',
       // Allow unused vars/args prefixed with _ (common convention for intentionally
       // unused destructured values, callback params, etc.)
       '@typescript-eslint/no-unused-vars': [
@@ -71,6 +78,13 @@ const eslintConfig = defineConfig([
           destructuredArrayIgnorePattern: '^_',
         },
       ],
+    },
+  },
+  {
+    files: ['e2e/**/*.ts'],
+    rules: {
+      // Playwright's route callback is named `use`; it is not a React hook.
+      'react-hooks/rules-of-hooks': 'off',
     },
   },
   // Package boundary (machine-enforced): @openmaic/renderer is a standalone,

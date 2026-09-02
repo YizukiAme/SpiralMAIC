@@ -51,7 +51,6 @@ export function useTextEditorAdapter({
   const activeFormat = formatEntry?.elementId === editingId ? formatEntry.state : null;
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- controlled selection invalidates stale editor handles.
     setController((current) => (current?.elementId === editingId ? current : null));
     setFormatEntry((current) => (current?.elementId === editingId ? current : null));
   }, [editingId]);

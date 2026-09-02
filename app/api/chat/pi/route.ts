@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 /**
  * Pi Director Chat API Endpoint
  *
@@ -39,7 +40,7 @@ const log = createLogger('Pi Chat API');
 
 export const maxDuration = 300;
 
-export async function POST(req: NextRequest) {
+async function POSTHandler(req: NextRequest) {
   if (!isPiChatEnabled()) {
     return apiError('INVALID_REQUEST', 404, 'Pi chat runtime is disabled');
   }
@@ -303,3 +304,5 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
+export const POST = withAccessCode(POSTHandler);

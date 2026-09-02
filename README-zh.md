@@ -73,7 +73,7 @@
 
 ## 跑起来
 
-准备 Node.js `>= 20.9.0`、pnpm 10，再选一个云端或本地模型服务。
+准备 Node.js `>= 22.13 < 23`、pnpm 10，再选一个云端或本地模型服务。
 
 ```bash
 git clone https://github.com/YizukiAme/SpiralMAIC.git
@@ -116,6 +116,20 @@ docker compose up --build
 细节见[存储说明](packages/@openmaic/storage/README.md)和
 [渲染服务说明](render-service/README.md)。
 
+公共部署应设置 `ACCESS_CODE`；未设置时，本地实例仍可直接使用。启用后，浏览器验证
+最长保留七天，之后需要重新输入。兼容性和回滚说明见 [v0.4 升级指南](UPGRADING-v0.4.md)。
+
+网络较慢时，可通过 `ALPINE_MIRROR`（Alpine 镜像站主机名）和 `NPM_REGISTRY`
+（完整 npm registry URL）加速 Docker 构建：
+
+```sh
+ALPINE_MIRROR=mirrors.tuna.tsinghua.edu.cn \
+NPM_REGISTRY=https://registry.npmmirror.com \
+docker compose up --build
+```
+
+只使用公共镜像地址；Docker 可能把构建参数保留在镜像元数据中。
+
 </details>
 
 <details>
@@ -136,7 +150,8 @@ Spiral 自己的部分很好找：
 ```bash
 pnpm check
 pnpm lint
-npx tsc --noEmit
+pnpm typecheck
+pnpm typecheck:e2e
 pnpm check:i18n-keys
 pnpm test
 pnpm build

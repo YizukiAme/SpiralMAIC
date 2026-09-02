@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 /**
  * Scene Outlines Streaming API (SSE)
  *
@@ -284,7 +285,7 @@ function ensureUniqueOutlineId(outline: SceneOutline, usedIds: Set<string>): Sce
   return { ...outline, id };
 }
 
-export async function POST(req: NextRequest) {
+async function POSTHandler(req: NextRequest) {
   let requirementSnippet: string | undefined;
   let resolvedModelString: string | undefined;
   try {
@@ -714,3 +715,5 @@ export async function POST(req: NextRequest) {
     return apiError('INTERNAL_ERROR', 500, error instanceof Error ? error.message : String(error));
   }
 }
+
+export const POST = withAccessCode(POSTHandler);

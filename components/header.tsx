@@ -79,7 +79,7 @@ export function Header({
               CommandBar title during the cross-fade. */}
           {mode !== 'edit' && (
             <div className="flex flex-col min-w-0">
-              <span className="text-[10px] uppercase tracking-widest font-bold text-gray-400 dark:text-gray-500 mb-0.5">
+              <span className="text-[10px] uppercase tracking-widest font-bold text-gray-600 dark:text-gray-400 mb-0.5">
                 {t('stage.currentScene')}
               </span>
               <h1

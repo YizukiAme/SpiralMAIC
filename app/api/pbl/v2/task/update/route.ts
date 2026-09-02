@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 /**
  * POST /api/pbl/v2/task/update
  *
@@ -45,7 +46,7 @@ interface UpdateRequest {
   microtaskId?: string;
 }
 
-export async function POST(req: NextRequest) {
+async function POSTHandler(req: NextRequest) {
   let body: UpdateRequest;
   try {
     body = (await req.json()) as UpdateRequest;
@@ -160,3 +161,5 @@ export async function POST(req: NextRequest) {
       return apiError('INVALID_REQUEST', 400, `Unknown action: ${String(body.action)}`);
   }
 }
+
+export const POST = withAccessCode(POSTHandler);

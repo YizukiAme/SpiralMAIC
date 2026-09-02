@@ -84,7 +84,7 @@ export function splitLongSpeechActions(actions: Action[], providerId: TTSProvide
   if (!maxLength) return actions;
 
   let didSplit = false;
-  const nextActions: Action[] = actions.flatMap((action) => {
+  const nextActions = actions.flatMap<Action>((action): Action[] => {
     if (action.type !== 'speech' || !action.text || action.text.length <= maxLength)
       return [action];
 

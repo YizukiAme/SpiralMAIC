@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 /**
  * Verify Image Provider API
  *
@@ -74,7 +75,7 @@ async function verifyCodexImageProvider() {
   }
 }
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
   try {
     const providerId = (request.headers.get('x-image-provider')?.trim() ||
       resolveServerImageProviderId()) as ImageProviderId;
@@ -136,3 +137,5 @@ export async function POST(request: NextRequest) {
     return apiError('INTERNAL_ERROR', 500, `Connectivity test error: ${err}`);
   }
 }
+
+export const POST = withAccessCode(POSTHandler);

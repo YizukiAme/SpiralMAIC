@@ -10,8 +10,8 @@ import {
 import { toModelMessages } from '@/lib/agent/runtime/stream-fn';
 import { OPENAI_REASONING_SIGNATURE_PREFIX } from '@/lib/agent/runtime/provider-metadata';
 
-type LanguageModelV3 = Parameters<typeof wrapCodexLanguageModel>[0];
-type ModelCallOptions = Parameters<LanguageModelV3['doStream']>[0];
+type LanguageModelV4 = ReturnType<typeof wrapCodexLanguageModel>;
+type ModelCallOptions = Parameters<LanguageModelV4['doStream']>[0];
 
 const USAGE = {
   inputTokens: { total: 3, noCache: 3, cacheRead: 0, cacheWrite: 0 },
@@ -42,9 +42,9 @@ function createStream(parts: Array<Record<string, unknown>>) {
   });
 }
 
-function createLanguageModel(overrides: Partial<LanguageModelV3> = {}): LanguageModelV3 {
+function createLanguageModel(overrides: Partial<LanguageModelV4> = {}): LanguageModelV4 {
   return {
-    specificationVersion: 'v3',
+    specificationVersion: 'v4',
     provider: 'openai.responses',
     modelId: 'gpt-test',
     supportedUrls: {},
@@ -65,7 +65,7 @@ function createLanguageModel(overrides: Partial<LanguageModelV3> = {}): Language
       ]),
     })),
     ...overrides,
-  } as LanguageModelV3;
+  } as LanguageModelV4;
 }
 
 async function collectStream(stream: ReadableStream<unknown>): Promise<unknown[]> {

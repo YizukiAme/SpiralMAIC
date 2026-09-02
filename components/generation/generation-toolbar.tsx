@@ -280,7 +280,7 @@ export function GenerationToolbar({
                 </span>
               </button>
             ) : (
-              <button className={pillMuted}>
+              <button className={pillMuted} aria-label={t('toolbar.courseMaterialUpload')}>
                 <Paperclip className="size-3.5" />
               </button>
             )}
@@ -431,7 +431,10 @@ export function GenerationToolbar({
         {webSearchAvailable ? (
           <Popover>
             <PopoverTrigger asChild>
-              <button className={webSearch ? pillActive : pillMuted}>
+              <button
+                className={webSearch ? pillActive : pillMuted}
+                aria-label={t('toolbar.webSearchDesc')}
+              >
                 <Globe2 className={cn('size-3.5', webSearch && 'animate-pulse')} />
                 {webSearch && (
                   <span>

@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 import { after, type NextRequest } from 'next/server';
 import { nanoid } from 'nanoid';
 import { apiError, apiSuccess } from '@/lib/server/api-response';
@@ -11,7 +12,7 @@ const log = createLogger('GenerateClassroom API');
 
 export const maxDuration = 30;
 
-export async function POST(req: NextRequest) {
+async function POSTHandler(req: NextRequest) {
   let requirementSnippet: string | undefined;
   try {
     const rawBody = (await req.json()) as Partial<GenerateClassroomInput>;
@@ -71,3 +72,5 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
+export const POST = withAccessCode(POSTHandler);

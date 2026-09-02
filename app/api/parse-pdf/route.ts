@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 import { NextRequest } from 'next/server';
 import {
   isServerConfiguredProvider,
@@ -12,7 +13,7 @@ import { apiError, apiSuccess } from '@/lib/server/api-response';
 import { validateUrlForSSRF } from '@/lib/server/ssrf-guard';
 const log = createLogger('Parse PDF');
 
-export async function POST(req: NextRequest) {
+async function POSTHandler(req: NextRequest) {
   let pdfFileName: string | undefined;
   let resolvedProviderId: string | undefined;
   try {
@@ -91,3 +92,5 @@ export async function POST(req: NextRequest) {
     return apiError('PARSE_FAILED', 500, error instanceof Error ? error.message : 'Unknown error');
   }
 }
+
+export const POST = withAccessCode(POSTHandler);

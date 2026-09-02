@@ -156,6 +156,7 @@ export function SceneSidebar({
             <img src="/logo-horizontal.png" alt="OpenMAIC" className="h-6" />
           </button>
           <button
+            aria-label={t('common.close')}
             onClick={() => onCollapseChange(true)}
             className="w-7 h-7 shrink-0 rounded-lg flex items-center justify-center bg-gray-100/80 dark:bg-gray-800/80 text-gray-500 dark:text-gray-400 ring-1 ring-black/[0.04] dark:ring-white/[0.06] hover:bg-gray-200/90 dark:hover:bg-gray-700/90 hover:text-gray-700 dark:hover:text-gray-200 active:scale-90 transition-all duration-200"
           >
@@ -672,7 +673,7 @@ export function SceneSidebar({
                           'text-xs font-bold truncate transition-colors',
                           isActive
                             ? 'text-amber-700 dark:text-amber-300'
-                            : 'text-amber-600 dark:text-amber-400',
+                            : 'text-amber-800 dark:text-amber-300',
                         )}
                       >
                         {t('stage.courseComplete')}

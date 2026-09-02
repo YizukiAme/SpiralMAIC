@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 /**
  * Auto-voice registration API (provider-neutral).
  *
@@ -61,7 +62,7 @@ function childSignal(
   };
 }
 
-export async function POST(req: NextRequest) {
+async function POSTHandler(req: NextRequest) {
   let providerId: string | undefined;
   let voiceId: string | undefined;
   const deadline = new AbortController();
@@ -253,3 +254,5 @@ export async function POST(req: NextRequest) {
     req.signal.removeEventListener('abort', abortFromRequest);
   }
 }
+
+export const POST = withAccessCode(POSTHandler);

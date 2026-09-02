@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 /**
  * POST /api/pbl/v2/open-task
  *
@@ -37,7 +38,7 @@ interface OpenTaskRequest {
   priorQuizResults?: PriorQuizResult[];
 }
 
-export async function POST(req: NextRequest) {
+async function POSTHandler(req: NextRequest) {
   let body: OpenTaskRequest;
   try {
     body = (await req.json()) as OpenTaskRequest;
@@ -91,3 +92,5 @@ export async function POST(req: NextRequest) {
     { signal: req.signal },
   );
 }
+
+export const POST = withAccessCode(POSTHandler);

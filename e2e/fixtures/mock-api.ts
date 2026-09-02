@@ -83,4 +83,120 @@ export class MockApi {
     await this.mockSceneContent();
     await this.mockSceneActions(stageId);
   }
+
+  /** Two deterministic Reverse Challenge turns: follow-up first, then a passing gate. */
+  async mockRevisitChat() {
+    let turn = 0;
+    await this.page.route('**/api/chat', (route) => {
+      turn += 1;
+      const isFollowUp = turn === 1;
+      const messageId = `revisit-student-message-${turn}`;
+      const events = [
+        {
+          type: 'agent_start',
+          data: {
+            messageId,
+            agentId: 'spiral-student-1',
+            agentName: 'Bo',
+          },
+        },
+        {
+          type: 'text_delta',
+          data: {
+            messageId,
+            content: isFollowUp
+              ? 'Could you give one real-world example?'
+              : 'The houseplant example makes the energy conversion clear.',
+          },
+        },
+        {
+          type: 'agent_end',
+          data: { messageId, agentId: 'spiral-student-1' },
+        },
+        {
+          type: 'revisit_gate',
+          data: {
+            status: isFollowUp ? 'probe' : 'pass',
+            pageIndex: 0,
+            reason: isFollowUp
+              ? 'The student requested a transfer example.'
+              : 'The explanation and example covered the concept.',
+            confidence: 0.95,
+            studentStates: {
+              'spiral-student-1': isFollowUp ? 'questioning' : 'satisfied',
+              'spiral-student-2': 'satisfied',
+            },
+            ...(isFollowUp ? { nextProbeId: 'probe-1' } : {}),
+          },
+        },
+        {
+          type: 'done',
+          data: {
+            totalActions: 0,
+            totalAgents: 1,
+            agentHadContent: true,
+            cueUserReceived: true,
+            directorState: { turnCount: turn, agentResponses: [], whiteboardLedger: [] },
+          },
+        },
+      ];
+      route.fulfill({
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' },
+        body: events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''),
+      });
+    });
+  }
+
+  /** A deterministic report response; persistence still runs through the production client path. */
+  async mockRevisitJudge() {
+    await this.page.route('**/api/revisit/judge', async (route) => {
+      const request = route.request().postDataJSON();
+      const completedAt = request.completedAt ?? Date.now();
+      await route.fulfill({
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          success: true,
+          report: {
+            attemptId: request.attemptId,
+            stageId: request.stageId,
+            completedAt,
+            summary: 'You clearly connected light energy to stored chemical energy.',
+            dimensions: {
+              clarity: 0.9,
+              doubtResolution: 0.85,
+              transfer: 0.88,
+              errorCorrection: 0.92,
+            },
+            qRaw: 0.89,
+            q: 0.89,
+            errors: [],
+            evidence: [
+              {
+                id: 'evidence-v04-1',
+                attemptId: request.attemptId,
+                stageId: request.stageId,
+                conceptId: 'photosynthesis',
+                source: 'teach_back',
+                scores: {
+                  clarity: 0.9,
+                  doubtResolution: 0.85,
+                  transfer: 0.88,
+                  errorCorrection: 0.92,
+                },
+                qRaw: 0.89,
+                q: 0.89,
+                polarity: 'positive',
+                timestamp: completedAt,
+                pageIndex: 0,
+                errors: [],
+              },
+            ],
+            pageReports: request.pageReports,
+          },
+        }),
+      });
+    });
+  }
 }

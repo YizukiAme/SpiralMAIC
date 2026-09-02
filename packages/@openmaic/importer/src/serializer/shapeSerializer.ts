@@ -250,7 +250,6 @@ function extractPathEndpoints(d: string): {
   const nums = d.match(/[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g);
   if (!nums || nums.length < 4) return null;
 
-  const cmds = d.match(/[MLAQCSTHVZ]/gi) || [];
   const allNums = nums.map(Number);
 
   const startX = allNums[0],

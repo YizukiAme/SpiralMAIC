@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers';
 import { apiSuccess } from '@/lib/server/api-response';
-import { verifyAccessToken } from '@/lib/server/access-token';
+import { ACCESS_TOKEN_COOKIE, verifyAccessToken } from '@/lib/server/access-token';
 
 export async function GET() {
   const accessCode = process.env.ACCESS_CODE;
@@ -9,7 +9,7 @@ export async function GET() {
   let authenticated = false;
   if (enabled) {
     const cookieStore = await cookies();
-    const token = cookieStore.get('openmaic_access')?.value;
+    const token = cookieStore.get(ACCESS_TOKEN_COOKIE)?.value;
     authenticated = !!token && verifyAccessToken(token, accessCode);
   }
 

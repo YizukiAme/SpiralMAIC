@@ -74,7 +74,6 @@ export function LaserPointerOverlay({
   }, [laserElementId, domIdPrefix]);
 
   useLayoutEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- DOM measurement requires effect
     measure();
   }, [measure, elements]);
 

@@ -44,13 +44,6 @@ function isTableFrame(node: SafeXmlNode): boolean {
   return graphicData.child('tbl').exists();
 }
 
-function isChartFrame(node: SafeXmlNode): boolean {
-  const graphic = node.child('graphic');
-  const graphicData = graphic.child('graphicData');
-  const uri = graphicData.attr('uri') || '';
-  return uri.includes('chart');
-}
-
 /**
  * Parse and collect renderable shapes from a master or layout spTree.
  * Only includes NON-placeholder shapes (decorative elements, logos, footers).

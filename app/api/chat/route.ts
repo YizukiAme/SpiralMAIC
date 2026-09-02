@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 /**
  * Stateless Chat API Endpoint
  *
@@ -42,7 +43,7 @@ export const maxDuration = 60;
  *
  * Response: SSE stream of StatelessEvent
  */
-export async function POST(req: NextRequest) {
+async function POSTHandler(req: NextRequest) {
   const encoder = new TextEncoder();
   let chatModel: string | undefined;
   let chatMessageCount: number | undefined;
@@ -208,3 +209,5 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
+export const POST = withAccessCode(POSTHandler);

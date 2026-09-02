@@ -1,9 +1,10 @@
 import { wrapLanguageModel, type LanguageModelMiddleware } from 'ai';
 import type { ModelInfo, ModelServiceTier, ThinkingCapability } from '@/lib/types/provider';
 
-type LanguageModelV3 = Parameters<typeof wrapLanguageModel>[0]['model'];
-type CodexStreamResult = Awaited<ReturnType<LanguageModelV3['doStream']>>;
-type CodexGenerateResult = Awaited<ReturnType<LanguageModelV3['doGenerate']>>;
+type CodexInputModel = Parameters<typeof wrapLanguageModel>[0]['model'];
+type CodexLanguageModel = ReturnType<typeof wrapLanguageModel>;
+type CodexStreamResult = Awaited<ReturnType<CodexLanguageModel['doStream']>>;
+type CodexGenerateResult = Awaited<ReturnType<CodexLanguageModel['doGenerate']>>;
 type CodexStreamPart =
   CodexStreamResult['stream'] extends ReadableStream<infer Part> ? Part : never;
 type CodexContent = CodexGenerateResult['content'][number];
@@ -616,7 +617,7 @@ function createCodexLanguageModelMiddleware(
   serviceTier?: ModelServiceTier,
 ): LanguageModelMiddleware {
   return {
-    specificationVersion: 'v3',
+    specificationVersion: 'v4',
     transformParams: async ({ params }) => {
       const normalized = { ...params };
       normalized.prompt = sanitizeCodexReplayPrompt(params.prompt);
@@ -648,9 +649,9 @@ function createCodexLanguageModelMiddleware(
 }
 
 export function wrapCodexLanguageModel(
-  model: LanguageModelV3,
+  model: CodexInputModel,
   options: { serviceTier?: ModelServiceTier; modelInfo?: ModelInfo } = {},
-): LanguageModelV3 {
+): CodexLanguageModel {
   const wrapped = wrapLanguageModel({
     model,
     middleware: createCodexLanguageModelMiddleware(options.serviceTier),

@@ -243,6 +243,7 @@ export function MediaPopover({ onSettingsOpen }: MediaPopoverProps) {
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         <button
+          aria-label={t('toolbar.advancedSettings')}
           className={cn(
             'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium transition-all cursor-pointer select-none whitespace-nowrap border',
             enabledCount > 0

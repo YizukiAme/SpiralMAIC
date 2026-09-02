@@ -8,9 +8,10 @@
 			"es2020"
 		],
 		"module": "es2020",
-		"moduleResolution": "node",
+		"moduleResolution": "bundler",
 		"noImplicitAny": false,
 		"outDir": "./out",
+		"rootDir": "./src",
 		"sourceMap": true,
 		"strict": true,
 		"strictNullChecks": false, // NOTE: very necessary!

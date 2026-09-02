@@ -12,7 +12,7 @@ import {
   type CodexTokenProvider,
 } from '@/lib/server/codex/token-provider';
 
-type LanguageModelV3 = Parameters<typeof wrapCodexLanguageModel>[0];
+type LanguageModelV4 = ReturnType<typeof wrapCodexLanguageModel>;
 const SAFE_STREAM_ERROR_MESSAGE = 'Codex response stream could not be processed';
 
 function createEventStreamResponse(events: Array<Record<string, unknown>>): Response {
@@ -52,7 +52,7 @@ function createModelForResponse(response: () => Response) {
     apiKey: '',
     customFetch,
   });
-  return { model: model as LanguageModelV3, tokenProvider, upstreamFetch };
+  return { model: model as LanguageModelV4, tokenProvider, upstreamFetch };
 }
 
 describe('Codex provider and OpenAI SDK integration', () => {
@@ -72,7 +72,7 @@ describe('Codex provider and OpenAI SDK integration', () => {
     });
 
     const error = await Promise.resolve(
-      (model as LanguageModelV3).doStream({
+      (model as LanguageModelV4).doStream({
         prompt: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }],
       }),
     ).catch((caught: unknown) => caught);
@@ -117,7 +117,7 @@ describe('Codex provider and OpenAI SDK integration', () => {
       });
 
       const error = await Promise.resolve(
-        (model as LanguageModelV3).doStream({
+        (model as LanguageModelV4).doStream({
           prompt: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }],
         }),
       ).catch((caught: unknown) => caught);
@@ -162,7 +162,7 @@ describe('Codex provider and OpenAI SDK integration', () => {
       });
 
       const error = await Promise.resolve(
-        (model as LanguageModelV3).doStream({
+        (model as LanguageModelV4).doStream({
           prompt: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }],
         }),
       ).catch((caught: unknown) => caught);
@@ -195,7 +195,7 @@ describe('Codex provider and OpenAI SDK integration', () => {
     });
 
     const error = await Promise.resolve(
-      (model as LanguageModelV3).doStream({
+      (model as LanguageModelV4).doStream({
         prompt: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }],
       }),
     ).catch((caught: unknown) => caught);
@@ -241,7 +241,7 @@ describe('Codex provider and OpenAI SDK integration', () => {
     });
 
     await Promise.resolve(
-      (model as LanguageModelV3).doStream({
+      (model as LanguageModelV4).doStream({
         prompt: [{ role: 'user', content: [{ type: 'text', text: 'Hello' }] }],
       }),
     ).catch(() => undefined);

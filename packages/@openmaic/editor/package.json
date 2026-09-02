@@ -66,15 +66,17 @@
     "@rollup/plugin-commonjs": "^28.0.1",
     "@rollup/plugin-node-resolve": "^16.0.1",
     "@rollup/plugin-typescript": "^12.1.0",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "@testing-library/jest-dom": "^6.9.1",
-    "@testing-library/dom": "^10.4.1",
-    "@testing-library/react": "^16.3.2",
     "jsdom": "^29.1.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
     "rollup": "^4.35.0",
     "rollup-plugin-preserve-directives": "^0.4.0",
-    "typescript": "^5",
-    "vitest": "^4.1.8"
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vitest": "^4.1.11"
   }
 }

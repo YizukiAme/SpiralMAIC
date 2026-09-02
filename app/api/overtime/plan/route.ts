@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 import { NextRequest } from 'next/server';
 
 import { callLLM } from '@/lib/ai/llm';
@@ -39,7 +40,7 @@ function isKnownConcept(value: unknown): value is OvertimeKnownConcept {
   );
 }
 
-export async function POST(req: NextRequest) {
+async function POSTHandler(req: NextRequest) {
   try {
     const body = (await req.json()) as OvertimePlanRequest;
     const request = parseRequestLearningExtensionParams(body.request);
@@ -119,3 +120,5 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
+export const POST = withAccessCode(POSTHandler);

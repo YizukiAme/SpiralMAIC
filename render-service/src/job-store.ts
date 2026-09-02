@@ -7,7 +7,7 @@
  * same interface so poll/download requests can be served by any replica. The
  * routes only ever see `JobStore`.
  */
-import type { RenderJobRecord, RenderJobStatus } from './types.js';
+import type { RenderJobRecord } from './types.js';
 import { isTerminal } from './types.js';
 
 export interface JobStore {

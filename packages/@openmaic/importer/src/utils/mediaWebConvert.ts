@@ -191,12 +191,6 @@ export async function encodeMediaForWebDisplay(
   return toDataUrl(arrayBufferToBase64(data), mime);
 }
 
-const NON_WEB_EXTENSIONS = new Set(['tif', 'tiff', 'emf', 'wmf', 'wdp', 'jxr', 'hdp']);
-
-function isNonWebFormat(mediaPath: string): boolean {
-  return NON_WEB_EXTENSIONS.has(extOf(mediaPath));
-}
-
 /**
  * Resolve media bytes to a URL string according to the given mode.
  */

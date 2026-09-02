@@ -49,7 +49,6 @@ export function ShapeElement({ elementInfo, selectElement }: ShapeElementProps) 
   // Stop editing when element is no longer active
   useEffect(() => {
     if (handleElementId !== elementInfo.id && editable) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- Sync editable state with active element
       setEditable(false);
     }
   }, [handleElementId, elementInfo.id, editable]);

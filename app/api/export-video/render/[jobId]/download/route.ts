@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 import { NextResponse, type NextRequest } from 'next/server';
 import { apiError } from '@/lib/server/api-response';
 import { proxyFetch } from '@/lib/server/proxy-fetch';
@@ -17,7 +18,7 @@ export const dynamic = 'force-dynamic';
  * from storage — bypassing this proxy. The OSS default (local-disk artifacts)
  * streams the bytes through here.
  */
-export async function GET(req: NextRequest, context: { params: Promise<{ jobId: string }> }) {
+async function GETHandler(req: NextRequest, context: { params: Promise<{ jobId: string }> }) {
   const { jobId } = await context.params;
   const resolved = resolveRenderServiceUrl();
   if ('error' in resolved) {
@@ -64,3 +65,5 @@ export async function GET(req: NextRequest, context: { params: Promise<{ jobId: 
     return apiError('UPSTREAM_ERROR', 502, 'Failed to reach render service');
   }
 }
+
+export const GET = withAccessCode(GETHandler);

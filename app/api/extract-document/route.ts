@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 import { NextRequest, NextResponse } from 'next/server';
 import {
   isServerConfiguredProvider,
@@ -437,7 +438,7 @@ async function runExtraction(
   return apiSuccess({ data: resultWithMetadata });
 }
 
-export async function POST(req: NextRequest) {
+async function POSTHandler(req: NextRequest) {
   const logState: ExtractLogState = {};
   // Whether this request took the asset-id (JSON) form. The multipart byte
   // form's observable behavior is frozen; a few JSON-path-only responses use
@@ -657,3 +658,5 @@ export async function POST(req: NextRequest) {
 function sanitizeLogValue(value: string): string {
   return value.replaceAll('\r', ' ').replaceAll('\n', ' ');
 }
+
+export const POST = withAccessCode(POSTHandler);

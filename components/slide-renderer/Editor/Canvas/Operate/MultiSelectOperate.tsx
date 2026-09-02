@@ -40,7 +40,7 @@ export function MultiSelectOperate({ elementList, scaleMultiElement }: MultiSele
   // Calculate the overall range of multi-selected elements on canvas
   useEffect(() => {
     const { minX, maxX, minY, maxY } = getElementListRange(localActiveElementList);
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- DOM measurement requires effect
+
     setRange({ minX, maxX, minY, maxY });
   }, [localActiveElementList]);
 

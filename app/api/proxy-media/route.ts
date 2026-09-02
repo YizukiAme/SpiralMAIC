@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 /**
  * Media Proxy API
  *
@@ -20,7 +21,7 @@ const log = createLogger('ProxyMedia');
 
 export const maxDuration = 60;
 
-export async function POST(request: NextRequest) {
+async function POSTHandler(request: NextRequest) {
   let url: string | undefined;
   try {
     ({ url } = await request.json());
@@ -87,3 +88,5 @@ export async function POST(request: NextRequest) {
     return apiError('INTERNAL_ERROR', 500, error instanceof Error ? error.message : String(error));
   }
 }
+
+export const POST = withAccessCode(POSTHandler);

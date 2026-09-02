@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 import { NextRequest } from 'next/server';
 
 import { callLLM } from '@/lib/ai/llm';
@@ -202,7 +203,7 @@ function isValidJudgeRequest(value: unknown): value is JudgeRequest {
   return true;
 }
 
-export async function POST(req: NextRequest) {
+async function POSTHandler(req: NextRequest) {
   try {
     const rawBody = (await req.json()) as unknown;
     if (!isValidJudgeRequest(rawBody)) {
@@ -253,3 +254,5 @@ export async function POST(req: NextRequest) {
     return apiError('INTERNAL_ERROR', 500, 'Failed to judge revisit challenge');
   }
 }
+
+export const POST = withAccessCode(POSTHandler);

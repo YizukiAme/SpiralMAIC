@@ -1,3 +1,4 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
 import { NextRequest } from 'next/server';
 
 import { callLLM } from '@/lib/ai/llm';
@@ -19,7 +20,7 @@ interface BlueprintRequest {
   adaptiveContext?: RevisitAdaptiveContext;
 }
 
-export async function POST(req: NextRequest) {
+async function POSTHandler(req: NextRequest) {
   try {
     const body = (await req.json()) as BlueprintRequest;
     if (!body.stage?.id || !Array.isArray(body.scenes)) {
@@ -80,3 +81,5 @@ export async function POST(req: NextRequest) {
     return apiError('INTERNAL_ERROR', 500, 'Failed to create revisit blueprint');
   }
 }
+
+export const POST = withAccessCode(POSTHandler);
