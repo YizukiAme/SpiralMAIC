@@ -18,11 +18,7 @@ import { withAccessCode } from '@/lib/server/with-access-code';
 
 import { NextRequest } from 'next/server';
 import { recordGenerationUsage } from '@/lib/server/usage-storage';
-import {
-  generateImage,
-  aspectRatioToDimensions,
-  IMAGE_PROVIDERS,
-} from '@/lib/media/image-providers';
+import { generateImage, IMAGE_PROVIDERS } from '@/lib/media/image-providers';
 import {
   isServerConfiguredProvider,
   isServerProviderDisabled,
@@ -44,6 +40,7 @@ import {
   createCodexImageTransport,
 } from '@/lib/server/codex/image-transport';
 import { getCodexAuthRuntime } from '@/lib/server/codex/runtime';
+import { resolveImageSize } from '@/lib/server/image-sizing';
 
 const log = createLogger('ImageGeneration API');
 
@@ -236,19 +233,14 @@ async function POSTHandler(request: NextRequest) {
       );
     }
 
-    // Resolve dimensions from aspect ratio if not explicitly set
-    if (!body.width && !body.height && body.aspectRatio) {
-      const dims = aspectRatioToDimensions(body.aspectRatio);
-      body.width = dims.width;
-      body.height = dims.height;
-    }
+    const sizedOptions = resolveImageSize(body, { providerId, modelId: model });
 
     log.info(
       `Generating image: provider=${providerId}, model=${model || 'default'}, ` +
-        `prompt="${body.prompt.slice(0, 80)}...", size=${body.width ?? 'auto'}x${body.height ?? 'auto'}`,
+        `prompt="${sizedOptions.prompt.slice(0, 80)}...", size=${sizedOptions.width ?? 'auto'}x${sizedOptions.height ?? 'auto'}`,
     );
 
-    const result = await generateImage({ providerId, apiKey, baseUrl, model }, body);
+    const result = await generateImage({ providerId, apiKey, baseUrl, model }, sizedOptions);
 
     void recordGenerationUsage({
       kind: 'image',
