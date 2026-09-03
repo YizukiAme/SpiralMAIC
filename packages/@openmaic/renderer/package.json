@@ -82,7 +82,7 @@
     "clsx": "^2.1.1",
     "html-to-image": "^1.11.13",
     "html2canvas-pro": "^2.0.4",
-    "katex": "^0.16.33",
+    "katex": "^0.18.4",
     "lucide-react": "^0.562.0",
     "tailwind-merge": "^3.4.0",
     "tinycolor2": "^1.6.0"
