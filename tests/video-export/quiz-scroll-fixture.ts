@@ -22,7 +22,7 @@ export const QUIZ_SCROLL_QUESTIONS: readonly unknown[] = Array.from({ length: 9 
 
 /** Chromium-pinned geometry for this exact shared fixture at 1280×720. */
 export const QUIZ_SCROLL_LAYOUT_720P: QuizLayoutMeasurement = {
-  contentHeightPx: 2298,
+  contentHeightPx: 2350,
   viewportHeightPx: 475,
   frameHeightPx: 720,
 };
