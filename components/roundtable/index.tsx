@@ -1576,6 +1576,10 @@ export function Roundtable({
 
                     {/* Action circle — voice (ASR on) or text input (ASR off) */}
                     <motion.button
+                      type="button"
+                      aria-label={
+                        asrEnabled ? t('roundtable.voiceInput') : t('roundtable.textInput')
+                      }
                       onClick={(e) => {
                         e.stopPropagation();
                         if (asrEnabled) handleToggleVoice();
