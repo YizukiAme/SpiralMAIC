@@ -69,7 +69,7 @@
     "@rollup/plugin-json": "^6.1.0",
     "@rollup/plugin-node-resolve": "^15.0.1",
     "@rollup/plugin-terser": "^0.1.0",
-    "@rollup/plugin-typescript": "^11.1.6",
+    "@rollup/plugin-typescript": "^12.3.0",
     "eslint": "^10.9.0",
     "rollup": "^3.3.0",
     "rollup-plugin-node-builtins": "^2.1.2",
