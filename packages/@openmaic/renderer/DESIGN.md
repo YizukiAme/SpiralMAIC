@@ -1,8 +1,5 @@
 # maic-renderer 设计稿（v1：只读画布）
 
-> 配套计划：`docs/superpowers/plans/2026-05-28-maic-renderer-package.md`
-> 原始 spec：`docs/superpowers/specs/2026-05-28-maic-renderer-package-design.md`
-
 ## 1. 目标
 
 把 OpenMAIC 主仓 `components/maic-renderer/` 中的只读画布部分抽成独立 workspace 包，让任意 React + Tailwind 4 项目都能"装包 → 传 Slide → 直接渲染"。
