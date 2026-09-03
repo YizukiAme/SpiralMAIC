@@ -2191,6 +2191,7 @@
     },
     "panel": {
       "title": "复盘面板",
+      "description": "查看这门课的记忆状态、挑战记录与教学材料。",
       "loading": "正在读取这堂课的复盘状态...",
       "memoryStatus": "记忆状态",
       "suggestedReview": "建议复习",
@@ -2283,6 +2284,7 @@
     "studio": {
       "title": "教学材料工作台",
       "subtitle": "按需创建、保存并使用不同形式的教学材料。",
+      "providerRequired": "配置一次模型，即可生成下方任意教学材料。",
       "createTitle": "创建教学材料",
       "createDescription": "每次只生成一种作品；其他材料仍可继续查看和使用。",
       "queueActive": "有任务排队中",

@@ -2191,6 +2191,7 @@
     },
     "panel": {
       "title": "複習面板",
+      "description": "查看這門課的記憶狀態、挑戰紀錄與教學材料。",
       "loading": "正在讀取這堂課的複習狀態...",
       "memoryStatus": "記憶狀態",
       "suggestedReview": "建議複習",
@@ -2283,6 +2284,7 @@
     "studio": {
       "title": "教學材料工作臺",
       "subtitle": "依需要分別建立、儲存並使用不同形式的教學材料。",
+      "providerRequired": "設定一次模型，即可生成下方任意教學材料。",
       "createTitle": "建立教學材料",
       "createDescription": "每次只生成一種作品；其他材料仍可繼續查看和使用。",
       "queueActive": "有工作排隊中",

@@ -2191,6 +2191,7 @@
     },
     "panel": {
       "title": "Review overview",
+      "description": "Xem trạng thái ghi nhớ, lịch sử thử thách và tài liệu học của khóa học này.",
       "loading": "Loading this course's review status...",
       "memoryStatus": "Memory status",
       "suggestedReview": "Suggested review",
@@ -2283,6 +2284,7 @@
     "studio": {
       "title": "Study materials studio",
       "subtitle": "Create, save, and use each study artifact independently.",
+      "providerRequired": "Kết nối mô hình một lần để tạo bất kỳ tài liệu nào bên dưới.",
       "createTitle": "Create study materials",
       "createDescription": "Generate one artifact at a time while the rest remain available.",
       "queueActive": "Tasks are queued",

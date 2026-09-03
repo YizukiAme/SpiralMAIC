@@ -106,6 +106,7 @@ import {
 import {
   clearRevisitPanelReturnParams,
   isCurrentRevisitPanelRequest,
+  orderSpiralClassrooms,
   parseRevisitPanelReturn,
   resolveHomeSurfaceState,
   shouldLoadRevisitHomeData,
@@ -778,6 +779,21 @@ function HomePage() {
       (c) => c.folderId === undefined || !folderNameById.has(c.folderId),
     );
   }, [filteredClassrooms, isSearching, currentFolderId, folderNameById]);
+  const orderedVisibleClassrooms = useMemo(
+    () =>
+      reverseChallengeEnabled
+        ? orderSpiralClassrooms(visibleClassrooms, memorySummaries)
+        : visibleClassrooms,
+    [memorySummaries, reverseChallengeEnabled, visibleClassrooms],
+  );
+  const spiralFocusClassroom = useMemo(
+    () =>
+      reverseChallengeEnabled ? orderSpiralClassrooms(classrooms, memorySummaries)[0] : undefined,
+    [classrooms, memorySummaries, reverseChallengeEnabled],
+  );
+  const spiralFocusMemory = spiralFocusClassroom
+    ? memorySummaries[spiralFocusClassroom.id]
+    : undefined;
   const currentFolderClassrooms = useMemo(
     () => (currentFolderId ? classrooms.filter((c) => c.folderId === currentFolderId) : []),
     [classrooms, currentFolderId],
@@ -1155,8 +1171,8 @@ function HomePage() {
 
       {/* ═══ Hero section: title + input (centered, wider) ═══ */}
       <motion.div
-        initial={heroEnter({ opacity: 0, y: 20 })}
-        animate={{ opacity: 1, y: 0 }}
+        initial={heroEnter({ y: 20 })}
+        animate={{ y: 0 }}
         transition={{ duration: 0.6, ease: 'easeOut' }}
         className={cn(
           'relative z-20 w-full max-w-[800px] flex flex-col items-center',
@@ -1201,7 +1217,7 @@ function HomePage() {
               className="absolute inset-0 size-full object-contain"
             />
           </motion.div>
-          {workbenchEntryEnabled ? (
+          {workbenchEntryEnabled && homeSurface.showProEntry ? (
             <div
               className="absolute left-full top-0 ml-1.5 mt-[10px] md:ml-2 md:mt-[14px]"
               data-pro-morph="badge"
@@ -1218,7 +1234,7 @@ function HomePage() {
           transition={{ delay: 0.25 }}
           className="text-sm text-muted-foreground/60 mb-8"
         >
-          {t('home.slogan')}
+          {homeSurface.showSpiralLogo ? t('revisit.panel.title') : t('home.slogan')}
         </motion.p>
 
         <AnimatePresence initial={false}>
@@ -1323,6 +1339,101 @@ function HomePage() {
             </motion.div>
           ) : null}
         </AnimatePresence>
+
+        {!homeSurface.showPromptComposer ? (
+          <motion.div
+            key="spiral-focus"
+            initial={{ y: 8 }}
+            animate={{ y: 0 }}
+            transition={{ delay: 0.08, duration: 0.3 }}
+            className="w-full"
+          >
+            {spiralFocusClassroom ? (
+              <section
+                className="relative overflow-hidden rounded-3xl border border-border/60 bg-white/80 p-6 shadow-xl shadow-slate-950/[0.05] backdrop-blur-xl dark:bg-slate-900/75"
+                style={
+                  spiralFocusMemory
+                    ? {
+                        borderColor: `color-mix(in srgb, ${spiralFocusMemory.color} 45%, transparent)`,
+                      }
+                    : undefined
+                }
+              >
+                <div className="flex flex-wrap items-end justify-between gap-6">
+                  <div className="min-w-0">
+                    <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                      <BrainCircuit className="size-4" />
+                      {t('revisit.panel.suggestedReview')}
+                    </p>
+                    <h1 className="mt-3 truncate text-2xl font-semibold tracking-tight">
+                      {spiralFocusClassroom.name}
+                    </h1>
+                    <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
+                      <span>{t('revisit.panel.currentMemory')}</span>
+                      {spiralFocusMemory ? (
+                        <span
+                          className="inline-flex items-center gap-2 rounded-full border px-2.5 py-1 font-medium"
+                          style={{
+                            borderColor: spiralFocusMemory.color,
+                            color: spiralFocusMemory.color,
+                            background: `color-mix(in srgb, ${spiralFocusMemory.color} 10%, transparent)`,
+                          }}
+                        >
+                          <span className="size-2 rounded-full bg-current" aria-hidden="true" />
+                          {t(`revisit.memory.${spiralFocusMemory.status}`)}
+                          {spiralFocusMemory.recall == null
+                            ? null
+                            : ` · ${Math.round(spiralFocusMemory.recall * 100)}%`}
+                        </span>
+                      ) : (
+                        <span>{t('revisit.panel.none')}</span>
+                      )}
+                    </div>
+                  </div>
+                  <Button
+                    size="lg"
+                    className="bg-[#6d28d9] text-white hover:bg-[#5b21b6]"
+                    onClick={() => {
+                      if (spiralFocusMemory?.status === 'unlearned') {
+                        router.push(`/classroom/${spiralFocusClassroom.id}`);
+                      } else {
+                        openClassroomCard(spiralFocusClassroom);
+                      }
+                    }}
+                  >
+                    <BrainCircuit />
+                    {spiralFocusMemory?.status === 'unlearned'
+                      ? t('revisit.panel.openCourse')
+                      : t('revisit.challenge.open')}
+                  </Button>
+                </div>
+              </section>
+            ) : (
+              <section className="rounded-3xl border border-dashed border-border/70 bg-white/65 px-6 py-8 text-center shadow-sm backdrop-blur-xl dark:bg-slate-900/55">
+                <BrainCircuit className="mx-auto size-8 text-muted-foreground" />
+                <h1 className="mt-4 text-lg font-semibold">
+                  {t('revisit.panel.completeCourseFirst')}
+                </h1>
+                <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted-foreground">
+                  {t('classroom.emptyLibraryHint')}
+                </p>
+                <div className="mt-5 flex items-center justify-center gap-3">
+                  <Button
+                    className="bg-[#6d28d9] text-white hover:bg-[#5b21b6]"
+                    onClick={triggerImport}
+                    disabled={importing}
+                  >
+                    <Upload />
+                    {t('import.classroom')}
+                  </Button>
+                  <Button variant="outline" onClick={() => setReverseChallengeEnabled(false)}>
+                    OpenMAIC
+                  </Button>
+                </div>
+              </section>
+            )}
+          </motion.div>
+        ) : null}
 
         {homeSurface.showPromptComposer && showVocationalTestUi && (
           <motion.div
@@ -1436,8 +1547,14 @@ function HomePage() {
                 }}
                 className="flex items-center gap-2 hover:text-foreground/70 transition-colors cursor-pointer"
               >
-                <Clock className="size-3.5" />
-                {t('classroom.recentClassrooms')}
+                {reverseChallengeEnabled ? (
+                  <BrainCircuit className="size-3.5" />
+                ) : (
+                  <Clock className="size-3.5" />
+                )}
+                {reverseChallengeEnabled
+                  ? t('revisit.panel.title')
+                  : t('classroom.recentClassrooms')}
                 {currentFolder && (
                   <>
                     <ChevronRight className="size-3 opacity-40" />
@@ -1591,9 +1708,11 @@ function HomePage() {
                 className="w-full overflow-hidden"
               >
                 {folders.length === 0 && classrooms.length === 0 ? (
-                  <div className="pt-8 pb-2 text-center text-[13px] text-muted-foreground/60">
-                    {t('classroom.emptyLibraryHint')}
-                  </div>
+                  reverseChallengeEnabled ? null : (
+                    <div className="pt-8 pb-2 text-center text-[13px] text-muted-foreground/60">
+                      {t('classroom.emptyLibraryHint')}
+                    </div>
+                  )
                 ) : !isSearching && currentFolderId && currentFolderClassrooms.length === 0 ? (
                   // Empty folder: hint directly below the centered path bar.
                   <div className="pt-8 text-center">
@@ -1670,7 +1789,7 @@ function HomePage() {
                           ))}
 
                         {/* Course tiles for the active view. */}
-                        {visibleClassrooms.map((classroom, i) => (
+                        {orderedVisibleClassrooms.map((classroom, i) => (
                           <motion.div
                             key={classroom.id}
                             initial={{ opacity: 0, y: 16 }}
@@ -2143,9 +2262,12 @@ function ClassroomCard({
   const memoryLabel = visibleMemorySummary
     ? t(`revisit.memory.${visibleMemorySummary.status}`)
     : null;
-  const memoryTooltip = visibleMemorySummary?.recall
-    ? t('revisit.memory.recallPercent', { percent: Math.round(visibleMemorySummary.recall * 100) })
-    : memoryLabel;
+  const memoryTooltip =
+    visibleMemorySummary?.recall != null
+      ? t('revisit.memory.recallPercent', {
+          percent: Math.round(visibleMemorySummary.recall * 100),
+        })
+      : memoryLabel;
 
   const startRename = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -2191,6 +2313,13 @@ function ClassroomCard({
       <div
         ref={thumbRef}
         className="relative w-full aspect-[16/9] rounded-2xl bg-slate-100 dark:bg-slate-800/80 overflow-hidden transition-transform duration-200 group-hover:scale-[1.02]"
+        style={
+          visibleMemorySummary
+            ? {
+                boxShadow: `0 0 0 1px color-mix(in srgb, ${visibleMemorySummary.color} 45%, transparent), 0 14px 34px -26px ${visibleMemorySummary.color}`,
+              }
+            : undefined
+        }
       >
         {slide && thumbWidth > 0 ? (
           <SlideThumbnail
@@ -2243,14 +2372,20 @@ function ClassroomCard({
               <span
                 aria-label={memoryTooltip || memoryLabel}
                 onClick={(e) => e.stopPropagation()}
-                className="absolute bottom-2 right-2 z-10 inline-flex h-5 max-w-[70%] items-center rounded-full border px-2 text-[10px] font-semibold shadow-sm backdrop-blur-sm"
+                className="absolute bottom-2.5 right-2.5 z-10 inline-flex h-7 max-w-[80%] items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-semibold shadow-sm backdrop-blur-md"
                 style={{
                   borderColor: visibleMemorySummary.color,
                   color: visibleMemorySummary.color,
-                  background: `color-mix(in srgb, ${visibleMemorySummary.color} 18%, transparent)`,
+                  background: `color-mix(in srgb, ${visibleMemorySummary.color} 16%, var(--background))`,
                 }}
               >
+                <span className="size-1.5 shrink-0 rounded-full bg-current" aria-hidden="true" />
                 <span className="truncate">{memoryLabel}</span>
+                {visibleMemorySummary.recall == null ? null : (
+                  <span className="tabular-nums">
+                    {Math.round(visibleMemorySummary.recall * 100)}%
+                  </span>
+                )}
               </span>
             </TooltipTrigger>
             <TooltipContent side="top" align="end" sideOffset={-4} className="text-xs">

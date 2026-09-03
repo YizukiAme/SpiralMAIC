@@ -2191,6 +2191,7 @@
     },
     "panel": {
       "title": "Painel de revisão",
+      "description": "Revise o estado da memória, o histórico de desafios e os materiais de estudo deste curso.",
       "loading": "Carregando o status de revisão deste curso...",
       "memoryStatus": "Status da memória",
       "suggestedReview": "Revisão sugerida",
@@ -2283,6 +2284,7 @@
     "studio": {
       "title": "Estúdio de materiais de estudo",
       "subtitle": "Crie, salve e use cada material de revisão de forma independente.",
+      "providerRequired": "Conecte um modelo uma vez para gerar qualquer material abaixo.",
       "createTitle": "Criar materiais de estudo",
       "createDescription": "Gere um material por vez enquanto os outros continuam disponíveis.",
       "queueActive": "Há tarefas na fila",

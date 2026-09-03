@@ -30,6 +30,12 @@ export const STUDY_ARTIFACT_GROUPS = [
   kinds: readonly StudyArtifactKind[];
 }>;
 
+export const STUDY_ARTIFACT_CREATION_GROUP_IDS = [
+  'practice',
+  'understanding',
+  'structure',
+] as const satisfies readonly StudyArtifactGroupId[];
+
 export function latestStudyArtifactByKind(
   artifacts: StudyArtifact[],
 ): Partial<Record<StudyArtifactKind, StudyArtifact>> {

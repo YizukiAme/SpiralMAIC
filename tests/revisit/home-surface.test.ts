@@ -6,6 +6,7 @@ import {
   isCurrentRevisitPanelRequest,
   parseRevisitPanelReturn,
   parseRevisitPanelSection,
+  orderSpiralClassrooms,
   resolveHomeSurfaceState,
   shouldLoadRevisitHomeData,
 } from '@/lib/revisit/home-surface';
@@ -19,10 +20,11 @@ describe('home Spiral surface state', () => {
     ).toEqual({
       showPromptComposer: true,
       showSpiralLogo: false,
+      showProEntry: true,
     });
   });
 
-  it('hides the prompt composer in Spiral mode', () => {
+  it('keeps Spiral and Pro as separate product surfaces', () => {
     expect(
       resolveHomeSurfaceState({
         reverseChallengeEnabled: true,
@@ -30,6 +32,7 @@ describe('home Spiral surface state', () => {
     ).toEqual({
       showPromptComposer: false,
       showSpiralLogo: true,
+      showProEntry: false,
     });
   });
 
@@ -39,6 +42,26 @@ describe('home Spiral surface state', () => {
     );
     expect(shouldLoadRevisitHomeData({ reverseChallengeEnabled: true, stageCount: 0 })).toBe(false);
     expect(shouldLoadRevisitHomeData({ reverseChallengeEnabled: true, stageCount: 3 })).toBe(true);
+  });
+
+  it('orders the Spiral library by review need instead of recent activity', () => {
+    const classrooms = [
+      { id: 'stable', updatedAt: 40 },
+      { id: 'fresh', updatedAt: 30 },
+      { id: 'review-later', updatedAt: 20 },
+      { id: 'review-now', updatedAt: 10 },
+      { id: 'unlearned', updatedAt: 50 },
+    ];
+
+    expect(
+      orderSpiralClassrooms(classrooms, {
+        stable: { status: 'stable', recall: 0.92 },
+        fresh: { status: 'fresh', recall: 0.78 },
+        'review-later': { status: 'review', recall: 0.48 },
+        'review-now': { status: 'review', recall: 0.22 },
+        unlearned: { status: 'unlearned', recall: null },
+      }).map(({ id }) => id),
+    ).toEqual(['review-now', 'review-later', 'fresh', 'stable', 'unlearned']);
   });
 
   it('rejects a stale review-panel response after another course is opened', () => {

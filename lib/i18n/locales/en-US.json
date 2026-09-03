@@ -2191,6 +2191,7 @@
     },
     "panel": {
       "title": "Review overview",
+      "description": "Review this course's memory status, challenge history, and study materials.",
       "loading": "Loading this course's review status...",
       "memoryStatus": "Memory status",
       "suggestedReview": "Suggested review",
@@ -2283,6 +2284,7 @@
     "studio": {
       "title": "Study materials studio",
       "subtitle": "Create, save, and use each study artifact independently.",
+      "providerRequired": "Connect a model once to generate any of the materials below.",
       "createTitle": "Create study materials",
       "createDescription": "Generate one artifact at a time while the rest remain available.",
       "queueActive": "Tasks are queued",

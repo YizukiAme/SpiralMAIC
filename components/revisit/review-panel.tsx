@@ -303,6 +303,7 @@ function ReverseChallengeHistory({
   const memory = summary.memorySummary;
   const recallPercent = memory.recall == null ? null : Math.round(memory.recall * 100);
   const lessonCompleted = Boolean(summary.completedAt);
+  const unfinishedAction = unfinished ? getRevisitAttemptAction(unfinished) : null;
 
   const requestNew = () => {
     if (!classroom) return;
@@ -329,23 +330,58 @@ function ReverseChallengeHistory({
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-2.5 border-b pb-5 sm:grid-cols-2 xl:grid-cols-3">
-        <SummaryMetric
-          label={t('revisit.panel.currentMemory')}
-          value={recallPercent == null ? t('revisit.panel.none') : `${recallPercent}%`}
-          icon={<BrainCircuit />}
-          accent={memory.color}
-        />
-        <SummaryMetric
-          label={t('revisit.panel.suggestedReview')}
-          value={formatSuggestedReview(summary.suggestedReviewAt)}
-          icon={<Clock />}
-        />
-        <SummaryMetric
-          label={t('revisit.panel.pendingAssessment')}
-          value={String(summary.pendingAssessmentCount)}
-          icon={<CalendarCheck />}
-        />
+      <div
+        className="relative overflow-hidden rounded-2xl border border-border/60 bg-background/70 p-5 shadow-sm backdrop-blur-sm"
+        style={{
+          boxShadow: `inset 4px 0 0 ${memory.color}`,
+        }}
+      >
+        <div className="flex flex-wrap items-end justify-between gap-5">
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-muted-foreground">
+              {t('revisit.panel.suggestedReview')}
+            </p>
+            <p className="mt-1 text-xl font-semibold tracking-tight">
+              {formatSuggestedReview(summary.suggestedReviewAt)}
+            </p>
+            <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
+              <span className="inline-flex items-center gap-2">
+                <span
+                  className="size-2.5 rounded-full"
+                  style={{ backgroundColor: memory.color }}
+                  aria-hidden="true"
+                />
+                <span className="text-muted-foreground">{t('revisit.panel.currentMemory')}</span>
+                <strong className="tabular-nums">
+                  {recallPercent == null ? t('revisit.panel.none') : `${recallPercent}%`}
+                </strong>
+              </span>
+              <span className="inline-flex items-center gap-2 text-muted-foreground">
+                <CalendarCheck className="size-4" />
+                {t('revisit.panel.pendingAssessment')}
+                <strong className="text-foreground">{summary.pendingAssessmentCount}</strong>
+              </span>
+            </div>
+          </div>
+          <Button
+            size="lg"
+            className="bg-[#6d28d9] text-white hover:bg-[#5b21b6]"
+            disabled={loading || Boolean(error)}
+            onClick={() => (unfinished ? onOpenAttempt(unfinished, dataScope) : requestNew())}
+          >
+            <BrainCircuit />
+            {unfinishedAction
+              ? t(`revisit.history.actions.${unfinishedAction}`)
+              : !lessonCompleted
+                ? t('revisit.panel.completeCourseFirst')
+                : canStart
+                  ? t('revisit.history.generateNew')
+                  : t('toolbar.configureProvider')}
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid gap-2.5 border-b pb-5 sm:grid-cols-3">
         <SummaryMetric
           label={t('revisit.panel.createdAt')}
           value={formatDateTime(summary.startedAt)}
@@ -371,19 +407,25 @@ function ReverseChallengeHistory({
         />
       </div>
 
-      <div className="grid min-h-[360px] gap-5 md:grid-cols-[minmax(250px,0.9fr)_minmax(0,1.25fr)]">
-        <section className="border-b pb-4 md:border-r md:border-b-0 md:pr-4 md:pb-0">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold">{t('revisit.history.title')}</h3>
-            <Badge variant="secondary">{attempts.length}</Badge>
+      {attempts.length === 0 ? (
+        <section className="rounded-2xl border border-dashed border-border/70 bg-background/35 px-6 py-12 text-center">
+          <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-muted/70 text-muted-foreground">
+            <BrainCircuit className="size-6" />
           </div>
-          <div className="space-y-4">
-            {attempts.length === 0 ? (
-              <p className="rounded-md border border-dashed px-3 py-5 text-center text-sm text-muted-foreground">
-                {t('revisit.history.empty')}
-              </p>
-            ) : (
-              attempts.map((attempt) => {
+          <h3 className="mt-4 text-sm font-semibold">{t('revisit.history.empty')}</h3>
+          <p className="mx-auto mt-1.5 max-w-md text-sm leading-6 text-muted-foreground">
+            {t('revisit.history.awaitingCompletion')}
+          </p>
+        </section>
+      ) : (
+        <div className="grid min-h-[360px] gap-5 md:grid-cols-[minmax(250px,0.9fr)_minmax(0,1.25fr)]">
+          <section className="border-b pb-4 md:border-r md:border-b-0 md:pr-4 md:pb-0">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold">{t('revisit.history.title')}</h3>
+              <Badge variant="secondary">{attempts.length}</Badge>
+            </div>
+            <div className="space-y-4">
+              {attempts.map((attempt) => {
                 const attemptReport = summary.reports.find(
                   (item) => item.attemptId === attempt.attemptId,
                 );
@@ -399,39 +441,17 @@ function ReverseChallengeHistory({
                     formatDateTime={formatDateTime}
                   />
                 );
-              })
-            )}
-          </div>
-
-          {!unfinished ? (
-            <Button
-              className="mt-3 w-full"
-              disabled={loading || Boolean(error)}
-              onClick={requestNew}
-            >
-              <BrainCircuit />
-              {!lessonCompleted
-                ? t('revisit.panel.completeCourseFirst')
-                : canStart
-                  ? t('revisit.history.generateNew')
-                  : t('home.configureProvider')}
-            </Button>
-          ) : null}
-        </section>
-
-        <section className="min-w-0">
-          {selected ? (
-            <AttemptDetails attempt={selected} report={report} formatDateTime={formatDateTime} />
-          ) : (
-            <div className="flex min-h-[280px] items-center justify-center border-y text-center">
-              <div>
-                <BrainCircuit className="mx-auto size-8 text-muted-foreground" />
-                <p className="mt-3 text-sm font-medium">{t('revisit.history.empty')}</p>
-              </div>
+              })}
             </div>
-          )}
-        </section>
-      </div>
+          </section>
+
+          <section className="min-w-0">
+            {selected ? (
+              <AttemptDetails attempt={selected} report={report} formatDateTime={formatDateTime} />
+            ) : null}
+          </section>
+        </div>
+      )}
 
       <AlertDialog open={lowBenefitOpen} onOpenChange={setLowBenefitOpen}>
         <AlertDialogContent>

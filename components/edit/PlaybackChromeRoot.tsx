@@ -233,6 +233,18 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
     const setChatAreaWidth = useSettingsStore((s) => s.setChatAreaWidth);
     const chatAreaCollapsed = useSettingsStore((s) => s.chatAreaCollapsed);
     const setChatAreaCollapsed = useSettingsStore((s) => s.setChatAreaCollapsed);
+    const revisitTranscriptPreviousCollapsedRef = useRef<boolean | null>(null);
+    const hasRevisitTranscript = Boolean(revisitConfig?.transcriptSession);
+    useEffect(() => {
+      if (!hasRevisitTranscript) return;
+      revisitTranscriptPreviousCollapsedRef.current = useSettingsStore.getState().chatAreaCollapsed;
+      setChatAreaCollapsed(false);
+      return () => {
+        const previous = revisitTranscriptPreviousCollapsedRef.current;
+        revisitTranscriptPreviousCollapsedRef.current = null;
+        if (previous !== null) setChatAreaCollapsed(previous);
+      };
+    }, [hasRevisitTranscript, setChatAreaCollapsed]);
     const setTTSMuted = useSettingsStore((s) => s.setTTSMuted);
     const setTTSVolume = useSettingsStore((s) => s.setTTSVolume);
     const activeRevisitDemoSessionByStage = useSettingsStore(

@@ -35,6 +35,16 @@ export interface ClassroomImportOptions {
   onPhase?: (phase: ImportPhase) => void;
 }
 
+/** Classroom ZIPs are complete snapshots; the format carries no resumable generation plan. */
+export function completedClassroomImportOutline(now: number): NonNullable<AppDocument['outline']> {
+  return {
+    outlines: [],
+    generationComplete: true,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 async function bestEffortRollback(created: {
   stageId: string;
   audioIds: string[];
@@ -168,6 +178,11 @@ export async function importClassroomBlob(
         ...(generatedAgentConfigs.length > 0 ? { generatedAgentConfigs } : {}),
         ...(isValidSpiralAgentRoster(spiralAgentConfigs) ? { spiralAgentConfigs } : {}),
       },
+      // A classroom archive is a self-contained snapshot: the ZIP format has
+      // no pending-outline state that the browser could resume after import.
+      // Mark it complete so playback can reach the course-end page and Spiral
+      // can record completion once every imported scene has actually played.
+      outline: completedClassroomImportOutline(now),
       scenes: manifest.scenes.map((manifestScene: ManifestScene, index: number) => {
         const newSceneId = nanoid();
         const actions = manifestScene.actions

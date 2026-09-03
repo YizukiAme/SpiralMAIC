@@ -108,7 +108,7 @@ const report: RevisitJudgeReport = {
 
 describe('shared Reverse report', () => {
   it.each(['full', 'compact'] as const)(
-    'renders %s density with the same evidence and accessible radar',
+    'renders %s density with the same evidence and accessible dimension bars',
     (density) => {
       const html = renderToStaticMarkup(
         createElement(RevisitReport, {
@@ -122,8 +122,9 @@ describe('shared Reverse report', () => {
       );
 
       expect(html).toContain(`data-density="${density}"`);
-      expect(html).toContain('role="img"');
-      expect(html).toContain('revisit.report.radarDescription');
+      expect(html.match(/role="progressbar"/g)).toHaveLength(4);
+      expect(html).not.toContain('<polygon');
+      expect(html).not.toContain('revisit.report.radarDescription');
       expect(html).toContain('90%');
       expect(html).toContain('80%');
       expect(html).toContain('70%');
@@ -158,7 +159,7 @@ describe('shared Reverse report', () => {
 
   it('uses container-width-safe auto-fit grids instead of viewport breakpoints', () => {
     expect(reportComponentSource).not.toMatch(/(?:sm|md|lg):grid-cols/);
-    expect(reportComponentSource.match(/gridTemplateColumns:/g)).toHaveLength(4);
+    expect(reportComponentSource.match(/gridTemplateColumns:/g)).toHaveLength(3);
     expect(reportComponentSource).toContain('repeat(auto-fit, minmax(min(100%');
   });
 
@@ -191,6 +192,11 @@ describe('shared Reverse report', () => {
 });
 
 describe('Reverse report integration contracts', () => {
+  it('opens the challenge transcript by default and restores the classroom preference on exit', () => {
+    expect(playbackSource).toContain('setChatAreaCollapsed(false)');
+    expect(playbackSource).toContain('setChatAreaCollapsed(previous)');
+  });
+
   it('uses the shared report for both the live report and history detail', () => {
     expect(liveSource).toContain('<RevisitReport');
     expect(liveSource).toContain('density="full"');

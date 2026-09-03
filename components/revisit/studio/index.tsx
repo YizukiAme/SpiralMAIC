@@ -60,6 +60,7 @@ import {
   groupStudyArtifacts,
   latestVisibleArtifactJobs,
   latestStudyArtifactByKind,
+  STUDY_ARTIFACT_CREATION_GROUP_IDS,
   STUDY_ARTIFACT_GROUPS,
 } from '@/lib/revisit/studio';
 import type { RevisitPanelSummary } from '@/lib/revisit/panel-summary';
@@ -173,68 +174,13 @@ export function StudyStudio({
 
   return (
     <div className="space-y-7 pb-5">
-      <section aria-labelledby="study-studio-create-heading" className="space-y-4">
-        <div className="flex items-end justify-between gap-4">
-          <div>
-            <h2 id="study-studio-create-heading" className="text-base font-semibold">
-              {t('revisit.studio.createTitle')}
+      {artifacts.length > 0 || libraryJobs.length > 0 ? (
+        <section aria-labelledby="study-studio-library-heading">
+          <div className="mb-4 px-1">
+            <h2 id="study-studio-library-heading" className="text-base font-semibold">
+              {t('revisit.studio.libraryTitle')}
             </h2>
           </div>
-          {stageJobs.some((job) => job.status === 'queued') ? (
-            <Badge variant="secondary">
-              <Clock3 />
-              {t('revisit.studio.queueActive')}
-            </Badge>
-          ) : null}
-        </div>
-
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {STUDY_ARTIFACT_DEFINITIONS.map((definition) => {
-            const latest = latestByKind[definition.kind];
-            const job = visibleJobByKind[definition.kind];
-            return (
-              <ArtifactCreationTile
-                key={definition.kind}
-                definition={definition}
-                latest={latest}
-                job={job}
-                disabled={disabled}
-                lessonCompleted={lessonCompleted}
-                canGenerate={canGenerate}
-                onGenerate={() =>
-                  requestGeneration(
-                    definition.kind,
-                    getDefaultStudyArtifactOptions(definition.kind),
-                  )
-                }
-                onCustomize={() => openCustomize(definition.kind)}
-                onRetry={() => job && retry(job.id)}
-                onCancel={() => job && cancel(job.id)}
-              />
-            );
-          })}
-        </div>
-      </section>
-
-      <section
-        aria-labelledby="study-studio-library-heading"
-        className="border-t border-border/60 pt-6 dark:border-white/10"
-      >
-        <div className="mb-4 px-1">
-          <h2 id="study-studio-library-heading" className="text-base font-semibold">
-            {t('revisit.studio.libraryTitle')}
-          </h2>
-        </div>
-
-        {artifacts.length === 0 && libraryJobs.length === 0 ? (
-          <div className="flex min-h-32 flex-col items-center justify-center rounded-lg border border-border/60 bg-white/65 px-6 text-center shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/65">
-            <Sparkles className="mb-3 size-5 text-muted-foreground" />
-            <p className="text-sm font-medium">{t('revisit.studio.emptyTitle')}</p>
-            <p className="mt-1 max-w-md text-xs leading-5 text-muted-foreground">
-              {t('revisit.studio.emptyDescription')}
-            </p>
-          </div>
-        ) : (
           <div className="divide-y overflow-hidden rounded-lg border border-border/60 bg-white/65 shadow-sm backdrop-blur-xl dark:divide-white/10 dark:border-white/10 dark:bg-slate-900/65">
             {STUDY_ARTIFACT_GROUPS.map((group) => {
               const groupArtifacts = groupedArtifacts[group.id];
@@ -280,7 +226,93 @@ export function StudyStudio({
               );
             })}
           </div>
+        </section>
+      ) : null}
+
+      <section
+        aria-labelledby="study-studio-create-heading"
+        className={cn(
+          'space-y-4',
+          artifacts.length > 0 || libraryJobs.length > 0
+            ? 'border-t border-border/60 pt-6 dark:border-white/10'
+            : '',
         )}
+      >
+        <div className="flex items-end justify-between gap-4">
+          <h2 id="study-studio-create-heading" className="text-base font-semibold">
+            {t('revisit.studio.createTitle')}
+          </h2>
+          {stageJobs.some((job) => job.status === 'queued') ? (
+            <Badge variant="secondary">
+              <Clock3 />
+              {t('revisit.studio.queueActive')}
+            </Badge>
+          ) : null}
+        </div>
+
+        {lessonCompleted && !canGenerate ? (
+          <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-violet-500/25 bg-violet-500/8 px-4 py-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-violet-500/15 text-violet-600 dark:text-violet-300">
+                <Sparkles className="size-4" />
+              </span>
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold">{t('toolbar.configureProvider')}</h3>
+                <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
+                  {t('revisit.studio.providerRequired')}
+                </p>
+              </div>
+            </div>
+            <Button size="sm" onClick={onConfigureProvider}>
+              {t('toolbar.configureProvider')}
+            </Button>
+          </div>
+        ) : null}
+
+        <div className="divide-y overflow-hidden rounded-lg border border-border/60 bg-white/50 shadow-sm backdrop-blur-xl dark:divide-white/10 dark:border-white/10 dark:bg-slate-900/45">
+          {STUDY_ARTIFACT_CREATION_GROUP_IDS.map((groupId) => {
+            const group = STUDY_ARTIFACT_GROUPS.find((candidate) => candidate.id === groupId)!;
+            return (
+              <div key={group.id} className="grid grid-cols-1 md:grid-cols-[150px_minmax(0,1fr)]">
+                <div className="border-b border-border/60 bg-slate-100/70 px-4 py-4 md:border-r md:border-b-0 dark:border-white/10 dark:bg-slate-950/35">
+                  <h3 className="text-sm font-medium">
+                    {t(`revisit.studio.groups.${group.id}.title`)}
+                  </h3>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    {t(`revisit.studio.groups.${group.id}.description`)}
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 gap-3 p-3 sm:grid-cols-2">
+                  {group.kinds.map((kind) => {
+                    const definition = STUDY_ARTIFACT_DEFINITION_BY_KIND[kind];
+                    const latest = latestByKind[definition.kind];
+                    const job = visibleJobByKind[definition.kind];
+                    return (
+                      <ArtifactCreationTile
+                        key={definition.kind}
+                        definition={definition}
+                        latest={latest}
+                        job={job}
+                        disabled={disabled}
+                        lessonCompleted={lessonCompleted}
+                        canGenerate={canGenerate}
+                        onGenerate={() =>
+                          requestGeneration(
+                            definition.kind,
+                            getDefaultStudyArtifactOptions(definition.kind),
+                          )
+                        }
+                        onCustomize={() => openCustomize(definition.kind)}
+                        onRetry={() => job && retry(job.id)}
+                        onCancel={() => job && cancel(job.id)}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </section>
 
       {classroom && customizingKind ? (
@@ -456,6 +488,7 @@ function ArtifactCreationTile({
   const Icon = definition.icon;
   const pending = job?.status === 'queued' || job?.status === 'generating';
   const retryable = job?.status === 'failed' || job?.status === 'interrupted';
+  const providerBlocked = lessonCompleted && !canGenerate;
 
   return (
     <article className="flex min-h-[196px] flex-col rounded-lg border border-border/60 bg-white/75 p-4 shadow-sm shadow-slate-950/5 backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 dark:shadow-black/20">
@@ -489,7 +522,7 @@ function ArtifactCreationTile({
         <Button
           size="sm"
           className="min-w-0 flex-1"
-          disabled={disabled || pending}
+          disabled={disabled || pending || providerBlocked}
           onClick={retryable ? onRetry : onGenerate}
         >
           {pending ? (
@@ -502,16 +535,19 @@ function ArtifactCreationTile({
           <span className="truncate">
             {!lessonCompleted
               ? t('revisit.studio.openCourse')
-              : !canGenerate
-                ? t('home.configureProvider')
-                : retryable
-                  ? t('revisit.studio.retry')
-                  : latest
-                    ? t('revisit.studio.regenerate')
-                    : t('revisit.studio.generate')}
+              : retryable
+                ? t('revisit.studio.retry')
+                : latest
+                  ? t('revisit.studio.regenerate')
+                  : t('revisit.studio.generate')}
           </span>
         </Button>
-        <Button size="sm" variant="outline" disabled={disabled || pending} onClick={onCustomize}>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={disabled || pending || providerBlocked}
+          onClick={onCustomize}
+        >
           <SlidersHorizontal />
           {t('revisit.studio.customizeButton')}
         </Button>

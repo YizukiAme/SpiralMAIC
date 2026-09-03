@@ -1,5 +1,6 @@
 import 'fake-indexeddb/auto';
 
+import { readFileSync } from 'node:fs';
 import JSZip from 'jszip';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -9,6 +10,10 @@ import { db } from '@/lib/utils/database';
 import type { Stage } from '@/lib/types/stage';
 
 const storage = new Map<string, string>();
+const homepageImporterSource = readFileSync(
+  new URL('../../lib/import/use-import-classroom.ts', import.meta.url),
+  'utf8',
+);
 const localStorageStub = {
   getItem: (key: string) => storage.get(key) ?? null,
   setItem: (key: string, value: string) => storage.set(key, value),
@@ -86,7 +91,15 @@ describe('importClassroomBlob', () => {
       name: 'Demo',
     });
     expect(imported?.scenes).toHaveLength(1);
+    expect(imported?.outline).toMatchObject({
+      outlines: [],
+      generationComplete: true,
+    });
     expect(phases).toEqual(['parsing', 'validating', 'writingMedia', 'writingCourse', 'done']);
+  });
+
+  it('marks the homepage import path as a complete classroom snapshot too', () => {
+    expect(homepageImporterSource).toContain('outline: completedClassroomImportOutline(now)');
   });
 
   it('imports Spiral agents into the stage without writing normal generated-agent records', async () => {

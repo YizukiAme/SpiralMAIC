@@ -6,7 +6,6 @@ import { Badge } from '@/components/ui/badge';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import {
   REVISIT_REPORT_DIMENSIONS,
-  buildRevisitRadarPoints,
   getRevisitReportFeedbackState,
 } from '@/lib/revisit/report-presentation';
 import type {
@@ -22,29 +21,13 @@ export interface RevisitReportProps {
   readonly conceptLabelsById?: Readonly<Record<string, string>>;
 }
 
-const RADAR_CENTER = 100;
-const RADAR_RADIUS = 68;
-
-function polygonPoints(points: Array<{ x: number; y: number }>): string {
-  return points.map(({ x, y }) => `${x.toFixed(2)},${y.toFixed(2)}`).join(' ');
-}
-
-function axisPoint(index: number, radius = RADAR_RADIUS): { x: number; y: number } {
-  const angle = -Math.PI / 2 + (index * Math.PI * 2) / REVISIT_REPORT_DIMENSIONS.length;
-  return {
-    x: RADAR_CENTER + Math.cos(angle) * radius,
-    y: RADAR_CENTER + Math.sin(angle) * radius,
-  };
-}
-
 export function RevisitReport({ report, density, conceptLabelsById = {} }: RevisitReportProps) {
   const { t } = useI18n();
-  const radarPoints = buildRevisitRadarPoints(report.dimensions, RADAR_CENTER, RADAR_RADIUS);
-  const radarDescription = REVISIT_REPORT_DIMENSIONS.map(
-    (dimension) =>
-      `${t(`revisit.report.dimensions.${dimension}`)} ${Math.round(report.dimensions[dimension] * 100)}%`,
-  ).join(', ');
   const evidenceAvailable = getRevisitReportFeedbackState(report) === 'evidence';
+  const leadingImprovement = evidenceAvailable ? report.improvements?.[0] : undefined;
+  const rankedDimensions = [...REVISIT_REPORT_DIMENSIONS].sort(
+    (left, right) => report.dimensions[left] - report.dimensions[right],
+  );
 
   return (
     <article
@@ -56,116 +39,87 @@ export function RevisitReport({ report, density, conceptLabelsById = {} }: Revis
     >
       <section
         className={cn(
-          'overflow-hidden rounded-2xl border border-amber-200/70 bg-gradient-to-br from-amber-50 via-background to-orange-50/60 shadow-sm dark:border-amber-900/60 dark:from-amber-950/25 dark:via-background dark:to-orange-950/20',
+          'overflow-hidden rounded-2xl border bg-card shadow-sm',
           density === 'full' ? 'p-6 sm:p-8' : 'p-4 sm:p-5',
         )}
       >
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-700 dark:text-amber-300">
-              {t('revisit.report.overall')}
-            </p>
-            <p
+        <div
+          className="grid gap-5"
+          style={{
+            gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 20rem), 1fr))',
+          }}
+        >
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="secondary">
+                {report.q >= 0.75 ? t('revisit.report.strong') : t('revisit.report.needsWork')}
+              </Badge>
+              <span className="text-xs tabular-nums text-muted-foreground">
+                {t('revisit.report.overall')} · {Math.round(report.q * 100)}%
+              </span>
+            </div>
+            <h2
               className={cn(
-                'mt-1 font-black tabular-nums text-amber-800 dark:text-amber-200',
-                density === 'full' ? 'text-5xl' : 'text-3xl',
+                'mt-4 font-semibold tracking-tight',
+                density === 'full' ? 'text-2xl' : 'text-lg',
               )}
             >
-              {Math.round(report.q * 100)}%
-            </p>
+              {t('revisit.report.summary')}
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">{report.summary}</p>
           </div>
-          <Badge
-            className={cn(
-              report.q >= 0.75
-                ? 'bg-emerald-700 text-white hover:bg-emerald-700'
-                : 'bg-amber-800 text-white hover:bg-amber-800',
-            )}
-          >
-            {report.q >= 0.75 ? t('revisit.report.strong') : t('revisit.report.needsWork')}
-          </Badge>
-        </div>
-        <div className="mt-5 border-t border-amber-200/60 pt-4 dark:border-amber-900/50">
-          <h2 className="text-sm font-semibold">{t('revisit.report.summary')}</h2>
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">{report.summary}</p>
+          {leadingImprovement ? (
+            <div className="rounded-xl border border-amber-200/80 bg-amber-50/55 p-4 dark:border-amber-900/60 dark:bg-amber-950/20">
+              <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-amber-700 dark:text-amber-300">
+                <Target className="size-4" />
+                {t('revisit.report.improvements')}
+              </p>
+              <h3 className="mt-3 text-sm font-semibold">{leadingImprovement.title}</h3>
+              <p className="mt-1.5 text-sm leading-6 text-muted-foreground">
+                {leadingImprovement.feedback}
+              </p>
+            </div>
+          ) : null}
         </div>
       </section>
 
       <section
         className={cn('rounded-2xl border bg-card', density === 'full' ? 'p-5 sm:p-6' : 'p-4')}
       >
-        <div
-          className="grid items-center gap-5"
-          style={{
-            gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 18rem), 1fr))',
-          }}
-        >
-          <svg
-            viewBox="0 0 200 200"
-            className="mx-auto aspect-square w-full max-w-[300px] text-primary"
-            role="img"
-            aria-label={t('revisit.report.radarLabel')}
-          >
-            <title>{t('revisit.report.radarLabel')}</title>
-            <desc>{t('revisit.report.radarDescription', { scores: radarDescription })}</desc>
-            {[0.25, 0.5, 0.75, 1].map((scale) => (
-              <polygon
-                key={scale}
-                points={polygonPoints(
-                  REVISIT_REPORT_DIMENSIONS.map((_, index) =>
-                    axisPoint(index, RADAR_RADIUS * scale),
-                  ),
+        <div className="space-y-4">
+          {rankedDimensions.map((dimension, index) => {
+            const score = Math.round(report.dimensions[dimension] * 100);
+            return (
+              <div
+                key={dimension}
+                role="progressbar"
+                aria-label={t(`revisit.report.dimensions.${dimension}`)}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={score}
+                className={cn(
+                  'rounded-xl border px-3.5 py-3',
+                  index === 0
+                    ? 'border-amber-200/80 bg-amber-50/45 dark:border-amber-900/50 dark:bg-amber-950/15'
+                    : 'bg-muted/20',
                 )}
-                fill="none"
-                stroke="currentColor"
-                strokeOpacity={scale === 1 ? 0.3 : 0.14}
-                strokeWidth="1"
-              />
-            ))}
-            {REVISIT_REPORT_DIMENSIONS.map((dimension, index) => {
-              const end = axisPoint(index);
-              return (
-                <line
-                  key={dimension}
-                  x1={RADAR_CENTER}
-                  y1={RADAR_CENTER}
-                  x2={end.x}
-                  y2={end.y}
-                  stroke="currentColor"
-                  strokeOpacity="0.18"
-                  strokeWidth="1"
-                />
-              );
-            })}
-            <polygon
-              points={polygonPoints(radarPoints)}
-              fill="currentColor"
-              fillOpacity="0.22"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinejoin="round"
-            />
-            {radarPoints.map((point) => (
-              <circle key={point.dimension} cx={point.x} cy={point.y} r="3" fill="currentColor" />
-            ))}
-          </svg>
-
-          <div
-            className="grid gap-2"
-            style={{
-              gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 11rem), 1fr))',
-            }}
-          >
-            {REVISIT_REPORT_DIMENSIONS.map((dimension) => (
-              <div key={dimension} className="rounded-xl border bg-muted/25 px-3 py-3">
-                <p className="text-xs text-muted-foreground">
-                  {t(`revisit.report.dimensions.${dimension}`)}
-                </p>
-                <p className="mt-1 text-lg font-bold tabular-nums">
-                  {Math.round(report.dimensions[dimension] * 100)}%
-                </p>
+              >
+                <div className="flex items-center justify-between gap-4 text-sm">
+                  <span className="font-medium">{t(`revisit.report.dimensions.${dimension}`)}</span>
+                  <span className="font-semibold tabular-nums">{score}%</span>
+                </div>
+                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className={cn(
+                      'h-full rounded-full',
+                      index === 0 ? 'bg-amber-500' : 'bg-primary',
+                    )}
+                    style={{ width: `${score}%` }}
+                  />
+                </div>
               </div>
-            ))}
-          </div>
+            );
+          })}
         </div>
       </section>
 

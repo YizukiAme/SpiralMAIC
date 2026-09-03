@@ -220,7 +220,7 @@ export function ChatSessionComponent({
   if (session.messages.length === 0 && !isActive) {
     return (
       <div className="h-20 flex items-center justify-center text-center px-2">
-        <p className="text-[10px] text-gray-400 dark:text-gray-500">{t('chat.noMessages')}</p>
+        <p className="text-[10px] text-gray-600 dark:text-gray-400">{t('chat.noMessages')}</p>
       </div>
     );
   }
@@ -297,10 +297,10 @@ export function ChatSessionComponent({
                   className={cn(
                     'text-[9px] font-bold uppercase tracking-wider block mb-0.5',
                     isUser
-                      ? 'text-purple-500 dark:text-purple-400'
+                      ? 'text-purple-700 dark:text-purple-300'
                       : isTeacher
-                        ? 'text-purple-400 dark:text-purple-300'
-                        : 'text-indigo-400 dark:text-indigo-300',
+                        ? 'text-purple-700 dark:text-purple-300'
+                        : 'text-indigo-700 dark:text-indigo-300',
                   )}
                 >
                   {(() => {
@@ -330,14 +330,14 @@ export function ChatSessionComponent({
         <AnimatePresence>
           {isEnded && (
             <motion.div
-              initial={{ opacity: 0, scaleX: 0 }}
-              animate={{ opacity: 1, scaleX: 1 }}
-              exit={{ opacity: 0, scaleX: 0 }}
+              initial={{ y: 2 }}
+              animate={{ y: 0 }}
+              exit={{ y: 2 }}
               transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
               className="mx-3 mt-2 mb-1 flex items-center gap-2"
             >
               <div className="flex-1 h-px bg-gradient-to-r from-transparent via-gray-200 dark:via-gray-700 to-transparent" />
-              <span className="flex items-center gap-1 text-[9px] text-gray-400 dark:text-gray-500 font-medium">
+              <span className="flex items-center gap-1 text-[9px] font-medium text-gray-600 dark:text-gray-400">
                 <CircleStop className="w-2.5 h-2.5" />
                 {t('chat.ended')}
               </span>
@@ -373,7 +373,7 @@ export function ChatSessionComponent({
                 <MessageCircleMore className="size-3" />
                 {t('chat.softClosing')}
                 {remainingSoftCloseSeconds !== undefined && (
-                  <span className="text-[9px] font-medium tabular-nums text-gray-400 dark:text-gray-500">
+                  <span className="text-[9px] font-medium tabular-nums text-gray-600 dark:text-gray-400">
                     {remainingSoftCloseSeconds}s
                   </span>
                 )}

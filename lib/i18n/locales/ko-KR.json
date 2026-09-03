@@ -2191,6 +2191,7 @@
     },
     "panel": {
       "title": "복습 패널",
+      "description": "이 과정의 기억 상태, 챌린지 기록, 학습 자료를 확인합니다.",
       "loading": "이 수업의 복습 상태를 불러오는 중...",
       "memoryStatus": "기억 상태",
       "suggestedReview": "권장 복습",
@@ -2283,6 +2284,7 @@
     "studio": {
       "title": "학습 자료 스튜디오",
       "subtitle": "복습 작품을 종류별로 만들고 저장해 활용하세요.",
+      "providerRequired": "모델을 한 번 연결하면 아래의 모든 학습 자료를 생성할 수 있습니다.",
       "createTitle": "학습 자료 만들기",
       "createDescription": "한 번에 한 종류만 생성하며 다른 자료는 계속 볼 수 있습니다.",
       "queueActive": "대기 중인 작업이 있습니다",

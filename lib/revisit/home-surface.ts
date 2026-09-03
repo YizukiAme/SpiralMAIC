@@ -1,6 +1,37 @@
+import type { LessonMemorySummary } from '@/lib/revisit/types';
+
 export interface HomeSurfaceState {
   showPromptComposer: boolean;
   showSpiralLogo: boolean;
+  showProEntry: boolean;
+}
+
+const SPIRAL_MEMORY_PRIORITY: Record<LessonMemorySummary['status'], number> = {
+  review: 0,
+  fresh: 1,
+  stable: 2,
+  unlearned: 3,
+};
+
+export function orderSpiralClassrooms<T extends { id: string; updatedAt: number }>(
+  classrooms: readonly T[],
+  memorySummaries: Readonly<
+    Record<string, Pick<LessonMemorySummary, 'status' | 'recall'> | undefined>
+  >,
+): T[] {
+  return [...classrooms].sort((left, right) => {
+    const leftMemory = memorySummaries[left.id];
+    const rightMemory = memorySummaries[right.id];
+    const priorityDifference =
+      (leftMemory ? SPIRAL_MEMORY_PRIORITY[leftMemory.status] : 4) -
+      (rightMemory ? SPIRAL_MEMORY_PRIORITY[rightMemory.status] : 4);
+    if (priorityDifference !== 0) return priorityDifference;
+
+    const leftRecall = leftMemory?.recall ?? 1;
+    const rightRecall = rightMemory?.recall ?? 1;
+    if (leftRecall !== rightRecall) return leftRecall - rightRecall;
+    return right.updatedAt - left.updatedAt;
+  });
 }
 
 export type RevisitPanelSection = 'challenge' | 'materials' | 'demo';
@@ -19,6 +50,7 @@ export function resolveHomeSurfaceState(args: {
   return {
     showPromptComposer: !args.reverseChallengeEnabled,
     showSpiralLogo: args.reverseChallengeEnabled,
+    showProEntry: !args.reverseChallengeEnabled,
   };
 }
 

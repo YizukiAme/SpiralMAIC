@@ -18,6 +18,7 @@ import { createLogger } from '@/lib/logger';
 import { canonicalizeLegacyScene, mutateDocument, type AppDocument } from '@/lib/document-store';
 import { isConcreteMediaAddress } from '@/lib/media/resolve-media-ref';
 import { isGeneratedMediaPlaceholder } from '@/lib/media/media-ref';
+import { completedClassroomImportOutline } from './classroom-import';
 import type JSZip from 'jszip';
 import type { Slide } from '@openmaic/dsl';
 import type { Stage } from '@/lib/types/stage';
@@ -463,6 +464,9 @@ export function useImportClassroom(onSuccess?: (importedStageId: string) => void
               ? { generatedAgentConfigs: importedAgentConfigs }
               : {}),
           },
+          // The archive is the whole imported deck, not a resumable generation
+          // job. This unlocks the real completion page after every scene plays.
+          outline: completedClassroomImportOutline(now),
           scenes: manifest.scenes.map((mScene: ManifestScene, index: number) => {
             const newSceneId = nanoid();
             const actions = mScene.actions

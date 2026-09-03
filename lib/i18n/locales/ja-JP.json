@@ -2191,6 +2191,7 @@
     },
     "panel": {
       "title": "復習パネル",
+      "description": "このコースの記憶状態、チャレンジ履歴、学習教材を確認します。",
       "loading": "このコースの復習状態を読み込んでいます...",
       "memoryStatus": "記憶状態",
       "suggestedReview": "おすすめの復習",
@@ -2283,6 +2284,7 @@
     "studio": {
       "title": "学習素材スタジオ",
       "subtitle": "復習作品を種類ごとに作成・保存・活用できます。",
+      "providerRequired": "モデルを一度設定すると、下の教材をどれでも生成できます。",
       "createTitle": "学習素材を作成",
       "createDescription": "一度に一種類だけ生成し、他の素材はそのまま閲覧できます。",
       "queueActive": "待機中のタスクがあります",

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { ArrowLeft, CheckCircle2, GraduationCap, Loader2 } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, ChevronRight, GraduationCap, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Stage as ClassroomStage } from '@/components/stage';
@@ -992,11 +992,21 @@ export default function RevisitChallengePage() {
     ) : !tailView ? (
       <>
         {currentPageState?.passed ? (
-          <div className="absolute left-4 top-4 z-[120]">
+          <div className="absolute left-4 top-4 z-[120] flex items-center gap-2">
             <Badge className="gap-1 bg-emerald-700 text-white">
               <CheckCircle2 className="size-3.5" />
               {t('revisit.challenge.gate.pass')}
             </Badge>
+            {allPagesPassed ? (
+              <Button
+                size="sm"
+                className="h-7 rounded-full bg-background/95 px-3 text-foreground shadow-md hover:bg-background"
+                onClick={() => navigateScene(REVISIT_COMPLETION_PAGE_ID)}
+              >
+                {t('revisit.challenge.complete')}
+                <ChevronRight className="size-3.5" />
+              </Button>
+            ) : null}
           </div>
         ) : null}
       </>

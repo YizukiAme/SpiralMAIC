@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   STUDY_ARTIFACT_GROUPS,
+  STUDY_ARTIFACT_CREATION_GROUP_IDS,
   STUDY_ARTIFACT_KINDS,
   groupArtifactGenerationJobs,
   groupStudyArtifacts,
@@ -118,6 +119,7 @@ describe('Spiral Study Studio organization', () => {
       ['mindMap'],
       ['flashcards', 'quiz'],
     ]);
+    expect(STUDY_ARTIFACT_CREATION_GROUP_IDS).toEqual(['practice', 'understanding', 'structure']);
   });
 
   it('keeps every version in its semantic group and selects the latest per kind', () => {
