@@ -99,7 +99,7 @@ function resolveCommit(ref) {
  * only happens for unrelated histories.
  *
  * NOTE: in both CI invocations this currently returns `base` unchanged.
- * `actions/checkout@v4` on a `pull_request` event checks out the merge ref, so
+ * `actions/checkout@v5` on a `pull_request` event checks out the merge ref, so
  * `merge-base(base.sha, HEAD)` is `base.sha`; on a push to main the before-SHA
  * is already an ancestor of HEAD. It is used anyway because it is the correct
  * reference for a "did THIS branch change it" question, and because the local
