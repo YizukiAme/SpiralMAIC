@@ -201,6 +201,7 @@ const TEMPORARY_VENDOR_DEBT: readonly AllowedVendorDebt[] = [
       ['veo', 2],
       ['happyhorse', 2],
       ['tavily', 7],
+      ['exa', 5],
       ['bocha', 5],
       ['brave', 3],
       ['baidu', 5],
@@ -255,6 +256,7 @@ const TEMPORARY_VENDOR_DEBT: readonly AllowedVendorDebt[] = [
       ['brave', 2],
       ['minimax', 2],
       ['doubao', 2],
+      ['exa', 2],
     ],
   ),
   ...groupedDebt(
@@ -303,6 +305,7 @@ const TEMPORARY_VENDOR_DEBT: readonly AllowedVendorDebt[] = [
       ['minimax', 4],
       ['searxng', 4],
       ['tavily', 4],
+      ['exa', 4],
     ],
   ),
   ...groupedDebt(
@@ -318,6 +321,7 @@ const TEMPORARY_VENDOR_DEBT: readonly AllowedVendorDebt[] = [
       ['minimax', 9],
       ['doubao', 1],
       ['searxng', 2],
+      ['exa', 3],
     ],
   ),
   ...groupedDebt(
@@ -424,6 +428,23 @@ function deriveVendorVocabulary(readSource: (file: string) => string): string[] 
   return [...terms].sort((a, b) => b.length - a.length || a.localeCompare(b));
 }
 
+function hasVendorAtWordStart(token: string, vendor: string): boolean {
+  const normalized = token.toLowerCase();
+  for (let index = 0; index <= token.length - vendor.length; index++) {
+    if (!normalized.startsWith(vendor, index)) continue;
+    if (index === 0 || /[^a-z0-9]/iu.test(token[index - 1])) return true;
+
+    const current = token[index];
+    const previous = token[index - 1];
+    const next = token[index + 1];
+    if (/[A-Z]/u.test(current) && /[a-z0-9]/u.test(previous)) return true;
+    if (/[A-Z]/u.test(current) && /[A-Z]/u.test(previous) && /[a-z]/u.test(next ?? '')) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function findVendorLeaks(file: string, source: string, vendors: readonly string[]): VendorLeak[] {
   const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
   const leaks: VendorLeak[] = [];
@@ -441,9 +462,8 @@ function findVendorLeaks(file: string, source: string, vendors: readonly string[
     }
 
     const token = node.getText(sourceFile);
-    const normalized = token.toLowerCase();
     for (const vendor of vendors) {
-      if (!normalized.includes(vendor)) continue;
+      if (!hasVendorAtWordStart(token, vendor)) continue;
       const position = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
       leaks.push({
         file,
@@ -556,5 +576,14 @@ describe('provider-neutral layer guard', () => {
     expect(message).toContain(
       'Move vendor behavior into an adapter, or add a provider-neutral contract method.',
     );
+  });
+
+  it('does not match a vendor across unrelated identifier words', () => {
+    const leaks = findVendorLeaks(
+      'fixtures/codex-runtime.ts',
+      'export const getCodexAuthRuntime = () => undefined;',
+      vendors,
+    );
+    expect(leaks).not.toEqual(expect.arrayContaining([expect.objectContaining({ vendor: 'exa' })]));
   });
 });

@@ -747,6 +747,12 @@ const getDefaultWebSearchConfig = () => ({
   webSearchProviderId: 'tavily' as WebSearchProviderId,
   webSearchProvidersConfig: {
     tavily: { apiKey: '', baseUrl: '', enabled: true, requiresApiKey: true },
+    exa: {
+      apiKey: '',
+      baseUrl: WEB_SEARCH_PROVIDERS.exa.defaultBaseUrl || '',
+      enabled: true,
+      requiresApiKey: true,
+    },
     bocha: { apiKey: '', baseUrl: '', enabled: true, requiresApiKey: true },
     brave: {
       apiKey: '',
@@ -2716,6 +2722,12 @@ export const useSettingsStore = create<SettingsState>()(
               enabled: true,
               requiresApiKey: true,
               isServerConfigured: oldIsServerConfigured,
+            },
+            exa: {
+              apiKey: '',
+              baseUrl: WEB_SEARCH_PROVIDERS.exa.defaultBaseUrl || '',
+              enabled: true,
+              requiresApiKey: true,
             },
             bocha: {
               apiKey: '',
