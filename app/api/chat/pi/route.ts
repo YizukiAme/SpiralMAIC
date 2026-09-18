@@ -9,6 +9,7 @@ import { withAccessCode } from '@/lib/server/with-access-code';
 import { NextRequest } from 'next/server';
 import { isProviderKeyRequired } from '@/lib/ai/providers';
 import {
+  isCoursewareReferenceEnabled,
   isPiChatEnabled,
   isPiNativeChildRuntimeEnabled,
   isPiNativeChildSpotlightEnabled,
@@ -33,7 +34,7 @@ import { hasNativeWhiteboardAction } from '@/lib/chat/pi/tools/native-whiteboard
 import {
   ELEMENT_REFERENCE_ACCEPTED_HEADER,
   ElementReferenceValidationError,
-  resolveSlideElementReference,
+  resolveElementReference,
 } from '@/lib/chat/pi/element-reference';
 
 const log = createLogger('Pi Chat API');
@@ -66,9 +67,13 @@ async function POSTHandler(req: NextRequest) {
       return apiError('MISSING_REQUIRED_FIELD', 400, 'Missing required field: config.agentIds');
     }
 
+    if (body.elementReference !== undefined && !isCoursewareReferenceEnabled()) {
+      return apiError('INVALID_REQUEST', 400, 'Courseware references are disabled');
+    }
+
     let elementReference;
     try {
-      elementReference = resolveSlideElementReference(body);
+      elementReference = resolveElementReference(body);
     } catch (error) {
       if (error instanceof ElementReferenceValidationError) {
         return apiError('INVALID_REQUEST', 400, error.message);

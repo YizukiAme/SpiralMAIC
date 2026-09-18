@@ -16,7 +16,11 @@ import {
   type PlaybackChromeRootHandle,
   type RevisitPlaybackConfig,
 } from '@/components/edit/PlaybackChromeRoot';
-import { InteractiveIframeHost } from '@/components/scene-renderers/InteractiveIframeHost';
+import {
+  InteractiveIframeHost,
+  type PlaybackInteractiveComponentPick,
+  type PlaybackInteractivePickerState,
+} from '@/components/scene-renderers/InteractiveIframeHost';
 import { CHROME_EASE } from '@/lib/edit/transitions';
 import { enterEditMode } from '@/lib/edit/enter-edit-mode';
 import { isEditorPreloaded, preloadEditor } from '@/lib/edit/preload-editor';
@@ -206,6 +210,14 @@ export function Stage({
   });
 
   const playbackRef = useRef<PlaybackChromeRootHandle>(null);
+  const [playbackInteractivePicker, setPlaybackInteractivePicker] =
+    useState<PlaybackInteractivePickerState | null>(null);
+  const handlePlaybackInteractivePick = useCallback((pick: PlaybackInteractiveComponentPick) => {
+    playbackRef.current?.acceptInteractivePick(pick);
+  }, []);
+  const handlePlaybackInteractiveCancel = useCallback(() => {
+    playbackRef.current?.cancelElementPick();
+  }, []);
 
   // Pro Switch handler. Edit→playback is a plain flip (PlaybackChromeRoot
   // will mount fresh; its engine effect re-inits). Playback→edit must
@@ -346,6 +358,7 @@ export function Stage({
         >
           <PlaybackChromeRoot
             ref={playbackRef}
+            onInteractivePickerChange={setPlaybackInteractivePicker}
             onRetryOutline={onRetryOutline}
             canEnterProMode={workbenchPlayback || isEditable}
             onEnterProMode={chromeToggleHandler}
@@ -387,7 +400,11 @@ export function Stage({
       {/* Keep-alive host for interactive scene iframes (#619). Lives here, above
           the mode-swap subtree, so its iframes survive Pro mode toggles and
           scene switches instead of reloading on every remount. */}
-      <InteractiveIframeHost />
+      <InteractiveIframeHost
+        playbackPicker={playbackInteractivePicker}
+        onPlaybackPick={handlePlaybackInteractivePick}
+        onPlaybackCancel={handlePlaybackInteractiveCancel}
+      />
     </div>
   );
 }

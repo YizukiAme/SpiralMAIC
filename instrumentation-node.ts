@@ -11,6 +11,11 @@
  * on I/O. Starting a timer does not.
  */
 export async function registerNodeRuntime(): Promise<void> {
+  // Validate before starting timers: a malformed quota must fail startup,
+  // not every persistence request after the server has passed its health check.
+  const { resolveAssetQuotaBytes } = await import('@/lib/persistence/asset-quota');
+  resolveAssetQuotaBytes();
+
   const { startAssetCollectorSchedule } =
     await import('@/lib/persistence/asset-collector-schedule');
   const assetSchedule = startAssetCollectorSchedule();

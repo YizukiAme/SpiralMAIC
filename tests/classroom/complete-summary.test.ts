@@ -220,7 +220,7 @@ describe('Classroom completion action', () => {
     expect(html).not.toContain('data-completion-action');
   });
 
-  it('uses a plain scroll root with a min-height centering wrapper for tall content', () => {
+  it('keeps tall completion content in its own scroll layer with a min-height centering wrapper', () => {
     const html = renderToStaticMarkup(
       createElement(ClassroomCompletePage, {
         scenes: [],
@@ -235,8 +235,10 @@ describe('Classroom completion action', () => {
       }),
     );
 
-    expect(html).toContain('class="absolute inset-0 z-[105] overflow-auto"');
-    expect(html).toContain('class="relative flex min-h-full');
+    expect(html).toContain('class="absolute inset-0 z-[105] overflow-hidden"');
+    expect(html).toContain('class="absolute inset-0 overflow-y-auto overflow-x-hidden"');
+    expect(html).toContain('class="min-h-full flex items-center justify-center"');
+    expect(html).toContain('data-completion-action');
     expect(html).not.toContain(
       'class="absolute inset-0 z-[105] flex items-center justify-center overflow-auto"',
     );
