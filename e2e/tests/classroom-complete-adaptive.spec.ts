@@ -89,7 +89,9 @@ test.describe('Classroom complete adaptive layout', () => {
     const classroom = new ClassroomPage(page);
     await classroom.goto(classroomId);
     await classroom.waitForLoaded();
-    await expect(page.getByRole('heading', { name: 'Page 1' })).toBeVisible();
+    // The loading placeholder can be absent before client hydration starts.
+    // Wait for the actual scene with the same budget as classroom loading.
+    await expect(page.getByRole('heading', { name: 'Page 1' })).toBeVisible({ timeout: 15_000 });
 
     // The fallback apply schedules an async full-aggregate save; that save
     // carries no outline and would DELETE an outline row written before it
