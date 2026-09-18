@@ -2413,7 +2413,8 @@ export function getModel(config: ModelConfig): ModelWithInfo {
           return response;
         };
         openaiOptions.fetch = compatFetch as typeof globalThis.fetch;
-      } else {
+      } else if (!isCodex) {
+        // Codex keeps its OAuth transport and request lifetime guard above.
         // Native OpenAI / Responses transport: route requests through the
         // shared transport so they carry the extended-timeout dispatcher too.
         openaiOptions.fetch = transportFetch;
