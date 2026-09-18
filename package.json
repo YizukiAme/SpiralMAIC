@@ -198,7 +198,7 @@
     "hyperframes": "0.7.60",
     "prettier": "3.8.5",
     "rollup": "^4.63.1",
-    "rollup-plugin-typescript2": "^0.36.0",
+    "rollup-plugin-typescript2": "^0.37.0",
     "semver": "7.8.5",
     "tailwindcss": "^4.3.3",
     "tslib": "^2.8.0",
