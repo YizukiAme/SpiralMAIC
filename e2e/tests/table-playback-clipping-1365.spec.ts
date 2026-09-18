@@ -35,11 +35,18 @@ async function seedTableClassroom(page: Page) {
   await page.evaluate(
     ({ stageId, finalRowText, rowTexts, theme, geometry }) =>
       new Promise<void>((resolve, reject) => {
-        const request = indexedDB.open('MAIC-Database');
+        const request = indexedDB.open('maic-documents', 1);
+        request.onupgradeneeded = () => {
+          const db = request.result;
+          db.createObjectStore('stages', { keyPath: 'id' });
+          const scenes = db.createObjectStore('scenes', { keyPath: ['stageId', 'id'] });
+          scenes.createIndex('by-stage', 'stageId');
+          db.createObjectStore('outlines', { keyPath: 'stageId' });
+        };
 
         request.onsuccess = (event) => {
           const db = (event.target as IDBOpenDBRequest).result;
-          const tx = db.transaction(['stages', 'scenes', 'stageOutlines'], 'readwrite');
+          const tx = db.transaction(['stages', 'scenes', 'outlines'], 'readwrite');
           const now = Date.now();
 
           tx.objectStore('stages').put({
@@ -48,6 +55,7 @@ async function seedTableClassroom(page: Page) {
             description: '',
             language: 'zh-CN',
             style: 'professional',
+            dslVersion: '0.1.0',
             createdAt: now,
             updatedAt: now,
           });
@@ -104,11 +112,9 @@ async function seedTableClassroom(page: Page) {
             updatedAt: now,
           });
 
-          tx.objectStore('stageOutlines').put({
+          tx.objectStore('outlines').put({
             stageId,
-            outlines: [],
-            createdAt: now,
-            updatedAt: now,
+            outline: { outlines: [], createdAt: now, updatedAt: now },
           });
 
           tx.oncomplete = () => {
