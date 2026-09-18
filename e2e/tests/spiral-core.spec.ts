@@ -102,6 +102,15 @@ test.describe('Spiral v0.4 core loop', () => {
 
     await page.getByText('Course complete', { exact: true }).first().click();
     await expect(page.getByRole('heading', { name: 'All challenge pages passed' })).toBeVisible();
+    const completionViewport = page.viewportSize();
+    await page.setViewportSize({ width: 1280, height: 480 });
+    const scrollRegion = page.locator(
+      'section[aria-label="Course complete"][tabindex="0"], section[aria-label="Course complete"] [tabindex="0"]',
+    );
+    await scrollRegion.focus();
+    await page.keyboard.press('End');
+    await expect(page.getByRole('button', { name: 'Complete challenge' })).toBeInViewport();
+    if (completionViewport) await page.setViewportSize(completionViewport);
     await page.getByRole('button', { name: 'Complete challenge' }).click();
     await expect(
       page.getByText('You clearly connected light energy to stored chemical energy.'),

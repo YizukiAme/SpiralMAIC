@@ -16,6 +16,11 @@ export async function registerNodeRuntime(): Promise<void> {
   const { resolveAssetQuotaBytes } = await import('@/lib/persistence/asset-quota');
   resolveAssetQuotaBytes();
 
+  // Reject a pending-allocation window that would expire assets before their
+  // document writes complete, before any background collector is started.
+  const { resolveAssetPendingTtlMs } = await import('@/lib/persistence/asset-pending-ttl');
+  resolveAssetPendingTtlMs();
+
   const { startAssetCollectorSchedule } =
     await import('@/lib/persistence/asset-collector-schedule');
   const assetSchedule = startAssetCollectorSchedule();

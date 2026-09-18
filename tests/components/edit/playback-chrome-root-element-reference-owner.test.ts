@@ -15,10 +15,16 @@ const mocks = vi.hoisted(() => ({
   engineOptions: undefined as
     | {
         onModeChange?: (mode: 'idle' | 'playing' | 'paused') => void;
+        onProgress?: (snapshot: { actionIndex: number; sceneId: string }) => void;
         onUserInterrupt?: (text: string) => void;
         onComplete?: () => void;
       }
     | undefined,
+  startLecture: vi.fn(),
+  endSession: vi.fn(),
+  engineStop: vi.fn(),
+  engineStart: vi.fn(),
+  engineContinuePlayback: vi.fn(),
   handleUserInterrupt: vi.fn(),
 }));
 
@@ -238,8 +244,8 @@ vi.mock('@/components/chat/chat-area', async () => {
       React.useImperativeHandle(ref, () => ({
         sendMessage: mocks.sendMessage,
         endActiveSession: vi.fn().mockResolvedValue(undefined),
-        endSession: vi.fn().mockResolvedValue(undefined),
-        startLecture: vi.fn().mockResolvedValue('lecture-1'),
+        endSession: mocks.endSession,
+        startLecture: mocks.startLecture,
         addLectureMessage: vi.fn(),
         getLectureMessageId: vi.fn(),
         startDiscussion: vi.fn(),
@@ -273,7 +279,9 @@ vi.mock('@/lib/playback', () => ({
       mocks.engineOptions = options;
       options.onModeChange?.(mocks.engineMode);
     }
-    stop() {}
+    stop() {
+      mocks.engineStop();
+    }
     getMode() {
       return mocks.engineMode;
     }
@@ -290,8 +298,12 @@ vi.mock('@/lib/playback', () => ({
       mocks.handleUserInterrupt(text);
       mocks.engineOptions?.onUserInterrupt?.(text);
     }
-    start() {}
-    continuePlayback() {}
+    start() {
+      mocks.engineStart();
+    }
+    continuePlayback() {
+      mocks.engineContinuePlayback();
+    }
     pause() {}
     confirmDiscussion() {}
     skipDiscussion() {}
@@ -369,6 +381,13 @@ describe('PlaybackChromeRoot element-reference ownership', () => {
     mocks.topicActive = false;
     mocks.engineMode = 'idle';
     mocks.engineOptions = undefined;
+    mocks.startLecture.mockReset();
+    mocks.startLecture.mockResolvedValue('lecture-1');
+    mocks.endSession.mockReset();
+    mocks.endSession.mockResolvedValue(undefined);
+    mocks.engineStop.mockReset();
+    mocks.engineStart.mockReset();
+    mocks.engineContinuePlayback.mockReset();
     mocks.handleUserInterrupt.mockReset();
     stageState.scenes = [scene, secondScene];
     stageState.currentSceneId = scene.id;
@@ -754,6 +773,81 @@ describe('PlaybackChromeRoot element-reference ownership', () => {
 
     expect(stageState.setCurrentSceneId).not.toHaveBeenCalled();
     expect(container.querySelector('[data-testid="owner-pill"]')).not.toBeNull();
+  });
+
+  it('stops the previous engine when switching to a non-playable scene', async () => {
+    await renderOwner();
+    expect(mocks.engineStop).not.toHaveBeenCalled();
+    const previousEngineOptions = mocks.engineOptions;
+
+    stageState.scenes = [scene, interactiveScene];
+    stageState.currentSceneId = interactiveScene.id;
+    await rerenderOwner();
+
+    expect(mocks.engineStop).toHaveBeenCalledOnce();
+    act(() => previousEngineOptions?.onProgress?.({ actionIndex: 1, sceneId: scene.id }));
+    expect(mocks.roundtableProps?.currentActionIndex).toBe(0);
+  });
+
+  it('does not resume manual playback after its engine is superseded', async () => {
+    let resolveStartLecture!: (sessionId: string) => void;
+    mocks.startLecture.mockReturnValueOnce(
+      new Promise<string>((resolve) => {
+        resolveStartLecture = resolve;
+      }),
+    );
+    await renderOwner();
+    const onPlayPause = mocks.roundtableProps?.onPlayPause as () => Promise<void>;
+
+    let playPromise!: Promise<void>;
+    act(() => {
+      playPromise = onPlayPause();
+    });
+    stageState.scenes = [scene, interactiveScene];
+    stageState.currentSceneId = interactiveScene.id;
+    await rerenderOwner();
+
+    await act(async () => {
+      resolveStartLecture('stale-lecture');
+      await playPromise;
+    });
+
+    expect(mocks.engineContinuePlayback).not.toHaveBeenCalled();
+    expect(mocks.endSession).toHaveBeenCalledWith('stale-lecture');
+  });
+
+  it('does not auto-start playback after its engine is superseded', async () => {
+    vi.useFakeTimers();
+    settingsState.autoPlayLecture = true;
+    try {
+      await renderOwner();
+      act(() => mocks.engineOptions?.onComplete?.());
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1500);
+      });
+
+      let resolveStartLecture!: (sessionId: string) => void;
+      mocks.startLecture.mockReturnValueOnce(
+        new Promise<string>((resolve) => {
+          resolveStartLecture = resolve;
+        }),
+      );
+      await rerenderOwner();
+
+      stageState.scenes = [scene, secondScene, interactiveScene];
+      stageState.currentSceneId = interactiveScene.id;
+      await rerenderOwner();
+
+      await act(async () => {
+        resolveStartLecture('stale-auto-lecture');
+        await Promise.resolve();
+      });
+
+      expect(mocks.engineStart).not.toHaveBeenCalled();
+      expect(mocks.endSession).toHaveBeenCalledWith('stale-auto-lecture');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('clears the owner draft after automatic playback advances the scene', async () => {

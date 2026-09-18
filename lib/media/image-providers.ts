@@ -29,6 +29,11 @@ import {
   generateWithLemonadeImage,
   testLemonadeImageConnectivity,
 } from './adapters/lemonade-image-adapter';
+import {
+  generateWithOpenRouterImage,
+  testOpenRouterImageConnectivity,
+  OPENROUTER_DEFAULT_BASE_URL,
+} from './adapters/openrouter-image-adapter';
 
 export const IMAGE_PROVIDERS: Record<ImageProviderId, ImageProviderConfig> = {
   seedream: {
@@ -167,6 +172,20 @@ export const IMAGE_PROVIDERS: Record<ImageProviderId, ImageProviderConfig> = {
     supportedAspectRatios: ['16:9', '4:3', '1:1', '9:16'],
     maxResolution: { width: 1024, height: 1024 },
   },
+  'openrouter-image': {
+    id: 'openrouter-image',
+    name: 'OpenRouter Image',
+    requiresApiKey: true,
+    defaultBaseUrl: OPENROUTER_DEFAULT_BASE_URL,
+    // Model list is fetched live from OpenRouter's public GET /images/models
+    // catalog; this seed keeps the picker usable offline.
+    models: [
+      { id: 'google/gemini-3-pro-image', name: 'Gemini 3 Pro Image' },
+      { id: 'openai/gpt-image-2', name: 'GPT Image 2' },
+      { id: 'bytedance-seed/seedream-5-0-pro', name: 'Seedream 5.0 Pro' },
+    ],
+    supportedAspectRatios: ['16:9', '4:3', '1:1', '9:16'],
+  },
 };
 
 export function getImageProviderCredentialMode(
@@ -200,6 +219,8 @@ export async function testImageConnectivity(
       return testComfyuiImageConnectivity(config);
     case 'lemonade':
       return testLemonadeImageConnectivity(config);
+    case 'openrouter-image':
+      return testOpenRouterImageConnectivity(config);
     default:
       return {
         success: false,
@@ -231,6 +252,8 @@ export async function generateImage(
       return generateWithComfyuiImage(config, options);
     case 'lemonade':
       return generateWithLemonadeImage(config, options);
+    case 'openrouter-image':
+      return generateWithOpenRouterImage(config, options);
     default:
       throw new Error(`Unsupported image provider: ${config.providerId}`);
   }

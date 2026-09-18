@@ -80,11 +80,14 @@ test.describe('Classroom complete adaptive layout', () => {
     page,
   }) => {
     // Persist the classroom server-side (file store), then load it once so
-    // the document lands in IndexedDB…
+    // the document lands in IndexedDB. The route mints the id, so navigation
+    // and the IndexedDB probe must use the id it returns rather than the
+    // fixture's stage id.
     const response = await page.request.post('/api/classroom', { data: CLASSROOM_PAYLOAD });
     expect(response.ok()).toBe(true);
+    const { id: classroomId } = (await response.json()) as { id: string };
     const classroom = new ClassroomPage(page);
-    await classroom.goto(STAGE_ID);
+    await classroom.goto(classroomId);
     await classroom.waitForLoaded();
     await expect(page.getByRole('heading', { name: 'Page 1' })).toBeVisible();
 
@@ -93,23 +96,25 @@ test.describe('Classroom complete adaptive layout', () => {
     // commits ("a full-aggregate save with no outline means no outline").
     // Wait for the document to land first…
     await expect
-      .poll(() =>
-        page.evaluate(
-          ({ stageId }) =>
-            new Promise<number>((resolve) => {
-              const req = indexedDB.open('maic-documents');
-              req.onsuccess = () => {
-                const tx = req.result.transaction(['stages'], 'readonly');
-                const get = tx.objectStore('stages').get(stageId);
-                get.onsuccess = () => resolve(get.result ? 1 : 0);
-                get.onerror = () => resolve(-1);
-              };
-              req.onerror = () => resolve(-1);
-            }),
-          { stageId: STAGE_ID },
-        ),
+      .poll(
+        () =>
+          page.evaluate(
+            ({ stageId }) =>
+              new Promise<number>((resolve) => {
+                const req = indexedDB.open('maic-documents');
+                req.onsuccess = () => {
+                  const tx = req.result.transaction(['stages'], 'readonly');
+                  const get = tx.objectStore('stages').get(stageId);
+                  get.onsuccess = () => resolve(get.result ? 1 : 0);
+                  get.onerror = () => resolve(-1);
+                };
+                req.onerror = () => resolve(-1);
+              }),
+            { stageId: classroomId },
+          ),
+        { timeout: 15_000 },
       )
-      .toBe(1, { timeout: 15_000 });
+      .toBe(1);
     await page.waitForTimeout(500); // let the aggregate save transaction settle
 
     // …then mark the outline record complete the way the generator would.
@@ -140,11 +145,11 @@ test.describe('Classroom complete adaptive layout', () => {
           };
           req.onerror = () => reject(req.error);
         }),
-      { stageId: STAGE_ID },
+      { stageId: classroomId },
     );
 
     // Reload: the completed document now offers the completion slot (N/N + 1).
-    await classroom.goto(STAGE_ID);
+    await classroom.goto(classroomId);
     await classroom.waitForLoaded();
     await expect(page.getByText('1/4', { exact: true })).toBeVisible({ timeout: 10_000 });
 

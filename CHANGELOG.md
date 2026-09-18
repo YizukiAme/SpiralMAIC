@@ -4,7 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased] - 2026-09-07
+## [Unreleased] - 2026-09-19
+
+- Upgrade Next.js to 16.3.3 and integrate upstream access-code, provider transport,
+  and render-service security fixes.
+- Improve PPTX import fidelity, mobile narration continuity, media persistence
+  and classroom completion layouts while preserving SpiralMAIC learning flows.
+- Add OpenRouter media providers and TokenDance configuration presets.
 
 Upstream security, stability, and feature changes integrated for the next
 SpiralMAIC release. Read the Breaking Changes section before deployment, as this

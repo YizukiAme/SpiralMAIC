@@ -697,9 +697,8 @@ const useStageStoreBase = create<StageState>()((set, get) => ({
     const provisionalAfter = state.stage ? { stage: state.stage, scenes } : null;
     const beforeRefs = collectStageAssetRefs(
       state.stage ? { stage: state.stage, scenes: state.scenes } : null,
-      { mediaRows: [], audioRows: [] },
     );
-    const afterRefs = collectStageAssetRefs(provisionalAfter, { mediaRows: [], audioRows: [] });
+    const afterRefs = collectStageAssetRefs(provisionalAfter);
     const detachedRefs = new Set(
       [...beforeRefs.referenced].filter((ref) => !afterRefs.referenced.has(ref)),
     );

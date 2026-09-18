@@ -1,8 +1,14 @@
 import { createHmac, timingSafeEqual } from 'crypto';
 
+import {
+  ACCESS_TOKEN_MAX_AGE_MS,
+  ACCESS_TOKEN_CLOCK_SKEW_SECONDS,
+  isAccessTokenSignatureFormatValid,
+} from './access-token-shared';
+export { ACCESS_TOKEN_MAX_AGE_MS } from './access-token-shared';
+
 export const ACCESS_TOKEN_COOKIE = 'openmaic_access';
-export const ACCESS_TOKEN_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-export const ACCESS_TOKEN_FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
+export const ACCESS_TOKEN_FUTURE_TOLERANCE_MS = ACCESS_TOKEN_CLOCK_SKEW_SECONDS * 1000;
 
 export interface VerifyAccessTokenOptions {
   now?: number;
@@ -36,6 +42,9 @@ export function verifyAccessToken(
   const futureToleranceMs = options.futureToleranceMs ?? ACCESS_TOKEN_FUTURE_TOLERANCE_MS;
   if (!Number.isSafeInteger(issuedAt) || issuedAt <= 0) return false;
   if (issuedAt > now + futureToleranceMs || now - issuedAt > maxAgeMs) return false;
+
+  // Reject non-canonical signatures so this verifier agrees with the Edge one.
+  if (!isAccessTokenSignatureFormatValid(signature)) return false;
 
   const expected = createHmac('sha256', accessCode).update(timestamp).digest('hex');
 

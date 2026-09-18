@@ -447,7 +447,6 @@ export function ClassroomCompletePage({
         ref={sectionRef}
         className="absolute inset-0 z-[105] overflow-hidden"
         aria-label={t('classroomComplete.title')}
-        tabIndex={0}
       >
         {/* Single-shot announcement for screen readers — replaces the noisy
             outer aria-live region that used to wrap the live-updating counters. */}
@@ -472,7 +471,7 @@ export function ClassroomCompletePage({
         <Confetti />
 
         {/* Scroll layer: only this part scrolls when content overflows. */}
-        <div className="absolute inset-0 overflow-y-auto overflow-x-hidden">
+        <div className="absolute inset-0 overflow-y-auto overflow-x-hidden" tabIndex={0}>
           <div className="min-h-full flex items-center justify-center">
             {/* Content */}
             <div

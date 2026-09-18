@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createAccessToken } from '@/lib/server/access-token';
+import { ACCESS_TOKEN_MAX_AGE_MS, createAccessToken } from '@/lib/server/access-token';
 import { CodexLoginManager } from '@/lib/server/codex/login-manager';
 import { ManagedCodexTokenProvider } from '@/lib/server/codex/token-provider';
 import type { CodexAuthRuntime } from '@/lib/server/codex/runtime';
@@ -91,6 +91,22 @@ afterEach(() => {
 });
 
 describe('/api/codex/auth', () => {
+  it('rejects expired access cookies before reading or clearing Codex credentials', async () => {
+    process.env.ACCESS_CODE = 'route-secret';
+    const route = await import('@/app/api/codex/auth/route');
+    const token = createAccessToken('route-secret', Date.now() - ACCESS_TOKEN_MAX_AGE_MS - 1000);
+    for (const handler of [route.GET, route.DELETE]) {
+      const response = await handler(
+        new Request('http://localhost/api/codex/auth', {
+          headers: { cookie: `openmaic_access=${token}` },
+        }),
+      );
+      expect(response.status).toBe(401);
+      expectNoStore(response);
+    }
+    expect(mocks.getRuntime).not.toHaveBeenCalled();
+  });
+
   it('exports dynamic Node handlers and returns connected public status with no secrets', async () => {
     const route = await import('@/app/api/codex/auth/route');
     const response = await route.GET(new Request('http://localhost/api/codex/auth'));

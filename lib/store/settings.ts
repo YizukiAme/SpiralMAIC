@@ -21,6 +21,7 @@ import type { AgentVoiceOverride } from '@/lib/audio/voice-resolver';
 import { isCustomTTSProvider, isCustomASRProvider } from '@/lib/audio/types';
 import {
   ASR_PROVIDERS,
+  CUSTOM_ASR_DEFAULT_LANGUAGES,
   DEFAULT_TTS_VOICES,
   isQwenCatalogVoice,
   isQwenVoiceCloneModel,
@@ -130,6 +131,28 @@ function pruneThinkingConfigs(
 /** Available playback speed tiers */
 export const PLAYBACK_SPEEDS = [1, 1.25, 1.5, 2] as const;
 export type PlaybackSpeed = (typeof PLAYBACK_SPEEDS)[number];
+
+/**
+ * Validate and resolve ASR language for a given provider.
+ * Keeps current language if supported by the provider, otherwise falls back
+ * to the provider's default supported language (or 'auto').
+ */
+export function getValidASRLanguage(providerId: ASRProviderId, currentLanguage?: string): string {
+  if (!providerId || typeof providerId !== 'string') return 'auto';
+  let supportedLanguages: readonly string[];
+  if (isCustomASRProvider(providerId)) {
+    supportedLanguages = CUSTOM_ASR_DEFAULT_LANGUAGES;
+  } else {
+    supportedLanguages =
+      ASR_PROVIDERS[providerId as keyof typeof ASR_PROVIDERS]?.supportedLanguages || [];
+  }
+  const isLanguageValid = Boolean(
+    typeof currentLanguage === 'string' &&
+    currentLanguage &&
+    supportedLanguages.includes(currentLanguage),
+  );
+  return isLanguageValid && currentLanguage ? currentLanguage : supportedLanguages[0] || 'auto';
+}
 
 export interface SettingsState {
   // Model selection
@@ -648,7 +671,7 @@ const getDefaultAudioConfig = () => ({
   ttsVoice: 'default',
   ttsSpeed: 1.0,
   asrProviderId: 'browser-native' as ASRProviderId,
-  asrLanguage: 'zh',
+  asrLanguage: 'zh-CN',
   ttsProvidersConfig: {
     // Built-in providers default enabled:true — they only ever surface once
     // configured (API key or server-managed), so "enabled" is a user opt-OUT,
@@ -723,6 +746,7 @@ const getDefaultImageConfig = () => ({
     'nano-banana': { apiKey: '', baseUrl: '', enabled: false },
     'minimax-image': { apiKey: '', baseUrl: '', enabled: false },
     'grok-image': { apiKey: '', baseUrl: '', enabled: false },
+    'openrouter-image': { apiKey: '', baseUrl: '', enabled: false },
     'comfyui-image': { apiKey: '', baseUrl: '', enabled: false },
     lemonade: { apiKey: '', baseUrl: '', enabled: false },
   } as Record<ImageProviderId, { apiKey: string; baseUrl: string; enabled: boolean }>,
@@ -738,6 +762,7 @@ const getDefaultVideoConfig = () => ({
     veo: { apiKey: '', baseUrl: '', enabled: false },
     'minimax-video': { apiKey: '', baseUrl: '', enabled: false },
     'grok-video': { apiKey: '', baseUrl: '', enabled: false },
+    'openrouter-video': { apiKey: '', baseUrl: '', enabled: false },
     happyhorse: { apiKey: '', baseUrl: '', enabled: false },
   } as Record<VideoProviderId, { apiKey: string; baseUrl: string; enabled: boolean }>,
 });
@@ -807,7 +832,9 @@ const getDefaultWebSearchConfig = () => ({
  * Check whether a provider ID exists in the given provider registry.
  */
 function hasProviderId(providerMap: Record<string, unknown>, providerId?: string): boolean {
-  return typeof providerId === 'string' && providerId in providerMap;
+  return (
+    typeof providerId === 'string' && Object.prototype.hasOwnProperty.call(providerMap, providerId)
+  );
 }
 
 /**
@@ -849,7 +876,7 @@ function ensureValidProviderSelections(state: Partial<SettingsState>): void {
       state.ttsProviderId &&
       isCustomTTSProvider(state.ttsProviderId) &&
       state.ttsProvidersConfig &&
-      state.ttsProviderId in state.ttsProvidersConfig
+      Object.prototype.hasOwnProperty.call(state.ttsProvidersConfig, state.ttsProviderId)
     )
   ) {
     state.ttsProviderId = defaultAudioConfig.ttsProviderId;
@@ -861,10 +888,13 @@ function ensureValidProviderSelections(state: Partial<SettingsState>): void {
       state.asrProviderId &&
       isCustomASRProvider(state.asrProviderId) &&
       state.asrProvidersConfig &&
-      state.asrProviderId in state.asrProvidersConfig
+      Object.prototype.hasOwnProperty.call(state.asrProvidersConfig, state.asrProviderId)
     )
   ) {
     state.asrProviderId = defaultAudioConfig.asrProviderId;
+  }
+  if (state.asrProviderId) {
+    state.asrLanguage = getValidASRLanguage(state.asrProviderId, state.asrLanguage);
   }
 }
 
@@ -1339,20 +1369,10 @@ export const useSettingsStore = create<SettingsState>()(
         // Reset language when switching providers, since language code formats differ
         // (e.g. browser-native uses BCP-47 "en-US", OpenAI Whisper uses ISO 639-1 "en")
         setASRProvider: (providerId) =>
-          set((state) => {
-            let supportedLanguages: string[];
-            if (isCustomASRProvider(providerId)) {
-              supportedLanguages = ['auto'];
-            } else {
-              supportedLanguages =
-                ASR_PROVIDERS[providerId as keyof typeof ASR_PROVIDERS]?.supportedLanguages || [];
-            }
-            const isLanguageValid = supportedLanguages.includes(state.asrLanguage);
-            return {
-              asrProviderId: providerId,
-              ...(isLanguageValid ? {} : { asrLanguage: supportedLanguages[0] || 'auto' }),
-            };
-          }),
+          set((state) => ({
+            asrProviderId: providerId,
+            asrLanguage: getValidASRLanguage(providerId, state.asrLanguage),
+          })),
 
         setASRLanguage: (language) => set({ asrLanguage: language }),
 
@@ -1691,17 +1711,19 @@ export const useSettingsStore = create<SettingsState>()(
               },
             },
             asrProviderId: id,
+            asrLanguage: getValidASRLanguage(id, state.asrLanguage),
           })),
 
         removeCustomASRProvider: (id) =>
           set((state) => {
             if (!isCustomASRProvider(id)) return state;
             const { [id]: _, ...rest } = state.asrProvidersConfig;
+            const fallbackProvider: ASRProviderId = 'browser-native';
             return {
               asrProvidersConfig: rest as typeof state.asrProvidersConfig,
               ...(state.asrProviderId === id && {
-                asrProviderId: 'browser-native' as ASRProviderId,
-                asrLanguage: 'zh',
+                asrProviderId: fallbackProvider,
+                asrLanguage: getValidASRLanguage(fallbackProvider, state.asrLanguage),
               }),
             };
           }),
@@ -2008,7 +2030,7 @@ export const useSettingsStore = create<SettingsState>()(
                   };
                 }
               }
-              for (const [pid, info] of Object.entries(data.tts)) {
+              for (const [pid, info] of Object.entries(data.tts || {})) {
                 const key = pid as TTSProviderId;
                 if (newTTSConfig[key]) {
                   newTTSConfig[key] = {
@@ -2033,7 +2055,7 @@ export const useSettingsStore = create<SettingsState>()(
                   };
                 }
               }
-              for (const [pid, info] of Object.entries(data.asr)) {
+              for (const [pid, info] of Object.entries(data.asr || {})) {
                 const key = pid as ASRProviderId;
                 if (newASRConfig[key]) {
                   newASRConfig[key] = {
@@ -2317,6 +2339,10 @@ export const useSettingsStore = create<SettingsState>()(
                 validTTSProvider !== state.ttsProviderId
                   ? DEFAULT_TTS_VOICES[validTTSProvider as BuiltInTTSProviderId] || 'default'
                   : state.ttsVoice;
+              const validASRLanguage = getValidASRLanguage(
+                validASRProvider as ASRProviderId,
+                state.asrLanguage,
+              );
 
               // Auto-disable image/video generation when no provider is usable
               const shouldDisableImage = !validImageProvider && state.imageGenerationEnabled;
@@ -2326,6 +2352,7 @@ export const useSettingsStore = create<SettingsState>()(
               let autoTtsProvider: TTSProviderId | undefined;
               let autoTtsVoice: string | undefined;
               let autoAsrProvider: ASRProviderId | undefined;
+              let autoAsrLanguage: string | undefined;
               let autoPdfProvider: PDFProviderId | undefined;
               let autoVideoProvider: VideoProviderId | undefined;
               let autoVideoModel: string | undefined;
@@ -2352,7 +2379,7 @@ export const useSettingsStore = create<SettingsState>()(
 
                 // TTS: select first server provider if current is not server-configured.
                 // Skip server-disabled entries — they are force-off, not selectable.
-                const serverTtsIds = Object.entries(data.tts)
+                const serverTtsIds = Object.entries(data.tts || {})
                   .filter(([, info]) => !info.disabled)
                   .map(([id]) => id) as TTSProviderId[];
                 if (
@@ -2372,7 +2399,7 @@ export const useSettingsStore = create<SettingsState>()(
                 // ASR: select first server provider if current is not
                 // server-configured. Skip server-disabled entries — they are
                 // force-off, not selectable.
-                const serverAsrIds = Object.entries(data.asr)
+                const serverAsrIds = Object.entries(data.asr || {})
                   .filter(([, info]) => !info.disabled)
                   .map(([id]) => id) as ASRProviderId[];
                 if (
@@ -2380,6 +2407,7 @@ export const useSettingsStore = create<SettingsState>()(
                   !newASRConfig[state.asrProviderId]?.isServerConfigured
                 ) {
                   autoAsrProvider = serverAsrIds[0];
+                  autoAsrLanguage = getValidASRLanguage(autoAsrProvider, state.asrLanguage);
                 }
 
                 // Image: first usable server provider. Skip force-disabled entries,
@@ -2450,7 +2478,13 @@ export const useSettingsStore = create<SettingsState>()(
                 }),
                 ...(validASRProvider !== state.asrProviderId && {
                   asrProviderId: validASRProvider as ASRProviderId,
+                  asrLanguage: validASRLanguage,
                 }),
+                ...(validASRProvider === state.asrProviderId &&
+                  validASRLanguage !== state.asrLanguage &&
+                  !autoAsrProvider && {
+                    asrLanguage: validASRLanguage,
+                  }),
                 ...(validPDFProvider !== state.pdfProviderId && {
                   pdfProviderId: validPDFProvider as PDFProviderId,
                 }),
@@ -2479,7 +2513,10 @@ export const useSettingsStore = create<SettingsState>()(
                   ttsProviderId: autoTtsProvider,
                   ttsVoice: autoTtsVoice,
                 }),
-                ...(autoAsrProvider && { asrProviderId: autoAsrProvider }),
+                ...(autoAsrProvider && {
+                  asrProviderId: autoAsrProvider,
+                  asrLanguage: autoAsrLanguage,
+                }),
                 ...(autoVideoProvider && {
                   videoProviderId: autoVideoProvider,
                 }),

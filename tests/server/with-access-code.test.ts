@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
-import { createAccessToken } from '@/lib/server/access-token';
+import { ACCESS_TOKEN_MAX_AGE_MS, createAccessToken } from '@/lib/server/access-token';
 import { withAccessCode } from '@/lib/server/with-access-code';
 
 describe('withAccessCode', () => {
@@ -39,5 +39,20 @@ describe('withAccessCode', () => {
     );
 
     expect(response.status).toBe(200);
+  });
+
+  test('rejects an expired signed cookie before calling the handler', async () => {
+    vi.stubEnv('ACCESS_CODE', 'secret');
+    const run = vi.fn(async (_request: Request) => Response.json({ ok: true }));
+    const handler = withAccessCode(run);
+    const token = createAccessToken('secret', Date.now() - ACCESS_TOKEN_MAX_AGE_MS - 1000);
+    const response = await handler(
+      new Request('http://localhost/api/test', {
+        headers: { cookie: `openmaic_access=${token}` },
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(run).not.toHaveBeenCalled();
   });
 });
