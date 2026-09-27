@@ -80,6 +80,10 @@ export const workbenchEn = {
     remove: 'Remove {{name}}',
     removeFailed: 'Remove failed upload',
     uploadFailed: 'Could not upload {{name}}. Please try again.',
+    fileTooLarge: 'File too large. Compress or split the file and try again.',
+    fileTooLargeWithLimit: 'File too large. Please select a file no larger than {{limit}} MB.',
+    unsupportedType: 'Unsupported file type. Please choose a supported file.',
+    quotaExceeded: 'Material upload limit reached.',
   },
   /**
    * The installed skills, as the product names them.
@@ -398,6 +402,10 @@ export const workbenchZh = {
     remove: '移除 {{name}}',
     removeFailed: '移除上传失败材料',
     uploadFailed: '{{name}} 上传失败，请重试',
+    fileTooLarge: '文件过大，请压缩或拆分后重试。',
+    fileTooLargeWithLimit: '文件过大，请选择不超过 {{limit}}MB 的文件。',
+    unsupportedType: '不支持此文件类型，请选择受支持的文件。',
+    quotaExceeded: '已达到材料上传限额。',
   },
   skill: {
     listFailed: 'Skill 列表加载失败',

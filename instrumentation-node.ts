@@ -11,6 +11,9 @@
  * on I/O. Starting a timer does not.
  */
 export async function registerNodeRuntime(): Promise<void> {
+  const { warnIfAccessCodeIsUnset } = await import('@/lib/server/access-code-warning');
+  warnIfAccessCodeIsUnset(process.env.ACCESS_CODE);
+
   // Validate before starting timers: a malformed quota must fail startup,
   // not every persistence request after the server has passed its health check.
   const { resolveAssetQuotaBytes } = await import('@/lib/persistence/asset-quota');
@@ -20,6 +23,10 @@ export async function registerNodeRuntime(): Promise<void> {
   // document writes complete, before any background collector is started.
   const { resolveAssetPendingTtlMs } = await import('@/lib/persistence/asset-pending-ttl');
   resolveAssetPendingTtlMs();
+
+  // Reject an unusable shared owner before any owner-scoped request or timer.
+  const { resolveSharedOwnerId } = await import('@/lib/server/agent-runtime/shared-owner');
+  resolveSharedOwnerId();
 
   const { startAssetCollectorSchedule } =
     await import('@/lib/persistence/asset-collector-schedule');

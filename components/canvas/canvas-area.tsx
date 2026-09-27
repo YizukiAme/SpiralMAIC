@@ -19,6 +19,7 @@ import {
 import { ContainBox } from '@/components/edit/ContainBox';
 import { useInWorkbenchPanel } from '@/lib/workbench/panel-context';
 import type { PPTElement } from '@openmaic/dsl';
+import type { WhiteboardElementReference } from '@/lib/types/chat';
 import { SlideElementPickOverlay } from '@/components/canvas/slide-element-pick-overlay';
 
 interface CanvasAreaProps extends CanvasToolbarProps {
@@ -33,6 +34,8 @@ interface CanvasAreaProps extends CanvasToolbarProps {
   readonly completionAction?: ClassroomCompleteAction;
   readonly hidePlaybackControls?: boolean;
   readonly elementPickActive?: boolean;
+  readonly whiteboardElementReference?: WhiteboardElementReference;
+  readonly onPickWhiteboardElement?: (element: PPTElement) => void;
   readonly onPickElement?: (element: PPTElement) => void;
   readonly onCancelElementPick?: () => void;
 }
@@ -71,7 +74,9 @@ export function CanvasArea({
   completionAction,
   hidePlaybackControls,
   elementPickActive,
+  whiteboardElementReference,
   onPickElement,
+  onPickWhiteboardElement,
   onCancelElementPick,
 }: CanvasAreaProps) {
   const { t } = useI18n();
@@ -145,7 +150,14 @@ export function CanvasArea({
           {/* Whiteboard Layer */}
           <div className="absolute inset-0 z-[110] pointer-events-none">
             <SceneProvider>
-              <Whiteboard isOpen={whiteboardOpen} onClose={onWhiteboardClose} />
+              <Whiteboard
+                isOpen={whiteboardOpen}
+                onClose={onWhiteboardClose}
+                elementPickActive={elementPickActive && whiteboardOpen}
+                whiteboardElementReference={whiteboardElementReference}
+                onPickElement={onPickWhiteboardElement}
+                onCancelElementPick={onCancelElementPick}
+              />
             </SceneProvider>
           </div>
 
@@ -159,6 +171,7 @@ export function CanvasArea({
           )}
 
           {elementPickActive &&
+            !whiteboardOpen &&
             onPickElement &&
             onCancelElementPick &&
             currentScene?.type === 'slide' &&

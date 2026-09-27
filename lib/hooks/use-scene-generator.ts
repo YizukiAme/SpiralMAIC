@@ -3,7 +3,11 @@
 import { useCallback, useRef } from 'react';
 import { useStageStore } from '@/lib/store/stage';
 import { isSceneEditLocked } from '@/lib/edit/regen-lock';
-import { buildModelRequestHeaders, getCurrentModelConfig } from '@/lib/utils/model-config';
+import {
+  buildModelRequestHeaders,
+  getCurrentModelConfig,
+  getStageRoutesHeaderValue,
+} from '@/lib/utils/model-config';
 import { useSettingsStore } from '@/lib/store/settings';
 import { db } from '@/lib/utils/database';
 import type {
@@ -46,7 +50,7 @@ import {
   isAbortError,
   withGenerationRetry,
   type GenerationRetryOptions,
-} from '@openmaic/generation/generation-retry';
+} from '@openmaic/generation/browser';
 
 const log = createLogger('SceneGenerator');
 
@@ -77,9 +81,11 @@ function getApiHeaders(): HeadersInit {
   const settings = useSettingsStore.getState();
   const imageProviderConfig = settings.imageProvidersConfig?.[settings.imageProviderId];
   const videoProviderConfig = settings.videoProvidersConfig?.[settings.videoProviderId];
+  const stageRoutesHeader = getStageRoutesHeaderValue();
 
   return {
     'Content-Type': 'application/json',
+    ...(stageRoutesHeader ? { 'x-model-routes': stageRoutesHeader } : {}),
     ...buildModelRequestHeaders(config),
     // Image generation provider
     'x-image-provider': settings.imageProviderId || '',
@@ -159,7 +165,7 @@ export async function fetchSceneContent(
     };
     agents?: AgentInfo[];
     languageDirective?: string;
-    requirements?: UserRequirements;
+    requirements?: Partial<UserRequirements>;
     /** Explicit override; when set, withThinkingConfig keeps it as-is. */
     thinkingConfig?: ThinkingConfig;
   },
@@ -752,6 +758,8 @@ export interface GenerationParams {
   agents?: AgentInfo[];
   userProfile?: string;
   languageDirective?: string;
+  /** Vocational task-engine flag; gates procedural-skill generation server-side (see resolveVocationalActive). */
+  taskEngineMode?: boolean;
 }
 
 export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
@@ -865,6 +873,7 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
               stageInfo: params.stageInfo,
               agents: params.agents,
               languageDirective: params.languageDirective,
+              ...(params.taskEngineMode ? { requirements: { taskEngineMode: true } } : {}),
             },
             signal,
           );
@@ -1118,6 +1127,7 @@ export function useSceneGenerator(options: UseSceneGeneratorOptions = {}) {
             stageInfo: params.stageInfo,
             agents: params.agents,
             languageDirective: params.languageDirective,
+            ...(params.taskEngineMode ? { requirements: { taskEngineMode: true } } : {}),
           },
           signal,
         );

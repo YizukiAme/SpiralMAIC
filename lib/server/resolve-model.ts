@@ -18,7 +18,6 @@ import {
 } from '@/lib/server/provider-config';
 import { validateUrlForSSRF } from '@/lib/server/ssrf-guard';
 import { fetchWithRedirectValidation } from '@/lib/server/fetch-with-redirect-validation';
-import { getStageRoute, type LlmStage } from '@/lib/server/model-routes';
 import { getCodexOAuthAvailability } from '@/lib/server/codex/availability';
 import { getCodexAuthRuntime } from '@/lib/server/codex/runtime';
 import { createCodexResponsesTransport } from '@/lib/server/codex/transport';
@@ -27,6 +26,13 @@ import {
   deriveCodexUpstreamSessionId,
   type CodexLogicalSession,
 } from '@/lib/server/codex/logical-session';
+import {
+  getStageRoute,
+  getUserStageRoute,
+  parseUserStageRoutes,
+  type LlmStage,
+  type UserStageRoute,
+} from '@/lib/server/model-routes';
 
 export interface ResolvedModel extends ModelWithInfo {
   /** Original model string (e.g. "openai/gpt-4o-mini") */
@@ -84,6 +90,14 @@ export async function resolveModel(params: {
    * lib/server/model-routes.ts.
    */
   stage?: LlmStage;
+  /**
+   * User-level per-stage routes (parsed from the `x-model-routes` header by
+   * resolveModelFromHeaders/FromRequest). Precedence: operator MODEL_ROUTES >
+   * these user routes > x-model > DEFAULT_MODEL. A user route carries its own
+   * connection params (apiKey/baseUrl/providerType) for the routed provider;
+   * server-managed providers still resolve credentials authoritatively.
+   */
+  userRoutes?: Record<string, UserStageRoute>;
   apiKey?: string;
   baseUrl?: string;
   providerType?: string;
@@ -92,14 +106,18 @@ export async function resolveModel(params: {
   logicalSession?: CodexLogicalSession;
   expectedResolvedModel?: ExpectedResolvedModel;
 }): Promise<ResolvedModel> {
-  // Resolution order: stage route > x-model > DEFAULT_MODEL.
+  // Resolution order: env stage route > user stage route > x-model > DEFAULT_MODEL.
   // A configured stage route is the operator's deliberate per-stage choice and
   // wins even over a client-sent x-model (otherwise the browser UI, which always
-  // sends its saved model, would shadow every route). Unrouted stages fall back
+  // sends its saved model, would shadow every route). User routes (the
+  // user-facing 「课程模型配置」 per-stage selection) sit just below operator
+  // routes and above the client's main-model x-model. Unrouted stages fall back
   // to the client x-model, then DEFAULT_MODEL. There is intentionally no hardcoded
   // model fallback — if nothing resolves we fail loud rather than silently pick a
   // vendor default.
-  const stageRoute = getStageRoute(params.stage);
+  const envRoute = getStageRoute(params.stage);
+  const userRoute = envRoute ? undefined : getUserStageRoute(params.userRoutes ?? {}, params.stage);
+  const stageRoute: UserStageRoute | undefined = envRoute ?? userRoute;
   const stageModel = stageRoute?.model;
   const modelString = stageModel || params.modelString || process.env.DEFAULT_MODEL;
   if (!modelString) {
@@ -134,7 +152,10 @@ export async function resolveModel(params: {
       throw new Error('Codex model is unavailable for the connected account');
     }
     let serviceTier: ModelServiceTier | undefined;
-    if (!stageModel && params.serviceTier === 'priority') {
+    // User routes carry their own tier. Operator routes suppress client tiers,
+    // and a main-model tier must never bleed into a different routed model.
+    const requestedTier = stageModel ? userRoute?.serviceTier : params.serviceTier;
+    if (requestedTier === 'priority') {
       if (discoveredModel.capabilities?.serviceTiers?.includes('priority')) {
         serviceTier = 'priority';
       }
@@ -172,11 +193,13 @@ export async function resolveModel(params: {
   // params (apiKey/baseUrl/providerType) belong to the client's *other* model
   // and must not bleed onto the routed provider — otherwise e.g. a routed
   // Anthropic model would be built with the client's OpenAI providerType/key.
-  // A routed model resolves purely from server config, as if no x-model was sent.
+  // A routed model resolves purely from server config, as if no x-model was sent
+  // — except a *user* route, which supplies its own connection for the routed
+  // provider (server-managed providers ignore it regardless).
   const routed = Boolean(stageModel);
-  const clientApiKey = routed ? undefined : params.apiKey;
-  const clientProviderType = routed ? undefined : params.providerType;
-  const clientBaseUrlParam = routed ? undefined : params.baseUrl;
+  const clientApiKey = routed ? userRoute?.apiKey : params.apiKey;
+  const clientProviderType = routed ? userRoute?.providerType : params.providerType;
+  const clientBaseUrlParam = routed ? userRoute?.baseUrl : params.baseUrl;
 
   // Server-managed providers are admin-owned: the operator's key and base URL
   // are authoritative and any client-sent override is ignored. Origin URL
@@ -268,7 +291,7 @@ function getServiceTierFromBody(body: unknown): ModelServiceTier | undefined {
 /**
  * Resolve a language model from standard request headers.
  *
- * Reads: x-model, x-api-key, x-base-url, x-provider-type, x-service-tier
+ * Reads: x-model, x-api-key, x-base-url, x-provider-type, x-model-routes, x-service-tier
  * Note: requiresApiKey is derived server-side from the provider registry,
  * never from client headers, to prevent auth bypass.
  */
@@ -282,6 +305,7 @@ export async function resolveModelFromHeaders(
   return resolveModel({
     modelString: req.headers.get('x-model') || undefined,
     stage,
+    userRoutes: parseUserStageRoutes(req.headers.get('x-model-routes')),
     apiKey: req.headers.get('x-api-key') || undefined,
     baseUrl: req.headers.get('x-base-url') || undefined,
     providerType: req.headers.get('x-provider-type') || undefined,

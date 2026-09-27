@@ -4,7 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased] - 2026-09-19
+## [Unreleased] - 2026-09-27
+
+- Upgrade the app and docs site to Next.js 16.3.6 for security and standalone-build fixes.
+- Refresh the docs site's YAML parser and build tooling to patched compatible versions.
+- Sync upstream model routing and course settings while preserving Codex sign-in and Spiral review.
+- Tighten document parsing, media redirects and render resource budgets.
+- Improve interactive lessons, whiteboard references, PPTX import and export.
+
+### Previous maintenance — 2026-09-19
 
 - Upgrade Next.js to 16.3.3 and integrate upstream access-code, provider transport,
   and render-service security fixes.

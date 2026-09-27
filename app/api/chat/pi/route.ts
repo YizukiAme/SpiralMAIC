@@ -1,9 +1,11 @@
 import { withAccessCode } from '@/lib/server/with-access-code';
+import { attachInteractiveState } from '@/lib/chat/pi/interactive-state-evidence';
 /**
  * Pi Director Chat API Endpoint
  *
- * POST /api/chat/pi - parallel PoC path for running the in-class multi-agent
- * chain as a single server-side pi agent loop.
+ * POST /api/chat/pi - default path for running the in-class multi-agent chain
+ * as a single server-side Pi agent loop. The build-time flag can disable this
+ * route together with the corresponding client path for legacy rollback.
  */
 
 import { NextRequest } from 'next/server';
@@ -23,6 +25,8 @@ import {
 import { runPiDirectorLoop } from '@/lib/chat/pi/director-loop';
 import type { SendEvent } from '@/lib/chat/pi/types';
 import { resolveModel } from '@/lib/server/resolve-model';
+import { parseExternalCodexLogicalSession } from '@/lib/server/codex/logical-session';
+import { parseUserStageRoutes } from '@/lib/server/model-routes';
 import { apiError } from '@/lib/server/api-response';
 import type { ThinkingConfig } from '@/lib/types/provider';
 import type { StatelessChatRequest } from '@/lib/types/chat';
@@ -67,13 +71,37 @@ async function POSTHandler(req: NextRequest) {
       return apiError('MISSING_REQUIRED_FIELD', 400, 'Missing required field: config.agentIds');
     }
 
-    if (body.elementReference !== undefined && !isCoursewareReferenceEnabled()) {
+    if (
+      (body.elementReference !== undefined || body.interactiveState !== undefined) &&
+      !isCoursewareReferenceEnabled()
+    ) {
       return apiError('INVALID_REQUEST', 400, 'Courseware references are disabled');
     }
 
     let elementReference;
     try {
       elementReference = resolveElementReference(body);
+    } catch (error) {
+      if (error instanceof ElementReferenceValidationError) {
+        return apiError(
+          'INVALID_REQUEST',
+          400,
+          error.message,
+          undefined,
+          body.elementReference?.kind === 'whiteboard_element'
+            ? 'whiteboard_reference_changed'
+            : undefined,
+        );
+      }
+      throw error;
+    }
+
+    let interactiveStateNote;
+    try {
+      ({ elementReference, stateNote: interactiveStateNote } = attachInteractiveState(
+        body,
+        elementReference,
+      ));
     } catch (error) {
       if (error instanceof ElementReferenceValidationError) {
         return apiError('INVALID_REQUEST', 400, error.message);
@@ -104,12 +132,17 @@ async function POSTHandler(req: NextRequest) {
     } = await resolveModel({
       modelString: body.model,
       stage: 'chat-adapter',
+      // Honor the classroom-interaction per-stage override the client sends in
+      // `x-model-routes`. A routed stage brings its own key and base URL; otherwise the body credentials are used (never x-* headers).
+      userRoutes: parseUserStageRoutes(req.headers.get('x-model-routes')),
       apiKey: body.apiKey,
       baseUrl: body.baseUrl,
       providerType: body.providerType,
       // Let resolveModel arbitrate thinking too: a routed chat-adapter's thinking
       // wins, an unrouted one honors this client thinking (see resolve-model.ts).
       thinkingConfig: body.thinkingConfig ?? body.thinking,
+      serviceTier: body.serviceTier,
+      logicalSession: parseExternalCodexLogicalSession(body.session),
     });
 
     if (isProviderKeyRequired(providerId) && !resolvedApiKey) {
@@ -232,6 +265,7 @@ async function POSTHandler(req: NextRequest) {
         await runPiDirectorLoop({
           body,
           elementReference,
+          interactiveStateNote,
           agentConfigs,
           send,
           languageModel,

@@ -1,2 +1,2 @@
 /** Compatibility barrel for package-owned PBL runtime-event primitives. */
-export * from '@openmaic/generation/pbl/kernel/runtime-events';
+export * from '@openmaic/generation/browser';

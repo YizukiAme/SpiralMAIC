@@ -1,7 +1,8 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
+import { buildCourseImagePickerGroups } from '@/components/settings/course-model-config';
 
 const root = resolve(__dirname, '../..');
 const read = (path: string) => readFileSync(resolve(root, path), 'utf8');
@@ -52,25 +53,40 @@ describe('Codex image settings surface contract', () => {
     const source = read('components/settings/index.tsx');
 
     expect(source).toMatch(
-      /handleManageCodexLogin[\s\S]*setActiveSection\('providers'\)[\s\S]*setSelectedProviderId\('openai-codex'\)/,
+      /handleManageCodexLogin[\s\S]*setActiveSection\('model-services'\)[\s\S]*setServiceTab\('providers'\)[\s\S]*setSelectedProviderId\('openai-codex'\)/,
     );
     expect(source).toContain('onManageCodexLogin={handleManageCodexLogin}');
-    expect(source).toContain("'codex-image': 'providerCodexImage'");
+    expect(read('components/settings/media-provider-names.ts')).toContain(
+      "'codex-image': 'providerCodexImage'",
+    );
     expect(source).toContain("'codex-image': '/logos/openai.svg'");
   });
 
-  it('gates the media popover by OAuth publication and keeps the fixed model', () => {
-    const availabilityPath = resolve(root, 'lib/media/image-provider-availability.ts');
-    expect(existsSync(availabilityPath)).toBe(true);
-    if (!existsSync(availabilityPath)) return;
+  it('excludes disconnected or authorization-disabled Codex images from the course picker', () => {
+    for (const config of [
+      { apiKey: 'stale', enabled: true, isServerConfigured: false },
+      { enabled: false, isServerConfigured: true },
+    ]) {
+      const groups = buildCourseImagePickerGroups({ 'codex-image': config }, (key) => key);
+      expect(groups.some((group) => group.id === 'codex-image')).toBe(false);
+    }
+  });
 
-    const availability = readFileSync(availabilityPath, 'utf8');
-    const popover = read('components/generation/media-popover.tsx');
-    expect(availability).toContain("credentialMode === 'oauth'");
-    expect(availability).toContain('isServerConfigured === true');
-    expect(popover).toContain('isImageProviderAvailable');
-    expect(popover).toContain("'codex-image': '/logos/openai.svg'");
-    expect(popover).toMatch(/credentialMode === 'oauth'\s*\?\s*p\.models/);
+  it('keeps the published Codex image model fixed despite a local custom catalog', () => {
+    const groups = buildCourseImagePickerGroups(
+      {
+        'codex-image': {
+          enabled: true,
+          isServerConfigured: true,
+          customModels: [{ id: 'injected-model', name: 'Injected' }],
+          replaceBuiltInModels: true,
+        },
+      },
+      (key) => key,
+    );
+    expect(groups.find((group) => group.id === 'codex-image')?.models).toEqual([
+      { id: 'gpt-image-2', name: 'GPT Image 2' },
+    ]);
   });
 
   it('defines every Codex image key in all eight locales', () => {

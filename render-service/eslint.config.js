@@ -6,8 +6,8 @@ export default tseslint.config(
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ['test/**/*.mjs'],
-    // Fixtures run in Node and pass browser callbacks to Chromium.
+    files: ['src/**/*.mjs', 'test/**/*.mjs'],
+    // Resource workers and test fixtures run in Node.
     languageOptions: {
       globals: {
         process: 'readonly',
@@ -15,7 +15,19 @@ export default tseslint.config(
         console: 'readonly',
         setTimeout: 'readonly',
         clearTimeout: 'readonly',
+        setInterval: 'readonly',
+        clearInterval: 'readonly',
+        AbortController: 'readonly',
         AbortSignal: 'readonly',
+        URL: 'readonly',
+      },
+    },
+  },
+  {
+    files: ['test/**/*.mjs'],
+    // Only fixtures pass browser callbacks to Chromium.
+    languageOptions: {
+      globals: {
         document: 'readonly',
         window: 'readonly',
         getComputedStyle: 'readonly',

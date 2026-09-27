@@ -1491,20 +1491,48 @@ describe('database runtime chat integration', () => {
   });
 
   it('keeps the global maintenance lock disjoint from a stage named all', async () => {
+    const serial = serialLockManager();
+    const heldNames = new Set<string>();
+    const locks = {
+      async request<T>(
+        name: string,
+        optionsOrCallback: LockOptions | (() => Promise<T> | T),
+        maybeCallback?: () => Promise<T> | T,
+      ): Promise<T> {
+        // This test runs one operation at a time. A repeated held name means
+        // recursive acquisition, which would deadlock the serial manager.
+        if (heldNames.has(name)) throw new Error(`Recursive lock acquisition: ${name}`);
+        const callback =
+          typeof optionsOrCallback === 'function' ? optionsOrCallback : maybeCallback!;
+        const options = typeof optionsOrCallback === 'function' ? {} : optionsOrCallback;
+        return serial.request(name, options, async () => {
+          heldNames.add(name);
+          try {
+            return await callback();
+          } finally {
+            heldNames.delete(name);
+          }
+        });
+      },
+    };
+    vi.stubGlobal('navigator', { locks });
+
+    // Prove the fixture rejects a collision immediately, without waiting for
+    // a wall-clock deadline that also penalizes a slow IndexedDB save.
+    await expect(
+      locks.request('fixture-recursion', () => locks.request('fixture-recursion', () => {})),
+    ).rejects.toThrow('Recursive lock acquisition: fixture-recursion');
+
     const runtimeStore = new BrowserRuntimeStore({
       indexedDB: globalThis.indexedDB,
       dbName: 'stage-all-lock',
     });
-    const { saveChatSessions } = await import('@/lib/utils/chat-storage');
+    const { loadChatSessions, saveChatSessions } = await import('@/lib/utils/chat-storage');
 
-    const outcome = await Promise.race([
-      saveChatSessions('all', [chatSession()], { store: runtimeStore, learnerKey }).then(
-        () => 'saved' as const,
-      ),
-      new Promise<'blocked'>((resolve) => setTimeout(() => resolve('blocked'), 50)),
+    await saveChatSessions('all', [chatSession()], { store: runtimeStore, learnerKey });
+    await expect(loadChatSessions('all', { store: runtimeStore, learnerKey })).resolves.toEqual([
+      chatSession(),
     ]);
-
-    expect(outcome).toBe('saved');
   });
 
   it('fails before mutating backup data when the default legacy store has no Web Locks', async () => {

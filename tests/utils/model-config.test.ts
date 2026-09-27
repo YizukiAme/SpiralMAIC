@@ -10,7 +10,11 @@ vi.mock('@/lib/store/settings', () => ({
   },
 }));
 
-import { buildModelRequestHeaders, getCurrentModelConfig } from '@/lib/utils/model-config';
+import {
+  buildModelRequestHeaders,
+  getCurrentModelConfig,
+  getStageRoutesHeaderValue,
+} from '@/lib/utils/model-config';
 
 function setCurrentModel(args: { providerId: string; fast: boolean; serviceTiers?: string[] }) {
   settings.state = {
@@ -85,5 +89,37 @@ describe('current model request configuration', () => {
       serviceTiers: ['priority'],
     });
     expect(buildModelRequestHeaders(getCurrentModelConfig())).not.toHaveProperty('x-service-tier');
+  });
+
+  it.each([
+    { fast: true, providerId: 'openai-codex', supported: true, expected: 'priority' },
+    { fast: false, providerId: 'openai-codex', supported: true, expected: undefined },
+    { fast: true, providerId: 'openai-codex', supported: false, expected: undefined },
+    { fast: true, providerId: 'openai', supported: true, expected: undefined },
+  ])('derives the routed tier independently of the main model: %j', (testCase) => {
+    setCurrentModel({ providerId: 'openai', fast: testCase.fast });
+    Object.assign(settings.state, {
+      llmStageRoutes: {
+        'chat-adapter': { providerId: testCase.providerId, modelId: 'routed-model' },
+      },
+      providersConfig: {
+        [testCase.providerId]: {
+          type: 'openai',
+          isServerConfigured: true,
+          models: [
+            { id: 'gpt-test', name: 'Main', capabilities: { serviceTiers: [] } },
+            {
+              id: 'routed-model',
+              name: 'Routed',
+              capabilities: { serviceTiers: testCase.supported ? ['priority'] : [] },
+            },
+          ],
+        },
+      },
+    });
+
+    const route = JSON.parse(getStageRoutesHeaderValue()!)['chat-adapter'];
+    expect(route.model).toBe(`${testCase.providerId}:routed-model`);
+    expect(route.serviceTier).toBe(testCase.expected);
   });
 });

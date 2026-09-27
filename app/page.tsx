@@ -129,7 +129,6 @@ import {
 
 const log = createLogger('Home');
 
-const WEB_SEARCH_STORAGE_KEY = 'webSearchEnabled';
 const RECENT_OPEN_STORAGE_KEY = 'recentClassroomsOpen';
 const INTERACTIVE_MODE_STORAGE_KEY = 'interactiveModeEnabled';
 
@@ -144,7 +143,6 @@ let workbenchRuntimeCache: boolean | null = null;
 interface FormState {
   courseMaterials: SelectedCourseMaterial[];
   requirement: string;
-  webSearch: boolean;
   interactiveMode: boolean;
   vocationalTestMode: boolean;
 }
@@ -152,7 +150,6 @@ interface FormState {
 const initialFormState: FormState = {
   courseMaterials: [],
   requirement: '',
-  webSearch: false,
   interactiveMode: false,
   vocationalTestMode: false,
 };
@@ -238,13 +235,9 @@ function HomePage() {
       /* localStorage unavailable */
     }
     try {
-      const savedWebSearch = localStorage.getItem(WEB_SEARCH_STORAGE_KEY);
       const savedInteractiveMode = localStorage.getItem(INTERACTIVE_MODE_STORAGE_KEY);
-      const updates: Partial<FormState> = {};
-      if (savedWebSearch === 'true') updates.webSearch = true;
-      if (savedInteractiveMode === 'true') updates.interactiveMode = true;
-      if (Object.keys(updates).length > 0) {
-        setForm((prev) => ({ ...prev, ...updates }));
+      if (savedInteractiveMode === 'true') {
+        setForm((prev) => ({ ...prev, interactiveMode: true }));
       }
     } catch {
       /* localStorage unavailable */
@@ -825,7 +818,6 @@ function HomePage() {
   const updateForm = <K extends keyof FormState>(field: K, value: FormState[K]) => {
     setForm((prev) => ({ ...prev, [field]: value }));
     try {
-      if (field === 'webSearch') localStorage.setItem(WEB_SEARCH_STORAGE_KEY, String(value));
       if (field === 'interactiveMode')
         localStorage.setItem(INTERACTIVE_MODE_STORAGE_KEY, String(value));
       if (field === 'requirement') updateRequirementCache(value as string);
@@ -925,7 +917,8 @@ function HomePage() {
         requirement: form.requirement,
         userNickname: userProfile.nickname || undefined,
         userBio: userProfile.bio || undefined,
-        webSearch: form.webSearch || undefined,
+        // Course-level web search now lives in settings (课程模型配置 → 联网调研)
+        webSearch: useSettingsStore.getState().webSearchEnabled || undefined,
         interactiveMode: form.vocationalTestMode ? true : form.interactiveMode,
         ...(form.vocationalTestMode ? { taskEngineMode: true } : {}),
       };
@@ -1274,8 +1267,6 @@ function HomePage() {
                 <div className="px-3 pb-3 flex items-end gap-2">
                   <div className="flex-1 min-w-0">
                     <GenerationToolbar
-                      webSearch={form.webSearch}
-                      onWebSearchChange={(v) => updateForm('webSearch', v)}
                       onSettingsOpen={(section) => {
                         setSettingsSection(section);
                         setSettingsOpen(true);

@@ -23,6 +23,7 @@ vi.mock('@/lib/utils/model-config', () => ({
     'x-api-key': config.apiKey || '',
     ...(config.serviceTier ? { 'x-service-tier': config.serviceTier } : {}),
   }),
+  getStageRoutesHeaderValue: () => undefined,
 }));
 
 vi.mock('@/lib/store/settings', () => ({

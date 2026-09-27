@@ -27,6 +27,7 @@ async function openCodexSettings(page: HomePage['page'], connected = false) {
   await expect(home.textarea).toBeVisible();
   await page.locator('button:has(svg.lucide-settings)').first().click();
   await expect(page.getByRole('dialog')).toBeVisible();
+  await page.getByRole('button', { name: 'Model Services', exact: true }).click();
   await page.getByRole('button', { name: /Codex/i }).first().click();
   if (connected) {
     await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();

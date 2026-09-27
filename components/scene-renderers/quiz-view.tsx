@@ -16,7 +16,11 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/hooks/use-i18n';
-import { buildModelRequestHeaders, getCurrentModelConfig } from '@/lib/utils/model-config';
+import {
+  buildModelRequestHeaders,
+  getCurrentModelConfig,
+  getStageRoutesHeaderValue,
+} from '@/lib/utils/model-config';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('QuizView');
@@ -104,6 +108,8 @@ async function gradeShortAnswerQuestion(
       'Content-Type': 'application/json',
       ...buildModelRequestHeaders(modelConfig),
     };
+    const stageRoutesHeader = getStageRoutesHeaderValue();
+    if (stageRoutesHeader) headers['x-model-routes'] = stageRoutesHeader;
 
     const res = await fetch('/api/quiz-grade', {
       method: 'POST',

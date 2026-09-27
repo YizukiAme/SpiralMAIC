@@ -62,7 +62,11 @@ import type {
 import { trimmedPBLText } from '@/lib/pbl/v2/readers';
 import type { PBLSSEEvent } from '@/lib/pbl/v2/api/sse';
 import { applyInstructorEvent } from './apply-instructor-event';
-import { buildModelRequestHeaders, getCurrentModelConfig } from '@/lib/utils/model-config';
+import {
+  buildModelRequestHeaders,
+  getCurrentModelConfig,
+  getStageRoutesHeaderValue,
+} from '@/lib/utils/model-config';
 import { useSettingsStore } from '@/lib/store/settings';
 import { normalizeProjectRuntime } from '@/lib/pbl/v2/operations/kernel/progress';
 import {
@@ -454,6 +458,8 @@ export function PBLV2SubmissionPanel({
           'Content-Type': 'application/json',
           ...buildModelRequestHeaders(modelConfig),
         };
+        const stageRoutesHeader = getStageRoutesHeaderValue();
+        if (stageRoutesHeader) headers['x-model-routes'] = stageRoutesHeader;
         try {
           const stored = localStorage.getItem('locale');
           if (stored) headers['x-user-locale'] = stored;

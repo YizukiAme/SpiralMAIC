@@ -21,6 +21,7 @@ import { apiError } from '@/lib/server/api-response';
 import { createLogger } from '@/lib/logger';
 import { resolveModel } from '@/lib/server/resolve-model';
 import { parseExternalCodexLogicalSession } from '@/lib/server/codex/logical-session';
+import { parseUserStageRoutes } from '@/lib/server/model-routes';
 import type { ThinkingConfig } from '@/lib/types/provider';
 const log = createLogger('Chat API');
 
@@ -74,6 +75,9 @@ async function POSTHandler(req: NextRequest) {
     } = await resolveModel({
       modelString: body.model,
       stage: 'chat-adapter',
+      // Honor the classroom-interaction per-stage override the client sends in
+      // `x-model-routes`. A routed stage brings its own key and base URL; otherwise the body credentials are used (never x-* headers).
+      userRoutes: parseUserStageRoutes(req.headers.get('x-model-routes')),
       apiKey: body.apiKey,
       baseUrl: body.baseUrl,
       providerType: body.providerType,

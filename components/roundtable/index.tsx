@@ -66,6 +66,7 @@ interface RoundtableProps {
   readonly isSoftClosing?: boolean;
   readonly softCloseDeadline?: number;
   readonly isTopicPending?: boolean;
+  readonly canSendMessage?: () => boolean;
   readonly onMessageSend?: (message: string) => void;
   readonly onUserSpeechStateChange?: (active: boolean) => void;
   readonly onDiscussionStart?: (request: DiscussionAction) => void;
@@ -181,6 +182,7 @@ export function Roundtable({
   isTopicPending,
   onMessageSend,
   onUserSpeechStateChange,
+  canSendMessage,
   onDiscussionStart,
   onDiscussionSkip,
   onStopDiscussion,
@@ -401,6 +403,12 @@ export function Roundtable({
           setIsVoiceOpen(false);
           return;
         }
+        if (canSendMessage?.() === false) {
+          setInputValue(text);
+          setIsInputOpen(true);
+          setIsVoiceOpen(false);
+          return;
+        }
         showLocalUserMessage(text);
         onMessageSend?.(text);
         setIsSendCooldown(true);
@@ -418,7 +426,7 @@ export function Roundtable({
   }, [isInputOpen, isRecording, isVoiceOpen, onUserSpeechStateChange]);
 
   const handleSendMessage = () => {
-    if (!inputValue.trim() || isSendCooldown) return;
+    if (!inputValue.trim() || isSendCooldown || canSendMessage?.() === false) return;
 
     showLocalUserMessage(inputValue);
     onMessageSend?.(inputValue);

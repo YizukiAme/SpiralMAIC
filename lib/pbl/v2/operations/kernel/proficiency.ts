@@ -1,2 +1,2 @@
 /** Compatibility barrel for package-owned PBL proficiency primitives. */
-export * from '@openmaic/generation/pbl/kernel/proficiency';
+export * from '@openmaic/generation/browser';
