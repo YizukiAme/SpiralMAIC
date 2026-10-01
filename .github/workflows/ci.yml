@@ -412,7 +412,7 @@ jobs:
       # the install and the package builds run.
       - name: Build deps + builder stages
         if: steps.changes.outputs.changed == 'true'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           target: builder
