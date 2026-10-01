@@ -406,7 +406,7 @@ jobs:
 
       - name: Set up Buildx
         if: steps.changes.outputs.changed == 'true'
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       # target=builder builds deps as well (COPY --from=deps), which is where
       # the install and the package builds run.
