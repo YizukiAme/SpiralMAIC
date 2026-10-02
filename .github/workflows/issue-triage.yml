@@ -47,7 +47,7 @@ jobs:
 
       - name: Collect issue, discussion and candidate context
         id: collect
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           ISSUE_INPUT: ${{ inputs.issue }}
           PUBLISH_INPUT: ${{ inputs.publish }}
@@ -127,7 +127,7 @@ jobs:
           name: ${{ needs.analyze.outputs.artifact }}
           path: triage-context
       - name: Validate and save proposed changes
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           TRIAGE_RESULT: ${{ needs.analyze.outputs.result }}
         with:
@@ -169,7 +169,7 @@ jobs:
           name: ${{ needs.analyze.outputs.artifact }}
           path: triage-context
       - name: Recheck discussion and apply eligible changes
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           TRIAGE_RESULT: ${{ needs.analyze.outputs.result }}
         with:
