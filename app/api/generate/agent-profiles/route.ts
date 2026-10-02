@@ -166,6 +166,7 @@ async function POSTHandler(req: NextRequest) {
       model: languageModel,
       modelString: _modelString,
       thinkingConfig,
+      serverManaged,
     } = await resolveModelFromRequest(req, body, 'agent-profiles');
     modelString = _modelString;
 
@@ -282,6 +283,7 @@ Return a JSON object with this exact structure:
         'agent-profiles',
         undefined,
         thinkingConfig,
+        { serverManaged },
       )
     ).text;
 

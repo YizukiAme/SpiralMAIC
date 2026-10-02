@@ -956,6 +956,15 @@ export async function importDatabase(
         const { restoreChatSessionsFromBackup } = await import('./chat-storage');
         await restoreChatSessionsFromBackup(restoredChatStageIds, restoreRows, {
           ...chatOptions,
+          // Ordinary chat reads no longer inspect the old browser database.
+          // A backup restore explicitly stages its own rows here; pass that
+          // source to the restore transaction so it actually reaches RuntimeStore.
+          legacyStore: {
+            load: (stageId) => db.chatRestoreStaging.where('stageId').equals(stageId).toArray(),
+            clear: async (stageId) => {
+              await db.chatRestoreStaging.where('stageId').equals(stageId).delete();
+            },
+          },
           globalLockHeld: true,
           rollbackLegacyRows: rollbackRows,
         });

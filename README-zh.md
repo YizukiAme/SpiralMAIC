@@ -73,7 +73,7 @@
 
 ## 跑起来
 
-准备 Node.js `>= 22.19 < 23`、pnpm 10，再选一个云端或本地模型服务。
+准备 Node.js `>= 22.19 < 23`、pnpm 10、PostgreSQL，再选一个云端或本地模型服务。
 
 ```bash
 git clone https://github.com/YizukiAme/SpiralMAIC.git
@@ -81,6 +81,18 @@ cd SpiralMAIC
 corepack enable
 pnpm install
 cp .env.example .env.local
+pnpm db:up
+```
+
+在 `.env.local` 中写入本地数据库地址：
+
+```env
+DATABASE_URL=postgres://openmaic:openmaic-dev@127.0.0.1:5432/openmaic
+```
+
+然后启动：
+
+```bash
 pnpm dev
 ```
 
@@ -92,6 +104,8 @@ DEFAULT_MODEL=openai:your-model
 ```
 
 然后打开 [http://localhost:3000](http://localhost:3000)，生成一门课，开始转第一圈。
+如果浏览器里留有旧版课程或学习记录，SpiralMAIC 会先问你是否导入到当前服务器。
+可以点“稍后”，再从设置里回来；浏览器原件会保留，中断后也能接着导入。
 
 Gemini、Anthropic、Bedrock、DeepSeek、Qwen、Kimi、MiniMax、GLM、小米 MiMo、
 OpenRouter、Ollama、Lemonade 等也都可以用。最新配置清单直接看 [`.env.example`](.env.example)。
@@ -112,7 +126,7 @@ pnpm start
 docker compose up --build
 ```
 
-可选的 PostgreSQL 持久化和隔离 MP4 渲染服务可以通过 Docker Compose profile 开启。
+Docker Compose 默认包含 PostgreSQL；隔离 MP4 渲染服务是可选项。
 细节见[存储说明](packages/@openmaic/storage/README.md)和
 [渲染服务说明](render-service/README.md)。
 
@@ -141,7 +155,7 @@ Spiral 自己的部分很好找：
 | --- | --- |
 | `app/classroom/[id]/revisit/` | Reverse Challenge 课堂 |
 | `components/revisit/` | 复盘面板、报告、教学材料工作台和阅读器 |
-| `lib/revisit/` | 记忆、考纲、证据、评分、挑战和本地数据 |
+| `lib/revisit/` | 记忆、考纲、证据、评分、挑战及正式／Demo 存储 |
 | `lib/overtime/` | 课后加时课件 |
 | `eval/revisit-judge/` | 报告稳定性评测 |
 

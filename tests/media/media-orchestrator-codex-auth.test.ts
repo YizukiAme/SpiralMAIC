@@ -30,9 +30,7 @@ const mocks = vi.hoisted(() => {
     mediaFilesPut: vi.fn(async (_record: unknown) => undefined),
     mediaFilesGet: vi.fn(async () => undefined),
     mediaFilesDelete: vi.fn(async () => undefined),
-    assetPut: vi.fn(async (_blob: Blob, meta: { prompt?: string }) =>
-      (meta.prompt ?? 'asset').replace(/^illustration /, ''),
-    ),
+    assetPut: vi.fn(async () => 'image-1'),
     assetRemove: vi.fn(async () => undefined),
     logError: vi.fn(),
   };
@@ -46,12 +44,13 @@ vi.mock('@/lib/store/media-generation', () => ({
   useMediaGenerationStore: { getState: () => mocks.mediaStore },
 }));
 
-vi.mock('@/lib/utils/database', () => ({
+vi.mock('@/lib/device-storage/database', () => ({
   db: {
     mediaFiles: {
       put: mocks.mediaFilesPut,
       get: mocks.mediaFilesGet,
       delete: mocks.mediaFilesDelete,
+      where: () => ({ equals: () => ({ toArray: async () => [] }) }),
     },
   },
   mediaFileKey: (stageId: string, elementId: string) => `${stageId}:${elementId}`,
@@ -61,6 +60,13 @@ vi.mock('@/lib/media/asset-pool', () => ({
   putAsset: mocks.assetPut,
   removeAsset: mocks.assetRemove,
   replaceAsset: vi.fn(),
+}));
+
+// These tests exercise Codex errors, not allocation handoff between a media
+// pass and a not-yet-generated slide. Keep each pass independent.
+vi.mock('@/lib/media/pending-media-allocations', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/media/pending-media-allocations')>()),
+  pendingMediaAllocation: () => undefined,
 }));
 
 vi.mock('@/lib/document-store', () => {
@@ -78,7 +84,7 @@ vi.mock('@/lib/document-store', () => {
 
 vi.mock('@/lib/store/stage', () => ({
   useStageStore: {
-    getState: () => ({ stage: null, scenes: [] }),
+    getState: () => ({ stage: { id: 'stage-1' }, scenes: [], generationComplete: false }),
     setState: vi.fn(),
   },
   markStagePersistenceDirty: vi.fn(),

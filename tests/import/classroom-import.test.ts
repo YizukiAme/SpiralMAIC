@@ -8,6 +8,7 @@ import { importClassroomBlob } from '@/lib/import/classroom-import';
 import { accessDocument } from '@/lib/document-store';
 import { db } from '@/lib/utils/database';
 import type { Stage } from '@/lib/types/stage';
+import { inMemoryDocumentStore } from '@/tests/helpers/in-memory-document-store';
 
 const storage = new Map<string, string>();
 const homepageImporterSource = readFileSync(
@@ -74,8 +75,16 @@ async function classroomBlob(overrides: Record<string, unknown> = {}) {
 beforeEach(async () => {
   storage.clear();
   await clearImportTables();
+  const { configureDocumentStorage, resetDocumentStorageForTests } =
+    await import('@/lib/document-store/config');
+  resetDocumentStorageForTests();
+  configureDocumentStorage({ store: inMemoryDocumentStore('classroom-import-test') });
 });
-afterEach(clearImportTables);
+afterEach(async () => {
+  await clearImportTables();
+  const { resetDocumentStorageForTests } = await import('@/lib/document-store/config');
+  resetDocumentStorageForTests();
+});
 
 describe('importClassroomBlob', () => {
   it('returns the new stage id and persists an ordinary classroom', async () => {

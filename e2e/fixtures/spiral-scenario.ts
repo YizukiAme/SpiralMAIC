@@ -2,10 +2,10 @@ import type { Page } from '@playwright/test';
 
 import { createSettingsStorage } from './test-data/settings';
 import { defaultTheme } from './test-data/scene-content';
-import { openHomeAndWaitForDatabase } from './indexed-db';
+import { uniqueStageId } from './server-seed';
 
-export const SPIRAL_STAGE_ID = 'spiral-v032-stage';
-export const SPIRAL_ATTEMPT_ID = 'spiral-v032-attempt';
+export const SPIRAL_STAGE_ID = uniqueStageId('spiral-v032-stage');
+export const SPIRAL_ATTEMPT_ID = `${SPIRAL_STAGE_ID}-attempt`;
 export const SPIRAL_ARTIFACT_ID = `${SPIRAL_STAGE_ID}:studyGuide:v1`;
 
 const SETTINGS_STORAGE = createSettingsStorage({
@@ -221,13 +221,61 @@ function createScenario(now: number) {
 async function seedCourseDatabase(page: Page, scenario: ReturnType<typeof createScenario>) {
   await page.evaluate((data) => {
     return new Promise<void>((resolve, reject) => {
-      const request = indexedDB.open('MAIC-Database');
+      const request = indexedDB.open('MAIC-Database', 140);
+      request.onupgradeneeded = () => {
+        const database = request.result;
+        const stores: Array<[string, string | string[], string[]]> = [
+          ['stages', 'id', ['updatedAt']],
+          ['scenes', 'id', ['stageId', 'order', '[stageId+order]']],
+          ['audioFiles', 'id', ['createdAt']],
+          ['imageFiles', 'id', ['createdAt']],
+          ['snapshots', 'id', []],
+          ['chatSessions', 'id', ['stageId', '[stageId+createdAt]']],
+          ['playbackState', 'stageId', []],
+          ['stageOutlines', 'stageId', []],
+          ['mediaFiles', 'id', ['stageId', '[stageId+type]']],
+          ['generatedAgents', 'id', ['stageId']],
+          ['voiceProfiles', 'id', ['providerId', 'kind', 'updatedAt']],
+          ['autoVoiceCache', 'voiceId', ['updatedAt']],
+          ['agentEditSessions', 'id', ['stageId', '[stageId+updatedAt]']],
+          [
+            'overtimeExtensions',
+            'id',
+            [
+              'stageId',
+              'sequence',
+              'status',
+              'updatedAt',
+              '[stageId+status]',
+              '[stageId+sequence]',
+            ],
+          ],
+        ];
+        for (const [name, keyPath, indexes] of stores) {
+          const store = database.createObjectStore(name, {
+            keyPath,
+            ...(name === 'snapshots' ? { autoIncrement: true } : {}),
+          });
+          for (const index of indexes) {
+            const fields = index.startsWith('[') ? index.slice(1, -1).split('+') : index;
+            store.createIndex(index, fields);
+          }
+        }
+      };
       request.onsuccess = () => {
         const database = request.result;
-        const transaction = database.transaction(
-          ['stages', 'scenes', 'stageOutlines', 'overtimeExtensions'],
-          'readwrite',
-        );
+        let transaction: IDBTransaction;
+        try {
+          transaction = database.transaction(
+            ['stages', 'scenes', 'stageOutlines', 'overtimeExtensions'],
+            'readwrite',
+          );
+        } catch (error) {
+          const stores = Array.from(database.objectStoreNames).join(', ');
+          database.close();
+          reject(new Error(`${String(error)}; available stores: ${stores}`));
+          return;
+        }
         transaction.objectStore('stages').put(data.stage);
         transaction.objectStore('scenes').put(data.sourceScene);
         transaction.objectStore('scenes').put(data.overtimeScene);
@@ -246,6 +294,7 @@ async function seedCourseDatabase(page: Page, scenario: ReturnType<typeof create
         transaction.onerror = () => reject(transaction.error);
       };
       request.onerror = () => reject(request.error);
+      request.onblocked = () => reject(new Error('Legacy classroom database is blocked'));
     });
   }, scenario);
 }
@@ -253,7 +302,28 @@ async function seedCourseDatabase(page: Page, scenario: ReturnType<typeof create
 async function seedRevisitDatabase(page: Page, scenario: ReturnType<typeof createScenario>) {
   await page.evaluate((data) => {
     return new Promise<void>((resolve, reject) => {
-      const request = indexedDB.open('SpiralMAIC-Revisit');
+      const request = indexedDB.open('SpiralMAIC-Revisit', 70);
+      request.onupgradeneeded = () => {
+        const database = request.result;
+        const stores: Array<[string, string | string[]]> = [
+          ['userConceptState', ['stageId', 'conceptId']],
+          ['conceptEvidence', 'id'],
+          ['examBlueprints', 'id'],
+          ['skeletonDecks', 'id'],
+          ['revisitReports', 'attemptId'],
+          ['lessonProgress', 'stageId'],
+          ['studyMaterials', 'id'],
+          ['studyArtifacts', 'id'],
+          ['studyPractice', 'artifactId'],
+          ['revisitAttempts', 'attemptId'],
+          ['revisitDemoSessions', 'id'],
+          ['lessonConcepts', ['stageId', 'conceptId']],
+        ];
+        for (const [name, keyPath] of stores) {
+          const store = database.createObjectStore(name, { keyPath });
+          if (name !== 'revisitDemoSessions') store.createIndex('stageId', 'stageId');
+        }
+      };
       request.onsuccess = () => {
         const database = request.result;
         const transaction = database.transaction(
@@ -305,19 +375,16 @@ export async function seedV032SpiralScenario(page: Page) {
   }, SETTINGS_STORAGE);
 
   const scenario = createScenario(Date.now());
-  // Wait for the app's Dexie migrations before opening the databases directly.
-  await openHomeAndWaitForDatabase(page, 'MAIC-Database', [
-    'stages',
-    'scenes',
-    'stageOutlines',
-    'overtimeExtensions',
-  ]);
+  // A static page gives the old browser databases the same origin without
+  // starting the new app's import detector before the snapshot is complete.
+  await page.goto('/openmaic-mark.png');
   await seedCourseDatabase(page, scenario);
-
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.getByRole('button', { name: scenario.stage.name }).waitFor();
   await seedRevisitDatabase(page, scenario);
 
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.getByRole('button', { name: /Start import|开始导入/ }).click();
+  await page.getByText(scenario.stage.name, { exact: true }).first().waitFor();
+  await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).last().click();
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.getByRole('button', { name: scenario.stage.name }).waitFor();
+  await page.getByText(scenario.stage.name, { exact: true }).first().waitFor();
 }

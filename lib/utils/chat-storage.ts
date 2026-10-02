@@ -1,9 +1,10 @@
 /**
  * Chat persistence on the learner RuntimeStore.
  *
- * The legacy Dexie table remains as a one-time migration source. Runtime
- * records are append-only, while the latest session-state record describes
- * the current message window and mutable chat metadata.
+ * Runtime records are append-only, while the latest session-state record
+ * describes the current message window and mutable chat metadata. Legacy chat
+ * rows are migrated only from an injected `legacyStore` (the one-way importer
+ * hands in a read-only one); the regular load and save paths have none.
  */
 
 import type { RuntimeSession } from '@openmaic/dsl';
@@ -15,7 +16,6 @@ import { nanoid } from 'nanoid';
 import { getLearnerKey } from '@/lib/runtime/learner-key';
 import { getRuntimeStore } from '@/lib/runtime/store';
 import type { ChatSession } from '@/lib/types/chat';
-import { db } from './database';
 import {
   buildChatRecordInit,
   chatRuntimeCandidates,
@@ -87,25 +87,14 @@ export interface ChatStorageSnapshot {
 
 export * from './chat-storage-core';
 
-const dexieLegacyStore: LegacyChatStore = {
-  async load(stageId) {
-    const staged = await db.chatRestoreStaging.where('stageId').equals(stageId).sortBy('createdAt');
-    const records =
-      staged.length > 0
-        ? staged
-        : await db.chatSessions.where('stageId').equals(stageId).sortBy('createdAt');
-    return records;
-  },
-  async clear(stageId) {
-    await db.transaction('rw', [db.chatSessions, db.chatRestoreStaging], async () => {
-      await db.chatSessions.where('stageId').equals(stageId).delete();
-      await db.chatRestoreStaging.where('stageId').equals(stageId).delete();
-    });
-  },
+/** The regular paths' legacy source: none. */
+const noLegacyStore: LegacyChatStore = {
+  load: async () => [],
+  clear: async () => undefined,
 };
 
 // Stage saves are debounced but can overlap. Keep each RuntimeStore partition
-// sequential locally. The shared legacy table requires Web Locks across realms;
+// sequential locally. The regular paths require Web Locks across realms;
 // injected legacy stores retain the isolated generation fallback used by
 // concurrency tests and non-browser adapters.
 const storeQueues = new WeakMap<RuntimeStore, Map<string, Promise<void>>>();
@@ -277,13 +266,12 @@ async function context(options: ChatStorageOptions): Promise<{
   requiresCrossRealmLock: boolean;
   sleep: ChatSyncSleep;
 }> {
-  const legacyStore = options.legacyStore ?? dexieLegacyStore;
   return {
     store: options.store ?? getRuntimeStore(),
     learnerKey: options.learnerKey ?? (await getLearnerKey(options.kv)),
-    legacyStore,
+    legacyStore: options.legacyStore ?? noLegacyStore,
     sleep: options.sleep ?? defaultChatSyncSleep,
-    requiresCrossRealmLock: legacyStore === dexieLegacyStore,
+    requiresCrossRealmLock: options.legacyStore === undefined,
   };
 }
 
@@ -1203,13 +1191,51 @@ export async function loadChatSessions(
           const markerView = beforeLoad.find((view) => view.runtimeSession.id === restoreMarker);
           const targets = restoreMarkerTargets(markerView);
           if (markerView && targets.length > 0) {
+            // A backup restore may have been interrupted after it staged its
+            // rows and wrote this marker but before it cleared old sessions.
+            // Ordinary reads intentionally ignore the old browser database;
+            // only a durable restore marker authorizes reading backup staging.
+            let restoreStaging: LegacyChatStore | undefined;
+            if (!options.legacyStore) {
+              const { db } = await import('./database');
+              restoreStaging = {
+                load: (id) => db.chatRestoreStaging.where('stageId').equals(id).toArray(),
+                clear: async (id) => {
+                  await db.chatRestoreStaging.where('stageId').equals(id).delete();
+                },
+              };
+              const staged = normalizeLegacyConversion(await restoreStaging.load(stageId));
+              if (staged.skippedRows.length > 0) {
+                throw new Error(`Cannot resume malformed backup chat rows for ${stageId}`);
+              }
+              legacy = staged.sessions;
+            }
             await Promise.all(
               targets.map((runtimeSessionId) => resolved.store.deleteSession(runtimeSessionId)),
             );
+            beforeLoad = await runtimeViews(resolved.store, stageId, resolved.learnerKey);
+            if (restoreStaging) {
+              // Keep both the target-bearing marker and staged source until
+              // runtime sync succeeds. An interrupted retry is then safe.
+              await syncSessions(
+                resolved.store,
+                stageId,
+                resolved.learnerKey,
+                legacy,
+                false,
+                isolatedWrites,
+                undefined,
+                undefined,
+                beforeLoad,
+                resolved.sleep,
+              );
+            }
             await finalizeRestoreMarker(resolved.store, markerView.runtimeSession);
+            if (restoreStaging) await restoreStaging.clear(stageId);
             beforeLoad = await runtimeViews(resolved.store, stageId, resolved.learnerKey);
             restoreMarker = currentRestoreMarker(beforeLoad, stageId) ?? null;
             readRestoreMarker = restoreMarker;
+            if (restoreStaging) legacy = [];
           }
         }
         if (legacy.length === 0) {
@@ -1447,9 +1473,4 @@ export async function restoreChatSessionsFromBackup(
   // Without Web Locks, serialize the whole restore against same-realm writers.
   await Promise.all(precedingWrites);
   await withChatStorageExclusiveLock(() => withStageLock(0));
-}
-
-/** Clear the legacy table during stage deletion; RuntimeStore cascades separately. */
-export async function deleteChatSessions(stageId: string): Promise<void> {
-  await dexieLegacyStore.clear(stageId);
 }

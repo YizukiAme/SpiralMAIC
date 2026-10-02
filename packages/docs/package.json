@@ -2,6 +2,7 @@
   "name": "@openmaic/docs",
   "version": "0.0.0",
   "private": true,
+  "packageManager": "pnpm@10.28.0",
   "scripts": {
     "build": "next build && node scripts/postexport.mjs",
     "postexport": "node scripts/postexport.mjs",

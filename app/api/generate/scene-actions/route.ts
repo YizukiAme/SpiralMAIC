@@ -89,6 +89,7 @@ async function POSTHandler(req: NextRequest) {
       modelInfo,
       modelString,
       thinkingConfig,
+      serverManaged,
     } = await resolveModelFromRequest(req, body, 'scene-actions');
     outlineTitle = outline?.title;
     resolvedModelString = modelString;
@@ -119,6 +120,7 @@ async function POSTHandler(req: NextRequest) {
           'scene-actions',
           undefined,
           thinkingConfig,
+          { serverManaged },
         );
         return result.text;
       }
@@ -133,6 +135,7 @@ async function POSTHandler(req: NextRequest) {
         'scene-actions',
         undefined,
         thinkingConfig,
+        { serverManaged },
       );
       return result.text;
     };

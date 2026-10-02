@@ -96,6 +96,27 @@ function deps(record: { current: OvertimeExtension }): OvertimeGenerationDepende
 }
 
 describe('overtime generation pipeline', () => {
+  it('claims a generation lease before planning and releases it after completion', async () => {
+    const record = { current: extension() };
+    const dependencies = deps(record);
+    dependencies.claim = vi.fn(async () => record.current);
+    dependencies.heartbeat = vi.fn(async () => undefined);
+    dependencies.release = vi.fn(async () => undefined);
+
+    await runOvertimeGeneration({
+      extensionId: record.current.id,
+      stage,
+      scenes: [sourceScene],
+      existingOutlines: [],
+      knownConcepts: [],
+      dependencies,
+      now: () => 20,
+    });
+
+    expect(dependencies.claim).toHaveBeenCalledWith('extension-1');
+    expect(dependencies.release).toHaveBeenCalledWith('extension-1');
+  });
+
   it('plans and generates one durable page through the existing content/actions/TTS pipeline', async () => {
     const record = { current: extension() };
     const dependencies = deps(record);

@@ -23,7 +23,7 @@
     "echarts": "^6.0.0",
     "esbuild": "0.28.1",
     "fflate": "^0.8.2",
-    "hono": "^4.6.14",
+    "hono": "^4.13.7",
     "hyperframes-resource-producer": "npm:@hyperframes/producer@0.8.37",
     "motion": "^12.27.5",
     "parse5": "^8.0.1",

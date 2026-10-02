@@ -125,11 +125,11 @@ async function POSTHandler(req: NextRequest) {
 
     let aiCall: AICallFn | undefined;
     try {
-      const { model: languageModel, thinkingConfig } = await resolveModelFromRequest(
-        req,
-        body,
-        'web-search-query-rewrite',
-      );
+      const {
+        model: languageModel,
+        thinkingConfig,
+        serverManaged,
+      } = await resolveModelFromRequest(req, body, 'web-search-query-rewrite');
       aiCall = async (systemPrompt, userPrompt) => {
         const result = await callLLM(
           {
@@ -143,6 +143,7 @@ async function POSTHandler(req: NextRequest) {
           'web-search-query-rewrite',
           undefined,
           thinkingConfig,
+          { serverManaged },
         );
         return result.text;
       };

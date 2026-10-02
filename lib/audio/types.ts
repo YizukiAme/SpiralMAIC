@@ -10,6 +10,7 @@
  * - GLM TTS (https://docs.bigmodel.cn/cn/guide/models/sound-and-video/glm-tts)
  * - Qwen TTS (https://bailian.console.aliyun.com/)
  * - Doubao TTS (https://www.volcengine.com/docs/6561/1257543)
+ * - Google Gemini TTS (https://ai.google.dev/gemini-api/docs/speech-generation)
  * - Browser Native TTS (Web Speech API, client-side only)
  *
  * Currently Supported ASR Providers:
@@ -88,6 +89,7 @@ export type BuiltInTTSProviderId =
   | 'doubao-tts'
   | 'elevenlabs-tts'
   | 'minimax-tts'
+  | 'google-tts'
   | 'lemonade-tts'
   | 'browser-native-tts';
 
@@ -143,6 +145,12 @@ export interface TTSProviderConfig {
     max: number;
     default: number;
   };
+  /**
+   * `false` when the provider ignores the requested speed, which locks the speed
+   * control in settings. Omitted means speed is supported; a missing
+   * `speedRange` does not imply the opposite.
+   */
+  supportsSpeed?: boolean;
 }
 
 /**
@@ -173,6 +181,13 @@ export interface TTSModelConfig {
    * `ALLOW_LOCAL_NETWORKS` behavior.
    */
   publicOnly?: boolean;
+  /**
+   * `true` when the provider is server-configured: its endpoint is operator
+   * configuration and may be on a local network without ALLOW_LOCAL_NETWORKS
+   * (cloud metadata stays refused). Set by the server, never from request
+   * input; an unmanaged provider's catalog default leaves it unset.
+   */
+  managed?: boolean;
 }
 
 // ============================================================================
@@ -224,6 +239,8 @@ export interface ASRModelConfig {
    * A client-supplied BYOK `baseUrl` sets this so the strict public policy wins.
    */
   publicOnly?: boolean;
+  /** Server-configured provider (see {@link TTSModelConfig.managed}). */
+  managed?: boolean;
 }
 
 /** Returns true if the provider ID is a user-defined custom TTS provider. */

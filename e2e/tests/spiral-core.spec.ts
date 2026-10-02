@@ -62,7 +62,7 @@ test.describe('Spiral v0.4 core loop', () => {
   test('reads v0.3.2 data and completes Reverse Challenge → report → Study Studio → overtime', async ({
     page,
   }) => {
-    const courseCard = page.getByRole('button', { name: 'Photosynthesis review' });
+    const courseCard = page.getByRole('button', { name: 'Review challenge' });
     await expect(courseCard).toBeVisible();
     await expect(page.locator('[aria-label^="Memory "]')).toBeVisible();
     await expectNoCriticalOrSeriousViolations(page, 'home');
@@ -145,5 +145,29 @@ test.describe('Spiral v0.4 core loop', () => {
       page.getByTestId('scene-title').filter({ hasText: 'Overtime: photosynthesis at home' }),
     ).toBeVisible();
     await expectNoCriticalOrSeriousViolations(page, 'classroom-with-overtime');
+  });
+
+  test('keeps Demo snapshots and clock local, and clearing them leaves formal challenges', async ({
+    page,
+  }) => {
+    await page.getByRole('button', { name: 'Review challenge' }).click();
+    await page.getByRole('button', { name: 'Demo box' }).click();
+    await expect(page.getByText('No demo data yet')).toBeVisible();
+
+    await page.getByRole('button', { name: '+1h' }).click();
+    await expect(page.getByText(/Reverse 1 · reports 0 · materials 1/)).toBeVisible();
+    expect(
+      await page.evaluate(async () =>
+        (await indexedDB.databases()).some((database) =>
+          database.name?.startsWith('SpiralMAIC-Revisit-Demo-'),
+        ),
+      ),
+    ).toBe(true);
+
+    await page.getByRole('button', { name: 'Clear demo data' }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Clear demo data' }).click();
+    await expect(page.getByText('No demo data yet')).toBeVisible();
+    await page.getByRole('button', { name: 'Reverse Challenge' }).click();
+    await expect(page.getByRole('button', { name: 'Reverse 1' })).toBeVisible();
   });
 });

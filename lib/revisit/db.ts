@@ -1,6 +1,7 @@
 import Dexie, { type EntityTable, type Transaction } from 'dexie';
 
 import { createStudyArtifactVersionId } from '@/lib/revisit/artifact-ids';
+import { formalRevisitCall, shouldUseFormalRevisitServer } from '@/lib/revisit/formal-transport';
 import {
   applyEvidenceToConceptState,
   createConceptStateFromEvidence,
@@ -248,15 +249,21 @@ export async function createRevisitDemoSession(args: {
   const databaseName = `${REVISIT_DEMO_DATABASE_PREFIX}${args.id}`;
   const destination = getRevisitDatabase({ kind: 'demo', sessionId: args.id });
   await Promise.all([revisitDb.open(), destination.open()]);
-  const snapshots = await Promise.all(
-    CLONED_TABLE_NAMES.map(
-      async (name) =>
-        [
-          name,
-          await revisitDb.table(name).where('stageId').equals(args.stageId).toArray(),
-        ] as const,
-    ),
-  );
+  const snapshots = shouldUseFormalRevisitServer(FORMAL_REVISIT_SCOPE)
+    ? Object.entries(
+        await formalRevisitCall<Record<string, unknown[]>>('snapshotStage', {
+          stageId: args.stageId,
+        }),
+      )
+    : await Promise.all(
+        CLONED_TABLE_NAMES.map(
+          async (name) =>
+            [
+              name,
+              await revisitDb.table(name).where('stageId').equals(args.stageId).toArray(),
+            ] as const,
+        ),
+      );
   await destination.transaction(
     'rw',
     CLONED_TABLE_NAMES.map((name) => destination.table(name)),
@@ -416,6 +423,10 @@ async function deleteRevisitDemoSession(session: RevisitDemoSession): Promise<vo
 }
 
 export async function getLatestExamBlueprint(stageId: string, scope = FORMAL_REVISIT_SCOPE) {
+  if (shouldUseFormalRevisitServer(scope))
+    return formalRevisitCall<RevisitExamBlueprint | undefined>('getLatestExamBlueprint', {
+      stageId,
+    });
   const db = getRevisitDatabase(scope);
   const records = await db.examBlueprints.where('stageId').equals(stageId).toArray();
   return records.sort((a, b) => b.generatedAt - a.generatedAt)[0];
@@ -425,6 +436,10 @@ export async function saveExamBlueprint(
   blueprint: RevisitExamBlueprint,
   scope = FORMAL_REVISIT_SCOPE,
 ): Promise<void> {
+  if (shouldUseFormalRevisitServer(scope)) {
+    await formalRevisitCall('saveExamBlueprint', { blueprint });
+    return;
+  }
   const db = getRevisitDatabase(scope);
   await db.transaction(
     'rw',
@@ -458,6 +473,8 @@ export async function listLessonConcepts(
   stageId: string,
   scope = FORMAL_REVISIT_SCOPE,
 ): Promise<LessonConcept[]> {
+  if (shouldUseFormalRevisitServer(scope))
+    return formalRevisitCall('listLessonConcepts', { stageId });
   const records = await getRevisitDatabase(scope)
     .lessonConcepts.where('stageId')
     .equals(stageId)
@@ -469,6 +486,10 @@ export async function upsertLessonConcepts(
   concepts: LessonConcept[],
   scope = FORMAL_REVISIT_SCOPE,
 ): Promise<void> {
+  if (shouldUseFormalRevisitServer(scope)) {
+    await formalRevisitCall('upsertLessonConcepts', { concepts });
+    return;
+  }
   const db = getRevisitDatabase(scope);
   await db.transaction('rw', db.lessonConcepts, async () => {
     for (const concept of concepts) {
@@ -503,6 +524,10 @@ export async function markLessonConceptsLearned(
   learnedAt = Date.now(),
   scope = FORMAL_REVISIT_SCOPE,
 ): Promise<void> {
+  if (shouldUseFormalRevisitServer(scope)) {
+    await formalRevisitCall('markLessonConceptsLearned', { stageId, conceptIds, learnedAt });
+    return;
+  }
   const db = getRevisitDatabase(scope);
   await db.transaction('rw', db.lessonConcepts, async () => {
     for (const conceptId of new Set(conceptIds)) {
@@ -518,6 +543,8 @@ export async function getPendingAssessmentConcepts(
   stageId: string,
   scope = FORMAL_REVISIT_SCOPE,
 ): Promise<LessonConcept[]> {
+  if (shouldUseFormalRevisitServer(scope))
+    return formalRevisitCall('getPendingAssessmentConcepts', { stageId });
   const db = getRevisitDatabase(scope);
   const [concepts, states] = await Promise.all([
     listLessonConcepts(stageId, scope),
@@ -536,6 +563,8 @@ export async function listStudyArtifacts(
   kind?: StudyArtifact['kind'],
   scope = FORMAL_REVISIT_SCOPE,
 ): Promise<StudyArtifact[]> {
+  if (shouldUseFormalRevisitServer(scope))
+    return formalRevisitCall('listStudyArtifacts', { stageId, kind });
   const db = getRevisitDatabase(scope);
   const records = kind
     ? await db.studyArtifacts.where('[stageId+kind]').equals([stageId, kind]).toArray()
@@ -544,6 +573,8 @@ export async function listStudyArtifacts(
 }
 
 export async function getStudyArtifact(id: string, scope = FORMAL_REVISIT_SCOPE) {
+  if (shouldUseFormalRevisitServer(scope))
+    return formalRevisitCall<StudyArtifact | undefined>('getStudyArtifact', { id });
   return getRevisitDatabase(scope).studyArtifacts.get(id);
 }
 
@@ -552,6 +583,8 @@ export async function saveStudyArtifactNewVersion(
   scope = FORMAL_REVISIT_SCOPE,
   now = Date.now(),
 ): Promise<StudyArtifact> {
+  if (shouldUseFormalRevisitServer(scope))
+    return formalRevisitCall('saveStudyArtifactNewVersion', { artifact, now });
   const db = getRevisitDatabase(scope);
   return db.transaction('rw', db.studyArtifacts, async () => {
     const siblings = await db.studyArtifacts
@@ -577,6 +610,8 @@ export async function renameStudyArtifact(
   scope = FORMAL_REVISIT_SCOPE,
   now = Date.now(),
 ) {
+  if (shouldUseFormalRevisitServer(scope))
+    return formalRevisitCall<StudyArtifact | undefined>('renameStudyArtifact', { id, title, now });
   const db = getRevisitDatabase(scope);
   return db.transaction('rw', db.studyArtifacts, async () => {
     const existing = await db.studyArtifacts.get(id);
@@ -588,6 +623,10 @@ export async function renameStudyArtifact(
 }
 
 export async function deleteStudyArtifact(id: string, scope = FORMAL_REVISIT_SCOPE): Promise<void> {
+  if (shouldUseFormalRevisitServer(scope)) {
+    await formalRevisitCall('deleteStudyArtifact', { id });
+    return;
+  }
   const db = getRevisitDatabase(scope);
   await db.transaction('rw', [db.studyArtifacts, db.studyPractice], async () => {
     await db.studyArtifacts.delete(id);
@@ -596,6 +635,8 @@ export async function deleteStudyArtifact(id: string, scope = FORMAL_REVISIT_SCO
 }
 
 export async function getStudyPractice(artifactId: string, scope = FORMAL_REVISIT_SCOPE) {
+  if (shouldUseFormalRevisitServer(scope))
+    return formalRevisitCall<StudyPracticeState | undefined>('getStudyPractice', { artifactId });
   return getRevisitDatabase(scope).studyPractice.get(artifactId);
 }
 
@@ -603,10 +644,16 @@ export async function saveStudyPractice(
   practice: StudyPracticeState,
   scope = FORMAL_REVISIT_SCOPE,
 ): Promise<void> {
+  if (shouldUseFormalRevisitServer(scope)) {
+    await formalRevisitCall('saveStudyPractice', { practice });
+    return;
+  }
   await getRevisitDatabase(scope).studyPractice.put(practice);
 }
 
 export async function getLessonProgress(stageId: string, scope = FORMAL_REVISIT_SCOPE) {
+  if (shouldUseFormalRevisitServer(scope))
+    return formalRevisitCall<LessonProgress | undefined>('getLessonProgress', { stageId });
   return getRevisitDatabase(scope).lessonProgress.get(stageId);
 }
 
@@ -628,6 +675,8 @@ export async function recordLessonCompleted(
   completedAt = Date.now(),
   scope = FORMAL_REVISIT_SCOPE,
 ): Promise<LessonProgress> {
+  if (shouldUseFormalRevisitServer(scope))
+    return formalRevisitCall('recordLessonCompleted', { stageId, completedAt });
   const db = getRevisitDatabase(scope);
   return db.transaction('rw', db.lessonProgress, async () => {
     const existing = await db.lessonProgress.get(stageId);
@@ -638,6 +687,8 @@ export async function recordLessonCompleted(
 }
 
 export async function getLatestRevisitReport(stageId: string, scope = FORMAL_REVISIT_SCOPE) {
+  if (shouldUseFormalRevisitServer(scope))
+    return formalRevisitCall<RevisitJudgeReport | undefined>('getLatestRevisitReport', { stageId });
   const records = await getRevisitDatabase(scope)
     .revisitReports.where('stageId')
     .equals(stageId)
@@ -646,10 +697,14 @@ export async function getLatestRevisitReport(stageId: string, scope = FORMAL_REV
 }
 
 export async function getRevisitReport(attemptId: string, scope = FORMAL_REVISIT_SCOPE) {
+  if (shouldUseFormalRevisitServer(scope))
+    return formalRevisitCall<RevisitJudgeReport | undefined>('getRevisitReport', { attemptId });
   return getRevisitDatabase(scope).revisitReports.get(attemptId);
 }
 
 export async function listRevisitReports(stageId: string, scope = FORMAL_REVISIT_SCOPE) {
+  if (shouldUseFormalRevisitServer(scope))
+    return formalRevisitCall<RevisitJudgeReport[]>('listRevisitReports', { stageId });
   const reports = await getRevisitDatabase(scope)
     .revisitReports.where('stageId')
     .equals(stageId)
@@ -658,10 +713,14 @@ export async function listRevisitReports(stageId: string, scope = FORMAL_REVISIT
 }
 
 export async function countRevisitReports(stageId: string, scope = FORMAL_REVISIT_SCOPE) {
+  if (shouldUseFormalRevisitServer(scope))
+    return formalRevisitCall<number>('countRevisitReports', { stageId });
   return getRevisitDatabase(scope).revisitReports.where('stageId').equals(stageId).count();
 }
 
 export async function getConceptStates(stageId: string, scope = FORMAL_REVISIT_SCOPE) {
+  if (shouldUseFormalRevisitServer(scope))
+    return formalRevisitCall<UserConceptState[]>('getConceptStates', { stageId });
   const states = await getRevisitDatabase(scope)
     .userConceptState.where('stageId')
     .equals(stageId)
@@ -678,6 +737,19 @@ export async function saveEvidenceAndUpdateState(
     scope?: RevisitDataScope;
   } = {},
 ): Promise<void> {
+  if (shouldUseFormalRevisitServer(options.scope)) {
+    throwIfAborted(options.signal);
+    await formalRevisitCall(
+      'saveEvidenceAndUpdateState',
+      {
+        report,
+        stableSuccessesRequired: options.stableSuccessesRequired,
+        conceptLabelsById: options.conceptLabelsById,
+      },
+      options.signal,
+    );
+    return;
+  }
   const db = getRevisitDatabase(options.scope);
   await db.transaction(
     'rw',
@@ -740,6 +812,10 @@ export async function deleteRevisitStageData(
   stageId: string,
   scope = FORMAL_REVISIT_SCOPE,
 ): Promise<void> {
+  if (shouldUseFormalRevisitServer(scope)) {
+    await formalRevisitCall('deleteRevisitStageData', { stageId });
+    return;
+  }
   const db = getRevisitDatabase(scope);
   await db.transaction(
     'rw',

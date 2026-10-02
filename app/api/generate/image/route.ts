@@ -30,7 +30,8 @@ import {
 import type { ImageProviderId, ImageGenerationOptions } from '@/lib/media/types';
 import { createLogger } from '@/lib/logger';
 import { apiError, apiSuccess } from '@/lib/server/api-response';
-import { validateUrlForSSRF } from '@/lib/server/ssrf-guard';
+import { validateClientBaseUrl } from '@/lib/server/ssrf-guard';
+import { withMediaProviderFetch } from '@/lib/server/media-provider-fetch';
 import { getCodexOAuthAvailability } from '@/lib/server/codex/availability';
 import {
   CODEX_IMAGE_GENERATIONS_ENDPOINT,
@@ -200,7 +201,7 @@ async function POSTHandler(request: NextRequest) {
     const clientApiKey = managed ? undefined : request.headers.get('x-api-key') || undefined;
     const clientBaseUrl = managed ? undefined : request.headers.get('x-base-url') || undefined;
     if (clientBaseUrl) {
-      const ssrfError = await validateUrlForSSRF(clientBaseUrl);
+      const ssrfError = await validateClientBaseUrl(clientBaseUrl);
       if (ssrfError) {
         return apiError('INVALID_URL', 403, ssrfError);
       }
@@ -240,7 +241,10 @@ async function POSTHandler(request: NextRequest) {
         `prompt="${sizedOptions.prompt.slice(0, 80)}...", size=${sizedOptions.width ?? 'auto'}x${sizedOptions.height ?? 'auto'}`,
     );
 
-    const result = await generateImage({ providerId, apiKey, baseUrl, model }, sizedOptions);
+    const result = await generateImage(
+      withMediaProviderFetch({ providerId, apiKey, baseUrl, model }, managed),
+      sizedOptions,
+    );
 
     void recordGenerationUsage({
       kind: 'image',
@@ -253,13 +257,19 @@ async function POSTHandler(request: NextRequest) {
     return apiSuccess({ result });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    // The provider's error text is logged only; the caller gets a fixed message
+    // so an upstream body never reaches the response.
     // Detect content safety filter rejections (e.g. Seedream OutputImageSensitiveContentDetected)
     if (message.includes('SensitiveContent') || message.includes('sensitive information')) {
       log.warn(`Image blocked by content safety filter: ${message}`);
-      return apiError('CONTENT_SENSITIVE', 400, message);
+      return apiError(
+        'CONTENT_SENSITIVE',
+        400,
+        'The image provider rejected this prompt under its content safety policy',
+      );
     }
     log.error(`Image generation failed: ${message}`, error);
-    return apiError('INTERNAL_ERROR', 500, message);
+    return apiError('INTERNAL_ERROR', 500, 'Image generation failed');
   }
 }
 

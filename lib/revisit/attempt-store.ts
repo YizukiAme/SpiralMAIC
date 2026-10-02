@@ -1,4 +1,5 @@
 import { getRevisitDatabase } from '@/lib/revisit/db';
+import { formalRevisitCall, shouldUseFormalRevisitServer } from '@/lib/revisit/formal-transport';
 import { FORMAL_REVISIT_SCOPE, type RevisitDataScope } from '@/lib/revisit/scope';
 import type { RevisitAttempt, RevisitExamBlueprint } from '@/lib/revisit/types';
 import type { Scene, Stage } from '@/lib/types/stage';
@@ -12,6 +13,14 @@ export async function createOrGetRevisitAttempt(args: {
   now?: number;
   scope?: RevisitDataScope;
 }): Promise<RevisitAttempt> {
+  if (shouldUseFormalRevisitServer(args.scope)) {
+    return formalRevisitCall('createOrGetRevisitAttempt', {
+      attemptId: args.attemptId,
+      stage: args.stage,
+      sourceScenes: args.sourceScenes,
+      now: args.now ?? Date.now(),
+    });
+  }
   const db = getRevisitDatabase(args.scope);
   const now = args.now ?? Date.now();
   return db.transaction('rw', db.revisitAttempts, async () => {
@@ -39,6 +48,8 @@ export async function getRevisitAttempt(
   attemptId: string,
   scope: RevisitDataScope = FORMAL_REVISIT_SCOPE,
 ): Promise<RevisitAttempt | undefined> {
+  if (shouldUseFormalRevisitServer(scope))
+    return formalRevisitCall('getRevisitAttempt', { attemptId });
   return getRevisitDatabase(scope).revisitAttempts.get(attemptId);
 }
 
@@ -46,6 +57,8 @@ export async function listRevisitAttempts(
   stageId: string,
   scope: RevisitDataScope = FORMAL_REVISIT_SCOPE,
 ): Promise<RevisitAttempt[]> {
+  if (shouldUseFormalRevisitServer(scope))
+    return formalRevisitCall('listRevisitAttempts', { stageId });
   const records = await getRevisitDatabase(scope)
     .revisitAttempts.where('stageId')
     .equals(stageId)
@@ -59,6 +72,8 @@ export async function saveRevisitAttemptBlueprint(
   now = Date.now(),
   scope: RevisitDataScope = FORMAL_REVISIT_SCOPE,
 ): Promise<RevisitAttempt> {
+  if (shouldUseFormalRevisitServer(scope))
+    return formalRevisitCall('saveRevisitAttemptBlueprint', { attemptId, blueprint, now });
   const db = getRevisitDatabase(scope);
   return db.transaction('rw', db.revisitAttempts, async () => {
     const existing = await requireAttempt(attemptId, scope);
@@ -85,6 +100,13 @@ export async function saveRevisitAttemptSource(
   now = Date.now(),
   scope: RevisitDataScope = FORMAL_REVISIT_SCOPE,
 ): Promise<RevisitAttempt> {
+  if (shouldUseFormalRevisitServer(scope))
+    return formalRevisitCall('saveRevisitAttemptSource', {
+      attemptId,
+      sourceStage,
+      sourceScenes,
+      now,
+    });
   const db = getRevisitDatabase(scope);
   return db.transaction('rw', db.revisitAttempts, async () => {
     const existing = await requireAttempt(attemptId, scope);
@@ -105,6 +127,12 @@ export async function setRevisitAttemptSpiralAgentGenerationState(
   now = Date.now(),
   scope: RevisitDataScope = FORMAL_REVISIT_SCOPE,
 ): Promise<RevisitAttempt> {
+  if (shouldUseFormalRevisitServer(scope))
+    return formalRevisitCall('setRevisitAttemptSpiralAgentGenerationState', {
+      attemptId,
+      state,
+      now,
+    });
   const db = getRevisitDatabase(scope);
   return db.transaction('rw', db.revisitAttempts, async () => {
     const existing = await requireAttempt(attemptId, scope);
@@ -125,6 +153,13 @@ export async function upsertRevisitAttemptScene(args: {
   now?: number;
   scope?: RevisitDataScope;
 }): Promise<RevisitAttempt> {
+  if (shouldUseFormalRevisitServer(args.scope))
+    return formalRevisitCall('upsertRevisitAttemptScene', {
+      attemptId: args.attemptId,
+      scene: args.scene,
+      index: args.index,
+      now: args.now ?? Date.now(),
+    });
   const scope = args.scope ?? FORMAL_REVISIT_SCOPE;
   const db = getRevisitDatabase(scope);
   return db.transaction('rw', db.revisitAttempts, async () => {
@@ -153,6 +188,10 @@ export async function setRevisitAttemptPreparationError(
   now = Date.now(),
   scope: RevisitDataScope = FORMAL_REVISIT_SCOPE,
 ): Promise<void> {
+  if (shouldUseFormalRevisitServer(scope)) {
+    await formalRevisitCall('setRevisitAttemptPreparationError', { attemptId, error, now });
+    return;
+  }
   const db = getRevisitDatabase(scope);
   await db.revisitAttempts.update(attemptId, { preparationError: error, updatedAt: now });
 }
@@ -162,6 +201,8 @@ export async function markRevisitAttemptCompleted(
   completedAt = Date.now(),
   scope: RevisitDataScope = FORMAL_REVISIT_SCOPE,
 ): Promise<RevisitAttempt> {
+  if (shouldUseFormalRevisitServer(scope))
+    return formalRevisitCall('markRevisitAttemptCompleted', { attemptId, completedAt });
   const db = getRevisitDatabase(scope);
   return db.transaction('rw', db.revisitAttempts, async () => {
     const existing = await requireAttempt(attemptId, scope);
@@ -204,6 +245,24 @@ export async function importLegacyRevisitAttemptSnapshot(
   if (!raw) return getRevisitAttempt(attemptId, scope);
   try {
     const legacy = JSON.parse(raw) as LegacyAttemptSnapshot;
+    if (shouldUseFormalRevisitServer(scope)) {
+      const attempt = await formalRevisitCall<RevisitAttempt>('importLegacyAttemptSnapshot', {
+        attempt: {
+          attemptId,
+          stageId: legacy.stageId,
+          sequence: 0,
+          status: legacy.scenes[0] ? 'ready' : 'preparing',
+          sourceScenes: [],
+          blueprint: legacy.blueprint,
+          scenes: legacy.scenes,
+          createdAt: legacy.createdAt,
+          updatedAt: legacy.updatedAt,
+          reportOnly: false,
+        } satisfies RevisitAttempt,
+      });
+      window.sessionStorage.removeItem(key);
+      return attempt;
+    }
     const db = getRevisitDatabase(scope);
     const existing = await db.revisitAttempts.get(attemptId);
     const attempts = await db.revisitAttempts.where('stageId').equals(legacy.stageId).toArray();

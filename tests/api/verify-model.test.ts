@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NextRequest } from 'next/server';
+import { APICallError } from 'ai';
 
 const mocks = vi.hoisted(() => ({
   resolveModel: vi.fn(),
@@ -34,20 +35,6 @@ async function postVerifyModel(body: Record<string, unknown>) {
   const request = new Request('http://localhost/api/verify-model', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  return POST(request as unknown as NextRequest);
-}
-
-async function postAcceptanceVerifyModel(body: Record<string, unknown>) {
-  const { POST } = await import('@/app/api/verify-model/route');
-  const request = new Request('http://localhost/api/verify-model', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-openmaic-expected-provider': 'openai-codex',
-      'x-openmaic-expected-model': 'gpt-5.5',
-    },
     body: JSON.stringify(body),
   });
   return POST(request as unknown as NextRequest);
@@ -109,105 +96,47 @@ describe('POST /api/verify-model', () => {
     );
   });
 
-  it('accepts a credential-free Codex connection request', async () => {
-    const res = await postVerifyModel({ model: 'openai-codex:gpt-5.5' });
-
-    expect(res.status).toBe(200);
-    expect(mocks.resolveModel).toHaveBeenCalledWith({
-      modelString: 'openai-codex:gpt-5.5',
-      apiKey: '',
-      baseUrl: undefined,
-      providerType: undefined,
+  function apiCallError(statusCode: number) {
+    return new APICallError({
+      message: 'internal-secret-body',
+      url: 'http://10.0.0.5/v1/chat/completions',
+      requestBodyValues: {},
+      statusCode,
+      responseBody: 'internal-secret-body',
     });
-  });
+  }
 
-  it('forwards the acceptance resolved-model assertion before verification generation', async () => {
-    const res = await postAcceptanceVerifyModel({ model: 'openai-codex:gpt-5.5' });
+  it.each([
+    [401, 'API key is invalid or expired'],
+    [403, 'API key is invalid or expired'],
+    [404, 'Model not found or API endpoint error'],
+    [429, 'API rate limit exceeded, please try again later'],
+    [502, 'API request failed (HTTP 5xx)'],
+    [418, 'API request failed (HTTP 4xx)'],
+  ])('maps an upstream %i by status and never echoes the body', async (status, message) => {
+    mocks.callLLM.mockRejectedValue(apiCallError(status));
 
-    expect(res.status).toBe(200);
-    expect(mocks.resolveModel).toHaveBeenCalledWith({
-      modelString: 'openai-codex:gpt-5.5',
-      apiKey: '',
-      baseUrl: undefined,
-      providerType: undefined,
-      expectedResolvedModel: { providerId: 'openai-codex', modelId: 'gpt-5.5' },
-    });
-  });
+    const res = await postVerifyModel({ model: 'openai:gpt-4o-mini', apiKey: 'k' });
+    const json = await res.json();
 
-  it('forwards only the exact priority tier for a credential-free Codex check', async () => {
-    const res = await postVerifyModel({
-      model: 'openai-codex:gpt-5.5',
-      serviceTier: 'priority',
-    });
-
-    expect(res.status).toBe(200);
-    expect(mocks.resolveModel).toHaveBeenCalledWith({
-      modelString: 'openai-codex:gpt-5.5',
-      apiKey: '',
-      baseUrl: undefined,
-      providerType: undefined,
-      serviceTier: 'priority',
-    });
-
-    mocks.resolveModel.mockClear();
-    await postVerifyModel({
-      model: 'openai-codex:gpt-5.5',
-      serviceTier: 'priority ',
-    });
-    expect(mocks.resolveModel).toHaveBeenCalledWith({
-      modelString: 'openai-codex:gpt-5.5',
-      apiKey: '',
-      baseUrl: undefined,
-      providerType: undefined,
-    });
+    expect(res.status).toBe(500);
+    expect(json).toEqual({ success: false, errorCode: 'INTERNAL_ERROR', error: message });
   });
 
   it.each([
-    [401, 'ChatGPT sign-in is required'],
-    [403, 'This ChatGPT workspace does not have Codex access'],
-    [429, 'ChatGPT plan quota or rate limit reached'],
-  ] as const)(
-    'preserves safe Codex status %i without leaking upstream details',
-    async (status, message) => {
-      const sentinel = `private-upstream-body-${status}`;
-      mocks.callLLM.mockRejectedValueOnce(
-        Object.assign(new Error(sentinel), { statusCode: status, cause: { body: sentinel } }),
-      );
+    new TypeError('fetch failed', { cause: new Error('connect ECONNREFUSED 10.0.0.5:80') }),
+    new Error('getaddrinfo ENOTFOUND internal.test'),
+    new SyntaxError('Unexpected token < in JSON at position 0: <html>internal-secret</html>'),
+    Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' }),
+  ])('answers a transport or parse failure with one fixed message (%s)', async (error) => {
+    mocks.callLLM.mockRejectedValue(error);
 
-      const res = await postVerifyModel({ model: 'openai-codex:gpt-5.5' });
-      const json = await res.json();
+    const res = await postVerifyModel({ model: 'openai:gpt-4o-mini', apiKey: 'k' });
 
-      expect(res.status).toBe(status);
-      expect(json).toMatchObject({ success: false, error: message });
-      expect(JSON.stringify(json)).not.toContain(sentinel);
-      expect(JSON.stringify(mocks.logError.mock.calls)).not.toContain(sentinel);
-    },
-  );
-
-  it('sanitizes Codex resolution failures too', async () => {
-    const sentinel = 'private-resolve-failure';
-    mocks.resolveModel.mockRejectedValueOnce(
-      Object.assign(new Error(sentinel), { statusCode: 403 }),
-    );
-
-    const res = await postVerifyModel({ model: 'openai-codex:gpt-5.5' });
-    const json = await res.json();
-
-    expect(res.status).toBe(403);
-    expect(json.error).toBe('This ChatGPT workspace does not have Codex access');
-    expect(JSON.stringify(json)).not.toContain(sentinel);
+    expect(await res.json()).toEqual({
+      success: false,
+      errorCode: 'INTERNAL_ERROR',
+      error: 'Cannot connect to API server, please check the Base URL',
+    });
   });
-
-  it.each(['CREDENTIALS_MISSING', 'SIGNED_OUT', 'INVALID_GRANT', 'REFRESH_REJECTED'])(
-    'maps the safe Codex auth code %s to re-login',
-    async (code) => {
-      mocks.resolveModel.mockRejectedValueOnce(Object.assign(new Error('safe'), { code }));
-
-      const res = await postVerifyModel({ model: 'openai-codex:gpt-5.5' });
-      const json = await res.json();
-
-      expect(res.status).toBe(401);
-      expect(json.error).toBe('ChatGPT sign-in is required');
-    },
-  );
 });

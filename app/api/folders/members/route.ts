@@ -22,10 +22,11 @@ import { NextResponse } from 'next/server';
 
 import type { DocumentFolderStore } from '@openmaic/storage';
 
-import { isAgentRuntimeConfigured } from '@/lib/config/feature-flags';
+import { isServerPersistenceConfigured } from '@/lib/config/feature-flags';
 import { getOwnerScopedDocumentStore } from '@/lib/server/agent-runtime/owner-scoped-documents';
 import { ownerJson } from '@/lib/server/agent-runtime/route-response';
-import { withRequestOwnerId } from '@/lib/server/agent-runtime/with-owner';
+import { withRequestOwner } from '@/lib/server/identity/with-owner';
+import { ownerWriteErrorResponse } from '@/lib/persistence/owner-merges';
 
 export const runtime = 'nodejs';
 export const POST = withAccessCode(POSTHandler);
@@ -36,7 +37,7 @@ function jsonError(status: number, code: string, message: string, headers?: Head
 
 // POST /api/folders/members
 async function POSTHandler(req: NextRequest) {
-  if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
+  if (!isServerPersistenceConfigured()) return new Response('Not found', { status: 404 });
 
   let body: unknown;
   try {
@@ -52,7 +53,7 @@ async function POSTHandler(req: NextRequest) {
     return jsonError(400, 'INVALID_FOLDER_ID', 'folderId must be a non-empty string or null');
   }
 
-  return withRequestOwnerId(req, async (ownerId, responseHeaders) => {
+  return withRequestOwner(req, async ({ ownerId }, responseHeaders) => {
     try {
       const store = (await getOwnerScopedDocumentStore(ownerId)) as unknown as DocumentFolderStore;
       const ok = await store.setStageFolder(stageId, folderId);
@@ -61,6 +62,8 @@ async function POSTHandler(req: NextRequest) {
       }
       return ownerJson({ ok: true }, 200, responseHeaders);
     } catch (error) {
+      const claimed = ownerWriteErrorResponse(error, responseHeaders);
+      if (claimed) return claimed;
       console.error(
         `[Folders] Failed to set membership [owner=${ownerId}, stage=${stageId}]:`,
         error,

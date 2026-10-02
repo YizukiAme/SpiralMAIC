@@ -1,10 +1,16 @@
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DSL_VERSION } from '@openmaic/dsl';
-import { BrowserRuntimeStore, type KVStore, type RuntimeStore } from '@openmaic/storage';
+import {
+  BrowserAssetStore,
+  BrowserRuntimeStore,
+  type KVStore,
+  type RuntimeStore,
+} from '@openmaic/storage';
 
 import type { ChatSession } from '@/lib/types/chat';
 import type { ChatStorageSnapshot } from '@/lib/utils/chat-storage';
+import { inMemoryDocumentStore } from '@/tests/helpers/in-memory-document-store';
 
 if (!('IDBKeyRange' in globalThis)) {
   Object.defineProperty(globalThis, 'IDBKeyRange', { value: IDBKeyRange, configurable: true });
@@ -139,6 +145,16 @@ function chatSession(): ChatSession {
   };
 }
 
+async function seedStoredStage(stage: {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+}): Promise<void> {
+  const { getDocumentStore } = await import('@/lib/document-store');
+  await getDocumentStore().saveDocument({ stage, scenes: [] });
+}
+
 function stubMemoryLocalStorage(): void {
   const values = new Map<string, string>();
   vi.stubGlobal('localStorage', {
@@ -154,11 +170,28 @@ function stubMemoryLocalStorage(): void {
 }
 
 describe('database runtime chat integration', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetModules();
     vi.stubGlobal('indexedDB', new IDBFactory());
     vi.stubGlobal('navigator', { locks: serialLockManager() });
     stubMemoryLocalStorage();
+    const { configureDocumentStorage } = await import('@/lib/document-store/config');
+    configureDocumentStorage({
+      store: inMemoryDocumentStore('database-chat-cutover', globalThis.indexedDB as IDBFactory),
+    });
+    const { configureRuntimeStorage } = await import('@/lib/runtime/config');
+    configureRuntimeStorage({
+      store: new BrowserRuntimeStore({ indexedDB: globalThis.indexedDB }),
+      learnerKey: () => learnerKey,
+    });
+    const { configureAssetPoolStorage } = await import('@/lib/media/asset-pool-config');
+    configureAssetPoolStorage({
+      store: () =>
+        new BrowserAssetStore({
+          indexedDB: globalThis.indexedDB,
+          dbName: 'database-chat-cutover-assets',
+        }),
+    });
   });
 
   afterEach(() => {
@@ -171,6 +204,12 @@ describe('database runtime chat integration', () => {
       await import('@/lib/utils/database');
     const { loadChatSessions, saveChatSessions } = await import('@/lib/utils/chat-storage');
     await db.stages.put({
+      id: 'stage-backup',
+      name: 'Backup stage',
+      createdAt: 1_000,
+      updatedAt: 2_000,
+    });
+    await seedStoredStage({
       id: 'stage-backup',
       name: 'Backup stage',
       createdAt: 1_000,
@@ -218,6 +257,12 @@ describe('database runtime chat integration', () => {
     const { db, exportDatabase, importDatabase } = await import('@/lib/utils/database');
     const { loadChatSessions, saveChatSessions } = await import('@/lib/utils/chat-storage');
     await db.stages.put({
+      id: 'stage-runtime-export',
+      name: 'Runtime stage',
+      createdAt: 1_000,
+      updatedAt: 2_000,
+    });
+    await seedStoredStage({
       id: 'stage-runtime-export',
       name: 'Runtime stage',
       createdAt: 1_000,
@@ -607,7 +652,7 @@ describe('database runtime chat integration', () => {
     expect(stageDeletionEpoch('stage-import-rollback')).toBeGreaterThan(epochAfterDelete);
   });
 
-  it('blocks lazy migration behind a runtime-wide clear and observes the deleted source', async () => {
+  it('blocks a document load behind a runtime-wide clear and leaves old browser rows untouched', async () => {
     vi.stubGlobal('navigator', { locks: fairLockManager() });
     const backing = new BrowserRuntimeStore({ indexedDB: globalThis.indexedDB });
     const { clearDatabase, db } = await import('@/lib/utils/database');
@@ -643,17 +688,17 @@ describe('database runtime chat integration', () => {
 
     const clearing = clearDatabase(gatedStore);
     await clearHasLock;
-    let migrationSettled = false;
-    const migrating = loadStageData('stage-clear-migration-race').finally(() => {
-      migrationSettled = true;
+    let loadSettled = false;
+    const loading = loadStageData('stage-clear-migration-race').finally(() => {
+      loadSettled = true;
     });
     await Promise.resolve();
     await Promise.resolve();
-    expect(migrationSettled).toBe(false);
+    expect(loadSettled).toBe(false);
 
     releaseDeleteAll();
     await clearing;
-    await expect(migrating).resolves.toBeNull();
+    await expect(loading).resolves.toBeNull();
   });
 
   it('rejects a stage save that resumes after a database clear and allows a fresh save', async () => {
@@ -674,13 +719,13 @@ describe('database runtime chat integration', () => {
     };
     await documentStore.saveDocument({ stage, scenes: [] });
 
-    let releaseMigrationLoad!: () => void;
-    const migrationLoadGate = new Promise<void>((resolve) => {
-      releaseMigrationLoad = resolve;
+    let releaseDocumentLoad!: () => void;
+    const documentLoadGate = new Promise<void>((resolve) => {
+      releaseDocumentLoad = resolve;
     });
-    let migrationLoadEntered!: () => void;
-    const migrationLoadStarted = new Promise<void>((resolve) => {
-      migrationLoadEntered = resolve;
+    let documentLoadEntered!: () => void;
+    const documentLoadStarted = new Promise<void>((resolve) => {
+      documentLoadEntered = resolve;
     });
     const originalLoad = documentStore.loadDocument.bind(documentStore);
     let gateNextLoad = true;
@@ -688,8 +733,8 @@ describe('database runtime chat integration', () => {
       const document = await originalLoad(stageId);
       if (stageId === stage.id && gateNextLoad) {
         gateNextLoad = false;
-        migrationLoadEntered();
-        await migrationLoadGate;
+        documentLoadEntered();
+        await documentLoadGate;
       }
       return document;
     });
@@ -704,9 +749,9 @@ describe('database runtime chat integration', () => {
       },
       0,
     );
-    await migrationLoadStarted;
+    await documentLoadStarted;
     const clearing = clearDatabase(runtimeStore);
-    releaseMigrationLoad();
+    releaseDocumentLoad();
 
     await expect(clearing).resolves.toBeUndefined();
     await expect(staleSave).rejects.toThrow('storage was cleared during the mutation');
@@ -749,8 +794,6 @@ describe('database runtime chat integration', () => {
       createdAt: 1_000,
       updatedAt: 3_000,
     });
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-
     await expect(loadStageData('stage-divergent-snapshot')).resolves.toMatchObject({
       stage: { name: 'Destination V1' },
     });
@@ -760,8 +803,6 @@ describe('database runtime chat integration', () => {
     await expect(db.stages.get('stage-divergent-snapshot')).resolves.toMatchObject({
       name: 'Legacy V2',
     });
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('stage stage-divergent-snapshot'));
-    warn.mockRestore();
   });
 
   it('finishes an interrupted runtime clear from the durable restore marker', async () => {
@@ -834,6 +875,12 @@ describe('database runtime chat integration', () => {
     }) as BrowserRuntimeStore;
     const { db, exportDatabase } = await import('@/lib/utils/database');
     await db.stages.put({
+      id: 'stage-backup',
+      name: 'Backup stage',
+      createdAt: 1_000,
+      updatedAt: 2_000,
+    });
+    await seedStoredStage({
       id: 'stage-backup',
       name: 'Backup stage',
       createdAt: 1_000,
@@ -946,6 +993,18 @@ describe('database runtime chat integration', () => {
         updatedAt: 2_000,
       },
     ]);
+    await seedStoredStage({
+      id: 'stage-backup',
+      name: 'Backup stage',
+      createdAt: 1_000,
+      updatedAt: 2_000,
+    });
+    await seedStoredStage({
+      id: 'stage-z-backup',
+      name: 'Later backup stage',
+      createdAt: 1_000,
+      updatedAt: 2_000,
+    });
     await saveChatSessions('stage-backup', [chatSession()], {
       store: importingStore,
       learnerKey,
@@ -1357,7 +1416,7 @@ describe('database runtime chat integration', () => {
     ).toBe(false);
   });
 
-  it('deletes stage-owned media rows when the document has no asset references', async () => {
+  it('keeps untouched legacy media rows after a stage cascade', async () => {
     const { db, deleteStageWithRelatedData } = await import('@/lib/utils/database');
     const stageId = 'stage-delete-media-row';
     await db.stages.put({
@@ -1380,7 +1439,7 @@ describe('database runtime chat integration', () => {
 
     await deleteStageWithRelatedData(stageId);
 
-    await expect(db.mediaFiles.where('stageId').equals(stageId).count()).resolves.toBe(0);
+    await expect(db.mediaFiles.where('stageId').equals(stageId).count()).resolves.toBe(1);
   });
 
   it('keeps the maintenance lock until a timed-out stage cascade actually settles', async () => {
@@ -1535,7 +1594,7 @@ describe('database runtime chat integration', () => {
     ]);
   });
 
-  it('fails before mutating backup data when the default legacy store has no Web Locks', async () => {
+  it('restores an explicit backup without Web Locks while leaving old browser rows alone', async () => {
     vi.stubGlobal('navigator', {});
     const runtimeStore = new BrowserRuntimeStore({
       indexedDB: globalThis.indexedDB,
@@ -1549,25 +1608,32 @@ describe('database runtime chat integration', () => {
       updatedAt: 2_000,
     });
 
-    await expect(
-      importDatabase(
-        {
-          stages: [
-            {
-              id: 'stage-no-lock',
-              name: 'Restored stage',
-              createdAt: 3_000,
-              updatedAt: 4_000,
-            },
-          ],
-          chatSessions: [{ ...chatSession(), stageId: 'stage-no-lock' }],
-        },
-        { store: runtimeStore, learnerKey },
-      ),
-    ).rejects.toThrow(/Web Locks/);
+    await importDatabase(
+      {
+        stages: [
+          {
+            id: 'stage-no-lock',
+            name: 'Restored stage',
+            createdAt: 3_000,
+            updatedAt: 4_000,
+          },
+        ],
+        chatSessions: [{ ...chatSession(), stageId: 'stage-no-lock' }],
+      },
+      { store: runtimeStore, learnerKey },
+    );
     await expect(db.stages.get('stage-no-lock')).resolves.toMatchObject({
       name: 'Existing stage',
     });
+    const { getDocumentStore } = await import('@/lib/document-store');
+    await expect(getDocumentStore().loadDocument('stage-no-lock')).resolves.toMatchObject({
+      stage: { name: 'Restored stage' },
+    });
+    vi.stubGlobal('navigator', { locks: serialLockManager() });
+    const { loadChatSessions } = await import('@/lib/utils/chat-storage');
+    await expect(
+      loadChatSessions('stage-no-lock', { store: runtimeStore, learnerKey }),
+    ).resolves.toMatchObject([{ id: 'chat-backup' }]);
     await expect(
       db.chatSessions.where('stageId').equals('stage-no-lock').toArray(),
     ).resolves.toEqual([]);
@@ -1600,7 +1666,7 @@ describe('database runtime chat integration', () => {
     });
   });
 
-  it('keeps legacy chats visible without Web Locks without migrating them', async () => {
+  it('does not read or delete old browser chats through the default no-lock path', async () => {
     vi.stubGlobal('navigator', {});
     stubMemoryLocalStorage();
     const { db } = await import('@/lib/utils/database');
@@ -1610,15 +1676,13 @@ describe('database runtime chat integration', () => {
       stageId: 'stage-legacy-no-lock',
     });
 
-    await expect(loadChatSessions('stage-legacy-no-lock')).resolves.toMatchObject([
-      { id: 'chat-backup', title: 'Persisted chat' },
-    ]);
+    await expect(loadChatSessions('stage-legacy-no-lock')).rejects.toThrow(/Web Lock/);
     await expect(
       db.chatSessions.where('stageId').equals('stage-legacy-no-lock').count(),
     ).resolves.toBe(1);
   });
 
-  it('exports a canonical legacy-only document without Web Locks and leaves legacy data untouched', async () => {
+  it('does not silently include a browser-only course in a server backup', async () => {
     vi.stubGlobal('navigator', {});
     stubMemoryLocalStorage();
     const runtimeStore = new BrowserRuntimeStore({
@@ -1647,9 +1711,8 @@ describe('database runtime chat integration', () => {
     };
     await db.stages.put(stage);
     await db.scenes.put(scene);
-    // Chat history lives on the RuntimeStore seam, independent of document
-    // migration — a legacy-only document's chats must still reach the backup.
-    // Write it while locks exist, then export from the no-locks environment.
+    // A runtime chat without a server document cannot make this browser-only
+    // course part of a server backup. The explicit browser importer owns it.
     vi.stubGlobal('navigator', { locks: serialLockManager() });
     const { saveChatSessions } = await import('@/lib/utils/chat-storage');
     await saveChatSessions(stage.id, [{ ...chatSession(), id: 'legacy-only-chat' }], {
@@ -1660,37 +1723,20 @@ describe('database runtime chat integration', () => {
 
     const backup = await exportDatabase({ store: runtimeStore, learnerKey });
     const exportedDocument = backup.documents.find((document) => document.stage.id === stage.id);
-    expect(
-      backup.chatSessions.filter(
-        (session) => session.stageId === stage.id && session.id === 'legacy-only-chat',
-      ),
-    ).toHaveLength(1);
-
-    expect(exportedDocument).toMatchObject({
-      dslVersion: DSL_VERSION,
-      stage: { id: stage.id, name: 'Legacy-only export' },
-      scenes: [
-        {
-          id: scene.id,
-          type: 'slide',
-          whiteboards: [{ id: 'whiteboard-legacy' }],
-        },
-      ],
-    });
-    expect(exportedDocument!.stage).not.toHaveProperty('currentSceneId');
+    expect(exportedDocument).toBeUndefined();
+    expect(backup.chatSessions.some((session) => session.stageId === stage.id)).toBe(false);
     await expect(getDocumentStore().loadDocument(stage.id)).resolves.toBeNull();
     await expect(db.stages.get(stage.id)).resolves.toEqual(stage);
     await expect(db.scenes.get(scene.id)).resolves.toEqual(scene);
   });
 
-  it('runs the DSL ladder over a legacy-only export instead of hand-stamping it', async () => {
-    vi.stubGlobal('navigator', {});
+  it('runs the DSL ladder when importing an old stage/scene backup', async () => {
     stubMemoryLocalStorage();
     const runtimeStore = new BrowserRuntimeStore({
       indexedDB: globalThis.indexedDB,
       dbName: 'legacy-only-export-migrates',
     });
-    const { db, exportDatabase } = await import('@/lib/utils/database');
+    const { db, exportDatabase, importDatabase } = await import('@/lib/utils/database');
     const stage = {
       id: 'stage-legacy-export-migrates',
       name: 'Legacy-only export (migrates)',
@@ -1727,6 +1773,8 @@ describe('database runtime chat integration', () => {
     await db.stages.put(stage);
     await db.scenes.put(scene);
 
+    await importDatabase({ stages: [stage], scenes: [scene] }, { store: runtimeStore, learnerKey });
+
     const backup = await exportDatabase({ store: runtimeStore, learnerKey });
     const exportedDocument = backup.documents.find((document) => document.stage.id === stage.id);
     // the stamp reflects an actually-run migration: the stray rotate is gone
@@ -1750,7 +1798,7 @@ describe('database runtime chat integration', () => {
       (exportedDocument!.scenes[0].content as { canvas: { elements: unknown[] } }).canvas
         .elements[0],
     ).not.toHaveProperty('rotate');
-    // the legacy rows themselves stay untouched (read-only fallback)
+    // The original browser rows are still untouched by importing a backup.
     await expect(db.scenes.get(scene.id)).resolves.toEqual(scene);
   });
 
@@ -1796,18 +1844,18 @@ describe('database runtime chat integration', () => {
 
     vi.stubGlobal('navigator', { locks: serialLockManager() });
     await expect(loadStageData('stage-legacy-autosave')).resolves.toMatchObject({
-      chats: [{ id: 'chat-backup', title: 'Persisted chat' }],
+      chats: [],
     });
     await expect(
       db.chatSessions.where('stageId').equals('stage-legacy-autosave').count(),
-    ).resolves.toBe(0);
+    ).resolves.toBe(1);
   });
 
-  it('still fails edits to a read-only legacy snapshot without Web Locks', async () => {
+  it('does not open an old browser-only stage for edits before explicit import', async () => {
     vi.stubGlobal('navigator', {});
     stubMemoryLocalStorage();
     const { db } = await import('@/lib/utils/database');
-    const { loadStageData, saveStageData } = await import('@/lib/utils/stage-storage');
+    const { loadStageData } = await import('@/lib/utils/stage-storage');
     await db.stages.put({
       id: 'stage-legacy-edit',
       name: 'Existing stage',
@@ -1818,40 +1866,39 @@ describe('database runtime chat integration', () => {
       ...chatSession(),
       stageId: 'stage-legacy-edit',
     });
-    const loaded = await loadStageData('stage-legacy-edit');
-
+    await expect(loadStageData('stage-legacy-edit')).resolves.toBeNull();
+    await expect(db.stages.get('stage-legacy-edit')).resolves.toMatchObject({
+      name: 'Existing stage',
+    });
     await expect(
-      saveStageData(
-        'stage-legacy-edit',
-        {
-          ...loaded!,
-          chats: [{ ...loaded!.chats[0]!, title: 'Unsaved edit', updatedAt: 3_000 }],
-        },
-        0,
-      ),
-    ).rejects.toThrow(/Web Locks/);
+      db.chatSessions.where('stageId').equals('stage-legacy-edit').count(),
+    ).resolves.toBe(1);
   });
 
-  it('still fails deletion of a read-only legacy snapshot without Web Locks', async () => {
-    vi.stubGlobal('navigator', {});
+  it('loads a server document without importing old browser chats when locks are absent', async () => {
     stubMemoryLocalStorage();
     const { db } = await import('@/lib/utils/database');
-    const { loadStageData, saveStageData } = await import('@/lib/utils/stage-storage');
-    await db.stages.put({
+    const { loadStageData } = await import('@/lib/utils/stage-storage');
+    const stage = {
       id: 'stage-legacy-delete',
       name: 'Existing stage',
       createdAt: 1_000,
       updatedAt: 2_000,
-    });
+    };
+    await db.stages.put(stage);
+    await seedStoredStage(stage);
     await db.chatSessions.put({
       ...chatSession(),
       stageId: 'stage-legacy-delete',
     });
-    const loaded = await loadStageData('stage-legacy-delete');
-
+    vi.stubGlobal('navigator', {});
+    await expect(loadStageData('stage-legacy-delete')).resolves.toMatchObject({
+      stage: { name: 'Existing stage' },
+      chats: [],
+    });
     await expect(
-      saveStageData('stage-legacy-delete', { ...loaded!, chats: [] }, 0),
-    ).rejects.toThrow(/Web Locks/);
+      db.chatSessions.where('stageId').equals('stage-legacy-delete').count(),
+    ).resolves.toBe(1);
   });
 
   it('still fails non-empty chat document saves without Web Locks', async () => {
@@ -1914,7 +1961,9 @@ describe('database runtime chat integration', () => {
     localStorage.setItem('maic:device:document-migration:stage-clear-document', '{}');
     localStorage.setItem('maic:device:editor-current-scene:stage-clear-document', '{}');
     await getAssetPool().put(new Blob(['private generated media'], { type: 'text/plain' }));
-    expect((await indexedDB.databases()).map((entry) => entry.name)).toContain('maic-asset-pool');
+    expect((await indexedDB.databases()).map((entry) => entry.name)).toContain(
+      'database-chat-cutover-assets',
+    );
 
     await expect(clearDatabase(runtimeStore)).resolves.toBeUndefined();
     await expect(runtimeStore.listSessions('stage-clear-no-lock', learnerKey)).resolves.toEqual([]);
@@ -1925,8 +1974,8 @@ describe('database runtime chat integration', () => {
     expect(
       localStorage.getItem('maic:device:editor-current-scene:stage-clear-document'),
     ).toBeNull();
-    expect((await indexedDB.databases()).map((entry) => entry.name)).not.toContain(
-      'maic-asset-pool',
+    expect((await indexedDB.databases()).map((entry) => entry.name)).toContain(
+      'database-chat-cutover-assets',
     );
   });
 

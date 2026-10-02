@@ -74,7 +74,7 @@ exports. SpiralMAIC simply refuses to let all of that disappear after “Complet
 
 ## Run it
 
-You need Node.js `>= 22.19 < 23`, pnpm 10, and one model provider (cloud or local).
+You need Node.js `>= 22.19 < 23`, pnpm 10, PostgreSQL, and one model provider (cloud or local).
 
 ```bash
 git clone https://github.com/YizukiAme/SpiralMAIC.git
@@ -82,6 +82,18 @@ cd SpiralMAIC
 corepack enable
 pnpm install
 cp .env.example .env.local
+pnpm db:up
+```
+
+Set the local database URL in `.env.local`:
+
+```env
+DATABASE_URL=postgres://openmaic:openmaic-dev@127.0.0.1:5432/openmaic
+```
+
+Then start the app:
+
+```bash
 pnpm dev
 ```
 
@@ -93,6 +105,9 @@ DEFAULT_MODEL=openai:your-model
 ```
 
 Then open [http://localhost:3000](http://localhost:3000), make a classroom, and start the loop.
+If this browser has courses or learning records from an older version, SpiralMAIC asks before
+copying them to this server. You can choose **Later** and return from Settings. The browser
+originals are kept; a partial import can resume without creating duplicate courses.
 
 There are plenty of other options—Gemini, Anthropic, Bedrock, DeepSeek, Qwen, Kimi,
 MiniMax, GLM, Xiaomi MiMo, OpenRouter, Ollama, Lemonade, and more. The always-current list
@@ -114,8 +129,8 @@ Or use Docker:
 docker compose up --build
 ```
 
-Optional PostgreSQL persistence and the isolated MP4 render service are available through
-Docker Compose profiles. See the [storage guide](packages/@openmaic/storage/README.md) and
+Docker Compose includes PostgreSQL by default. The isolated MP4 render service is optional.
+See the [storage guide](packages/@openmaic/storage/README.md) and
 [render-service guide](render-service/README.md).
 
 Shared deployments should set `ACCESS_CODE`. Local instances remain open when it is unset;
@@ -144,7 +159,7 @@ The Spiral-specific layer is intentionally easy to find:
 | --- | --- |
 | `app/classroom/[id]/revisit/` | The Reverse Challenge classroom |
 | `components/revisit/` | Review panel, report, Study Studio, artifact viewers |
-| `lib/revisit/` | Memory, blueprints, evidence, judging, attempts, local data |
+| `lib/revisit/` | Memory, blueprints, evidence, judging, and formal/Demo storage |
 | `lib/overtime/` | Post-class follow-up lessons |
 | `eval/revisit-judge/` | Report stability evals |
 

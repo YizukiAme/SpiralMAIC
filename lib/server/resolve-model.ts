@@ -16,7 +16,7 @@ import {
   resolveBaseUrl,
   resolveProxy,
 } from '@/lib/server/provider-config';
-import { validateUrlForSSRF } from '@/lib/server/ssrf-guard';
+import { validateClientBaseUrl, validateUrlForSSRF } from '@/lib/server/ssrf-guard';
 import { fetchWithRedirectValidation } from '@/lib/server/fetch-with-redirect-validation';
 import { getCodexOAuthAvailability } from '@/lib/server/codex/availability';
 import { getCodexAuthRuntime } from '@/lib/server/codex/runtime';
@@ -26,6 +26,7 @@ import {
   deriveCodexUpstreamSessionId,
   type CodexLogicalSession,
 } from '@/lib/server/codex/logical-session';
+import { clientBaseUrlLlmFetch } from '@/lib/server/llm-provider-fetch';
 import {
   getStageRoute,
   getUserStageRoute,
@@ -49,6 +50,8 @@ export interface ResolvedModel extends ModelWithInfo {
   thinkingConfig?: ThinkingConfig;
   /** Server-validated Codex request tier. */
   serviceTier?: ModelServiceTier;
+  /** Only operator-selected models may use the configured fallback. */
+  serverManaged: boolean;
 }
 
 export interface ExpectedResolvedModel {
@@ -185,6 +188,7 @@ export async function resolveModel(params: {
       apiKey: '',
       baseUrl: undefined,
       thinkingConfig: stageModel ? stageRoute?.thinking : params.thinkingConfig,
+      serverManaged: Boolean(envRoute),
       ...(serviceTier ? { serviceTier } : {}),
     };
   }
@@ -227,8 +231,18 @@ export async function resolveModel(params: {
     throw new Error('Amazon Bedrock must be enabled by the server operator before it can be used.');
   }
   const clientBaseUrl = managed ? undefined : clientBaseUrlParam || undefined;
-  if (clientBaseUrl) {
-    const ssrfError = await validateUrlForSSRF(clientBaseUrl);
+  // An unmanaged provider's endpoint is the caller's choice whenever the caller
+  // picked the model (x-model or a user route) or sent a base URL: either the
+  // client-supplied URL or the provider's catalog default (e.g. a localhost
+  // Ollama). Only a model the operator selected (MODEL_ROUTES or
+  // DEFAULT_MODEL) with no client base URL resolves purely from server config.
+  const operatorSelected = Boolean(envRoute) || (!userRoute && !params.modelString);
+  const clientEndpoint = !managed && (Boolean(clientBaseUrl) || !operatorSelected);
+  const endpointUrl = clientBaseUrl ?? getProvider(providerId)?.defaultBaseUrl;
+  if (clientEndpoint && endpointUrl) {
+    const ssrfError = clientBaseUrl
+      ? await validateClientBaseUrl(clientBaseUrl)
+      : await validateUrlForSSRF(endpointUrl);
     if (ssrfError) {
       throw new Error(ssrfError);
     }
@@ -244,9 +258,10 @@ export async function resolveModel(params: {
     baseUrl,
     proxy,
     providerType: clientProviderType as ProviderType | undefined,
-    // Re-validate every redirect hop of the outbound request (see
-    // fetchWithRedirectValidation); the base URL above is checked at origin.
-    fetchImpl: fetchWithRedirectValidation,
+    // A caller-chosen endpoint is pinned and refuses redirects (see
+    // lib/server/llm-provider-fetch.ts). Operator-configured endpoints keep the
+    // transport that re-validates every redirect hop.
+    fetchImpl: clientEndpoint ? clientBaseUrlLlmFetch : fetchWithRedirectValidation,
   });
 
   // Thinking arbitration mirrors model routing — the route carries a full
@@ -269,6 +284,12 @@ export async function resolveModel(params: {
     apiKey,
     baseUrl,
     thinkingConfig,
+    // An operator route (MODEL_ROUTES) or DEFAULT_MODEL pick is the operator's
+    // choice, and a server-configured provider key is operator-owned — either
+    // way the primary is server-managed and may arm the fallback. A user-level
+    // route or a plain client x-model on an unmanaged provider is NOT
+    // server-managed.
+    serverManaged: Boolean(envRoute) || managed,
   };
 }
 

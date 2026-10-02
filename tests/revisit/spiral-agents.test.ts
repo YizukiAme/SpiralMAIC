@@ -15,7 +15,13 @@ import { db } from '@/lib/utils/database';
 import { useAgentRegistry } from '@/lib/orchestration/registry/store';
 import { loadStageData } from '@/lib/utils/stage-storage';
 import type { PersistedAgentConfig, Stage } from '@/lib/types/stage';
-import { getDocumentStore, mutateDocument } from '@/lib/document-store';
+import {
+  configureDocumentStorage,
+  getDocumentStore,
+  mutateDocument,
+  resetDocumentStorageForTests,
+} from '@/lib/document-store';
+import { inMemoryDocumentStore } from '@/tests/helpers/in-memory-document-store';
 
 const storage = new Map<string, string>();
 const localStorageStub = {
@@ -71,6 +77,10 @@ const stage: Stage = {
 describe('Spiral agent roster persistence', () => {
   beforeEach(async () => {
     storage.clear();
+    resetDocumentStorageForTests();
+    configureDocumentStorage({
+      store: inMemoryDocumentStore(`revisit-agents-${crypto.randomUUID()}`),
+    });
     await getDocumentStore().deleteDocument(stage.id);
     await Promise.all([db.stages.clear(), db.scenes.clear(), db.generatedAgents.clear()]);
   });
@@ -78,6 +88,7 @@ describe('Spiral agent roster persistence', () => {
   afterEach(async () => {
     await getDocumentStore().deleteDocument(stage.id);
     await Promise.all([db.stages.clear(), db.scenes.clear(), db.generatedAgents.clear()]);
+    resetDocumentStorageForTests();
   });
 
   it('accepts only one assistant plus two or three students', () => {

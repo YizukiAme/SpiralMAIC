@@ -2,6 +2,8 @@ import 'fake-indexeddb/auto';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BrowserRuntimeStore } from '@openmaic/storage';
+import { configureDocumentStorage, resetDocumentStorageForTests } from '@/lib/document-store/store';
+import { inMemoryDocumentStore } from '@/tests/helpers/in-memory-document-store';
 
 import {
   checkpointOvertimeExtension,
@@ -10,7 +12,7 @@ import {
   getOvertimeExtension,
   listOvertimeExtensions,
   markActiveOvertimeExtensionsInterrupted,
-} from '@/lib/overtime/store';
+} from '@/lib/overtime/local-store';
 import type { SceneOutline } from '@/lib/types/generation';
 import type { Scene } from '@/lib/types/stage';
 import {
@@ -104,6 +106,10 @@ async function clearCoreTables() {
 
 describe('overtime extension persistence', () => {
   beforeEach(async () => {
+    resetDocumentStorageForTests();
+    configureDocumentStorage({
+      store: inMemoryDocumentStore(`overtime-local-${crypto.randomUUID()}`),
+    });
     await clearCoreTables();
     await db.stages.put({
       id: 'stage-1',
@@ -123,7 +129,10 @@ describe('overtime extension persistence', () => {
     });
   });
 
-  afterEach(clearCoreTables);
+  afterEach(async () => {
+    await clearCoreTables();
+    resetDocumentStorageForTests();
+  });
 
   it('keeps overtime storage in the current Core Dexie schema and creates only one unfinished task per course', async () => {
     expect(db.tables.map((table) => table.name)).toContain('overtimeExtensions');

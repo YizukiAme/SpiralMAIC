@@ -11,6 +11,10 @@ import { createLogger } from '@/lib/logger';
 import { CLASSROOMS_DIR } from '@/lib/server/classroom-storage';
 import { generateImage } from '@/lib/media/image-providers';
 import { generateVideo, normalizeVideoOptions } from '@/lib/media/video-providers';
+import {
+  managedMediaDownloadFetch,
+  managedMediaProviderFetch,
+} from '@/lib/server/media-provider-fetch';
 import { generateTTS, TTSRateLimitError } from '@/lib/audio/tts-providers';
 import { DEFAULT_TTS_VOICES, DEFAULT_TTS_MODELS, TTS_PROVIDERS } from '@/lib/audio/constants';
 import { IMAGE_PROVIDERS } from '@/lib/media/image-providers';
@@ -19,6 +23,7 @@ import {
   getServerImageProviders,
   getServerVideoProviders,
   getServerTTSProviders,
+  isServerConfiguredProvider,
   resolveImageApiKey,
   resolveImageBaseUrl,
   resolveImageModel,
@@ -38,6 +43,7 @@ import { splitLongSpeechActions } from '@/lib/audio/tts-utils';
 import { isGeneratedMediaPlaceholder } from '@/lib/media/media-ref';
 import { resolveImageSize } from '@/lib/server/image-sizing';
 import { VOXCPM_AUTO_VOICE_ID, VOXCPM_TTS_PROVIDER_ID } from '@/lib/audio/voxcpm';
+import { decodeDataUrl, fetchProviderResultUrl } from '@/lib/server/provider-result-fetch';
 
 const log = createLogger('ClassroomMedia');
 
@@ -62,7 +68,7 @@ async function ensureDir(dir: string) {
 }
 
 const DOWNLOAD_TIMEOUT_MS = 120_000; // 2 minutes
-const DOWNLOAD_MAX_SIZE = 100 * 1024 * 1024; // 100 MB
+export const DOWNLOAD_MAX_SIZE = 100 * 1024 * 1024; // 100 MB
 
 /**
  * File extension for the image types this path writes.
@@ -78,14 +84,52 @@ const IMAGE_EXTENSION_BY_MIME: Record<string, string> = {
   'image/webp': 'webp',
 };
 
-async function downloadToBuffer(url: string): Promise<Buffer> {
-  const resp = await fetch(url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
+export async function downloadToBuffer(url: string): Promise<Buffer> {
+  if (url.startsWith('data:')) {
+    return decodeDataUrl(url, DOWNLOAD_MAX_SIZE).bytes;
+  }
+
+  const resp = await fetchProviderResultUrl(url, {
+    signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+    maxBytes: DOWNLOAD_MAX_SIZE,
+  });
   if (!resp.ok) throw new Error(`Download failed: ${resp.status} ${resp.statusText}`);
+
   const contentLength = Number(resp.headers.get('content-length') || 0);
   if (contentLength > DOWNLOAD_MAX_SIZE) {
     throw new Error(`File too large: ${contentLength} bytes (max ${DOWNLOAD_MAX_SIZE})`);
   }
-  return Buffer.from(await resp.arrayBuffer());
+
+  const body = resp.body;
+  if (!body) {
+    const buf = Buffer.from(await resp.arrayBuffer());
+    if (buf.byteLength > DOWNLOAD_MAX_SIZE) {
+      throw new Error(`File too large: ${buf.byteLength} bytes (max ${DOWNLOAD_MAX_SIZE})`);
+    }
+    return buf;
+  }
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > DOWNLOAD_MAX_SIZE) {
+        throw new Error(`File too large: ${total} bytes (max ${DOWNLOAD_MAX_SIZE})`);
+      }
+      chunks.push(value);
+    }
+    return Buffer.concat(chunks);
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw error;
+  } finally {
+    reader.releaseLock?.();
+  }
 }
 
 function mediaServingUrl(baseUrl: string, classroomId: string, subPath: string): string {
@@ -143,7 +187,14 @@ export async function generateMediaForClassroom(
         const model = resolveImageModel(providerId) ?? providerConfig?.models?.[0]?.id;
 
         const result = await generateImage(
-          { providerId, apiKey, baseUrl: resolveImageBaseUrl(providerId), model },
+          {
+            providerId,
+            apiKey,
+            baseUrl: resolveImageBaseUrl(providerId),
+            model,
+            // Server-configured provider: its base URL is operator configuration.
+            fetchImpl: managedMediaProviderFetch,
+          },
           resolveImageSize(
             { prompt: req.prompt, aspectRatio: req.aspectRatio || '16:9' },
             { providerId, modelId: model },
@@ -160,7 +211,17 @@ export async function generateMediaForClassroom(
           ext = IMAGE_EXTENSION_BY_MIME[result.mimeType ?? ''] ?? 'png';
         } else if (result.url) {
           buf = await downloadToBuffer(result.url);
-          const urlExt = path.extname(new URL(result.url).pathname).replace('.', '');
+          let urlExt = '';
+          if (result.url.startsWith('data:')) {
+            const mime = result.url.slice(5).split(';')[0]?.toLowerCase();
+            urlExt = IMAGE_EXTENSION_BY_MIME[mime] ?? '';
+          } else {
+            try {
+              urlExt = path.extname(new URL(result.url).pathname).replace('.', '');
+            } catch {
+              urlExt = '';
+            }
+          }
           ext = ['png', 'jpg', 'jpeg', 'webp'].includes(urlExt) ? urlExt : 'png';
         } else {
           log.warn(`Image generation returned no data for ${req.elementId}`);
@@ -201,7 +262,15 @@ export async function generateMediaForClassroom(
         });
 
         const result = await generateVideo(
-          { providerId, apiKey, baseUrl: resolveVideoBaseUrl(providerId), model },
+          {
+            providerId,
+            apiKey,
+            baseUrl: resolveVideoBaseUrl(providerId),
+            model,
+            // Server-configured provider: its base URL is operator configuration.
+            fetchImpl: managedMediaProviderFetch,
+            downloadFetchImpl: managedMediaDownloadFetch,
+          },
           normalized,
         );
 
@@ -429,6 +498,7 @@ export async function generateTTSForClassroom(
     );
   }
   const ttsBaseUrl = resolveTTSBaseUrl(providerId) || ttsProvider?.defaultBaseUrl;
+  const ttsManaged = isServerConfiguredProvider('tts', providerId);
   const voice = DEFAULT_TTS_VOICES[providerId as keyof typeof DEFAULT_TTS_VOICES] || 'default';
   const format = ttsProvider?.supportedFormats?.[0] || 'mp3';
   if (providerId === VOXCPM_TTS_PROVIDER_ID && voice === VOXCPM_AUTO_VOICE_ID) {
@@ -495,6 +565,7 @@ export async function generateTTSForClassroom(
               modelId: DEFAULT_TTS_MODELS[providerId as keyof typeof DEFAULT_TTS_MODELS] || '',
               apiKey,
               baseUrl: ttsBaseUrl,
+              managed: ttsManaged,
               voice,
               speed: speechAction.speed,
               signal,

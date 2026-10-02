@@ -10,12 +10,15 @@ import { generateMediaForOutlines } from '@/lib/media/media-orchestrator';
 import { materializeOvertimePlan } from '@/lib/overtime/concepts';
 import {
   checkpointOvertimeExtension,
+  claimOvertimeExtension,
   commitOvertimeExtension,
   getOvertimeExtension,
+  heartbeatOvertimeExtension,
+  isOvertimeLeaseConflict,
   markOvertimeExtensionFailed,
+  releaseOvertimeExtension,
 } from '@/lib/overtime/store';
 import type { OvertimeExtension, OvertimePlanDraft } from '@/lib/overtime/types';
-import { upsertLessonConcepts } from '@/lib/revisit/db';
 import type { LessonConcept } from '@/lib/revisit/types';
 import type { SceneOutline } from '@/lib/types/generation';
 import { makeScene, type Scene, type Stage } from '@/lib/types/stage';
@@ -27,6 +30,9 @@ type ActionsResult = Awaited<ReturnType<typeof fetchSceneActions>>;
 
 export interface OvertimeGenerationDependencies {
   getExtension: (id: string) => Promise<OvertimeExtension | undefined>;
+  claim?: (id: string) => Promise<OvertimeExtension>;
+  heartbeat?: (id: string) => Promise<void>;
+  release?: (id: string) => Promise<void>;
   requestPlan: (args: {
     stage: Stage;
     scenes: Scene[];
@@ -46,6 +52,9 @@ export interface OvertimeGenerationDependencies {
 
 const defaultDependencies: OvertimeGenerationDependencies = {
   getExtension: getOvertimeExtension,
+  claim: claimOvertimeExtension,
+  heartbeat: heartbeatOvertimeExtension,
+  release: releaseOvertimeExtension,
   requestPlan: requestOvertimePlan,
   checkpoint: checkpointOvertimeExtension,
   markFailed: markOvertimeExtensionFailed,
@@ -53,7 +62,8 @@ const defaultDependencies: OvertimeGenerationDependencies = {
   fetchActions: fetchSceneActions,
   generateTTS: generateTTSForScene,
   generateMedia: generateMediaForOutlines,
-  upsertConcepts: (concepts) => upsertLessonConcepts(concepts),
+  // Formal concepts commit in the same server transaction as the new page.
+  upsertConcepts: async () => undefined,
   commit: commitOvertimeExtension,
 };
 
@@ -127,6 +137,20 @@ export async function runOvertimeGeneration(args: {
   let extension = await dependencies.getExtension(args.extensionId);
   if (!extension) throw new Error(`Overtime extension ${args.extensionId} was not found.`);
   if (extension.status === 'ready') return extension;
+  const extensionId = extension.id;
+  if (dependencies.claim) extension = await dependencies.claim(extension.id);
+  let heartbeatError: unknown;
+  const heartbeatTimer = dependencies.heartbeat
+    ? setInterval(() => {
+        void dependencies.heartbeat!(extensionId).catch((error) => {
+          heartbeatError = error;
+        });
+      }, 10_000)
+    : undefined;
+  const checkpoint = (patch: Parameters<typeof dependencies.checkpoint>[1]) => {
+    if (heartbeatError) throw heartbeatError;
+    return dependencies.checkpoint(extensionId, patch);
+  };
   args.onProgress?.(extension);
 
   try {
@@ -149,7 +173,7 @@ export async function runOvertimeGeneration(args: {
     });
     let outline = extension.outline ?? materialized.outline;
     if (!extension.plan || !extension.outline) {
-      extension = await dependencies.checkpoint(extension.id, {
+      extension = await checkpoint({
         status: 'generating',
         phase: 'content',
         plan,
@@ -194,7 +218,7 @@ export async function runOvertimeGeneration(args: {
         };
         allOutlines = buildAllOutlines();
       }
-      extension = await dependencies.checkpoint(extension.id, {
+      extension = await checkpoint({
         status: 'generating',
         phase: 'actions',
         plan,
@@ -250,7 +274,7 @@ export async function runOvertimeGeneration(args: {
         },
         generatedContent,
       );
-      extension = await dependencies.checkpoint(extension.id, {
+      extension = await checkpoint({
         status: 'generating',
         phase: 'tts',
         plan,
@@ -266,7 +290,7 @@ export async function runOvertimeGeneration(args: {
     if (extension.phase === 'tts') {
       const tts = await dependencies.generateTTS(scene, args.stage.languageDirective, args.signal);
       if (!tts.success) throw new Error(tts.error || 'Overtime page TTS generation failed.');
-      extension = await dependencies.checkpoint(extension.id, {
+      extension = await checkpoint({
         status: 'generating',
         phase: 'commit',
         scene,
@@ -280,6 +304,7 @@ export async function runOvertimeGeneration(args: {
       extensionId: extension.id,
       outline,
       scene,
+      concepts: materialized.concepts,
       now: now(),
     });
     args.onProgress?.(ready);
@@ -287,6 +312,9 @@ export async function runOvertimeGeneration(args: {
     return ready;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (isOvertimeLeaseConflict(error)) {
+      throw error;
+    }
     if (isAbortError(error)) {
       extension = await dependencies.checkpoint(extension.id, {
         status: 'interrupted',
@@ -295,10 +323,17 @@ export async function runOvertimeGeneration(args: {
       });
       args.onProgress?.(extension);
     } else {
-      await dependencies.markFailed(extension.id, message, now());
+      try {
+        await dependencies.markFailed(extension.id, message, now());
+      } catch (failure) {
+        if (!isOvertimeLeaseConflict(failure)) throw failure;
+      }
       const failed = await dependencies.getExtension(extension.id);
       if (failed) args.onProgress?.(failed);
     }
     throw error;
+  } finally {
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    await dependencies.release?.(extension.id).catch(() => undefined);
   }
 }

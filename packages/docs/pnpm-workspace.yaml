@@ -1,0 +1,6 @@
+packages:
+  - .
+
+# The standalone documentation app needs esbuild's platform binary setup.
+allowBuilds:
+  esbuild: true

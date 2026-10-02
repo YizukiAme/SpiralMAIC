@@ -143,6 +143,8 @@ async function POSTHandler(req: NextRequest) {
       baseUrl,
       apiKey,
       publicOnly,
+      // A server-configured provider's endpoint may be on a local network.
+      managed,
       model:
         providerId === 'qwen-tts'
           ? resolveQwenVoiceCloneModel()

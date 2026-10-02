@@ -94,6 +94,7 @@ const TTS_ENV_MAP: Record<string, string> = {
   TTS_DOUBAO: 'doubao-tts',
   TTS_ELEVENLABS: 'elevenlabs-tts',
   TTS_MINIMAX: 'minimax-tts',
+  TTS_GOOGLE: 'google-tts',
   TTS_LEMONADE: 'lemonade-tts',
 };
 
@@ -584,9 +585,22 @@ function getConfig(): ServerConfig {
 
 type ProviderSection = 'providers' | 'tts' | 'asr' | 'pdf' | 'image' | 'video' | 'webSearch';
 
+/**
+ * The operator's entry for a provider, or undefined. Provider ids come from
+ * requests, so only the section's own keys count: an id such as `constructor`
+ * or `__proto__` must not resolve to an inherited object property.
+ */
+function serverEntry(
+  section: ProviderSection,
+  providerId: string,
+): ServerProviderEntry | undefined {
+  const entries = getConfig()[section];
+  return Object.hasOwn(entries, providerId) ? entries[providerId] : undefined;
+}
+
 /** Whether the operator configured this provider in the given section. */
 export function isServerConfiguredProvider(section: ProviderSection, providerId: string): boolean {
-  return !!getConfig()[section][providerId];
+  return serverEntry(section, providerId) !== undefined;
 }
 
 /** Whether the operator force-disabled this provider in the given capability section (server precedence). */
@@ -613,7 +627,7 @@ function resolveSectionApiKey(
   providerId: string,
   clientKey?: string,
 ): string {
-  const entry = getConfig()[section][providerId];
+  const entry = serverEntry(section, providerId);
   if (entry) return entry.apiKey || ''; // managed: server key is authoritative
   return clientKey || ''; // unmanaged: client-supplied key only
 }
@@ -623,7 +637,7 @@ function resolveSectionBaseUrl(
   providerId: string,
   clientBaseUrl?: string,
 ): string | undefined {
-  const entry = getConfig()[section][providerId];
+  const entry = serverEntry(section, providerId);
   if (entry) return entry.baseUrl; // managed: server base URL is authoritative
   return clientBaseUrl; // unmanaged: client-supplied base URL only
 }
@@ -659,7 +673,7 @@ export function resolveBaseUrl(providerId: string, clientBaseUrl?: string): stri
 
 /** Resolve proxy URL for a provider (server config only) */
 export function resolveProxy(providerId: string): string | undefined {
-  return getConfig().providers[providerId]?.proxy;
+  return serverEntry('providers', providerId)?.proxy;
 }
 
 // ---------------------------------------------------------------------------
@@ -733,7 +747,7 @@ export function resolveTTSModel(
   clientModel?: string,
   voiceId?: string,
 ): string | undefined {
-  const entry = getConfig().tts[providerId];
+  const entry = serverEntry('tts', providerId);
   const pinnedModels = entry?.models?.filter(Boolean) ?? [];
 
   if (providerId === 'qwen-tts') {
@@ -809,7 +823,7 @@ export function resolveServerASRProviderId(): string | undefined {
  * entry is the managed default; otherwise the client model wins.
  */
 export function resolveASRModel(providerId: string, clientModel?: string): string | undefined {
-  const serverModels = getConfig().asr[providerId]?.models;
+  const serverModels = serverEntry('asr', providerId)?.models;
   if (serverModels?.length) {
     if (clientModel && serverModels.includes(clientModel)) return clientModel;
     return serverModels[0];
@@ -885,7 +899,7 @@ export function resolveServerImageProviderId(): string | undefined {
  * entry is the managed default; otherwise the client model wins.
  */
 export function resolveImageModel(providerId: string, clientModel?: string): string | undefined {
-  const serverModels = getConfig().image[providerId]?.models;
+  const serverModels = serverEntry('image', providerId)?.models;
   if (serverModels?.length) {
     if (clientModel && serverModels.includes(clientModel)) return clientModel;
     return serverModels[0];
@@ -944,7 +958,7 @@ export function resolveServerVideoProviderId(): string | undefined {
  * entry is the managed default; otherwise the client model wins.
  */
 export function resolveVideoModel(providerId: string, clientModel?: string): string | undefined {
-  const serverModels = getConfig().video[providerId]?.models;
+  const serverModels = serverEntry('video', providerId)?.models;
   if (serverModels?.length) {
     if (clientModel && serverModels.includes(clientModel)) return clientModel;
     return serverModels[0];
@@ -1001,7 +1015,7 @@ export function resolveWebSearchModel(
   providerId: string,
   clientModel?: string,
 ): string | undefined {
-  const entry = getConfig().webSearch[providerId];
+  const entry = serverEntry('webSearch', providerId);
   if (entry?.models && entry.models.length > 0) return entry.models[0];
   return clientModel;
 }

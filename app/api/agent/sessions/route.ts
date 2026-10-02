@@ -19,7 +19,8 @@ import {
   bindOwnerMaterialsToSession,
   SessionMaterialBindingError,
 } from '@/lib/server/agent-runtime/session-materials';
-import { withRequestOwnerId } from '@/lib/server/agent-runtime/with-owner';
+import { withRequestOwner } from '@/lib/server/identity/with-owner';
+import { ownerRetiredResponse, ownerWriteErrorResponse } from '@/lib/persistence/owner-merges';
 import { buildRequestOrigin, isValidClassroomId } from '@/lib/server/classroom-storage';
 import { decodeCourseRefs } from '@/lib/workbench/course-refs';
 
@@ -94,7 +95,7 @@ async function POSTHandler(req: NextRequest) {
     return apiError('INVALID_REQUEST', 400, decodedCourseRefs.error);
   }
 
-  return withRequestOwnerId(req, async (ownerId, responseHeaders) => {
+  return withRequestOwner(req, async ({ ownerId }, responseHeaders) => {
     // An EXPLICIT skill — a `?skill=` launch link, not composer UI — is
     // rejected here rather than at claim time: a session created with a typo'd
     // skill would otherwise sit queued and then quietly build an ordinary
@@ -140,19 +141,34 @@ async function POSTHandler(req: NextRequest) {
     // ownership validation is deferred until a later slice consumes stageId —
     // the upstream document store has no owner partition yet.
     const store = await getAgentSessionStore();
+    // A request still presenting an anonymous identity that was claimed into
+    // an account starts nothing under it (lib/persistence/owner-merges.ts).
+    if ((await store.readRetirement(ownerId)) !== null) {
+      return ownerRetiredResponse(responseHeaders);
+    }
     const hasOpeningContext = materialIds.length > 0 || decodedCourseRefs.refs.length > 0;
-    const meta = await store.createSession({
-      ownerId,
-      prompt,
-      ...(stageId ? { stageId } : {}),
-      ...(skillId ? { skillId } : {}),
-      existingCourse,
-      titleState: 'pending',
-      origin: buildRequestOrigin(req),
-      // Keep the runner from claiming the session until its opening materials
-      // and references are durable. postUserMessage below atomically requeues it.
-      ...(existingCourse || hasOpeningContext ? { status: 'succeeded' as const } : {}),
-    });
+    // A create racing a claim of this owner is written for the account, as if
+    // it had committed just before the claim (the store forwards under the
+    // owner's identity lock); a busy claim answers 503 OWNER_BUSY.
+    let meta: Awaited<ReturnType<typeof store.createSession>>;
+    try {
+      meta = await store.createSession({
+        ownerId,
+        prompt,
+        ...(stageId ? { stageId } : {}),
+        ...(skillId ? { skillId } : {}),
+        existingCourse,
+        titleState: 'pending',
+        origin: buildRequestOrigin(req),
+        // Keep the runner from claiming the session until its opening materials
+        // and references are durable. postUserMessage below atomically requeues it.
+        ...(existingCourse || hasOpeningContext ? { status: 'succeeded' as const } : {}),
+      });
+    } catch (error) {
+      const claimed = ownerWriteErrorResponse(error, responseHeaders);
+      if (claimed) return claimed;
+      throw error;
+    }
 
     if (!hasOpeningContext) {
       if (!existingCourse) scheduleConversationTitle(meta.id, ownerId);
@@ -197,7 +213,7 @@ async function GETHandler(req: NextRequest) {
     return new Response('Not found', { status: 404 });
   }
 
-  return withRequestOwnerId(req, async (ownerId, responseHeaders) => {
+  return withRequestOwner(req, async ({ ownerId }, responseHeaders) => {
     const store = await getAgentSessionStore();
     const sessions = await store.listSessionsByOwner(ownerId);
     return NextResponse.json(sessions, { headers: responseHeaders });

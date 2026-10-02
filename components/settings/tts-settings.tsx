@@ -56,6 +56,7 @@ import { toast } from 'sonner';
 import { createLogger } from '@/lib/logger';
 import { useTTSPreview } from '@/lib/audio/use-tts-preview';
 import { isCustomTTSProvider } from '@/lib/audio/types';
+import { TTSSpeedField } from './tts-speed-field';
 import {
   getVoxCPMProviderOptions,
   normalizeQwenReferenceAudio,
@@ -228,6 +229,8 @@ export function TTSSettings({ selectedProviderId }: TTSSettingsProps) {
         return '/text-to-speech';
       case 'doubao-tts':
         return '/unidirectional';
+      case 'google-tts':
+        return '/interactions';
       default:
         return '';
     }
@@ -473,28 +476,12 @@ export function TTSSettings({ selectedProviderId }: TTSSettingsProps) {
           </>
         ))}
 
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <Label className="text-sm">{t('settings.ttsSpeed')}</Label>
-          <span className="text-xs text-muted-foreground">
-            {cloneSpeedDisabled ? '1×' : `${ttsSpeed.toFixed(2)}×`}
-          </span>
-        </div>
-        <input
-          aria-label={t('settings.ttsSpeed')}
-          type="range"
-          min={ttsProvider?.speedRange?.min ?? 0.5}
-          max={ttsProvider?.speedRange?.max ?? 2}
-          step={0.05}
-          value={cloneSpeedDisabled ? 1 : ttsSpeed}
-          disabled={cloneSpeedDisabled}
-          onChange={(event) => setTTSSpeed(Number(event.target.value))}
-          className="w-full disabled:cursor-not-allowed disabled:opacity-50"
-        />
-        {cloneSpeedDisabled && (
-          <p className="text-xs text-muted-foreground">{t('settings.qwenCloneSpeedHint')}</p>
-        )}
-      </div>
+      <TTSSpeedField
+        provider={ttsProvider}
+        speed={ttsSpeed}
+        cloneVoiceLocked={cloneSpeedDisabled}
+        onSpeedChange={setTTSSpeed}
+      />
 
       {/* Test TTS */}
       <div className="space-y-2">

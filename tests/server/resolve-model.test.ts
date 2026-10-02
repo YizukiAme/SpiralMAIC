@@ -78,6 +78,7 @@ vi.mock('@/lib/server/provider-config', () => ({
 
 vi.mock('@/lib/server/ssrf-guard', () => ({
   validateUrlForSSRF: async () => null,
+  validateClientBaseUrl: async () => null,
 }));
 
 vi.mock('@/lib/server/codex/availability', () => ({

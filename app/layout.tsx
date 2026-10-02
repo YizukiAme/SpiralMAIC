@@ -12,6 +12,7 @@ import { ServerProvidersInit } from '@/components/server-providers-init';
 import { StorageHealthNotice } from '@/components/storage-health-notice';
 import { AccessCodeGuard } from '@/components/access-code-guard';
 import { ProSwapWatcher } from '@/components/workbench/ProSwapWatcher';
+import { LegacyBrowserImportNotice } from '@/components/legacy-import/notice';
 
 // The UI font is loaded from @fontsource's stylesheet rather than next/font,
 // because only the stylesheet carries the per-subset `unicode-range`
@@ -55,6 +56,7 @@ export default function RootLayout({
                 persistence is already broken, and a toast raised before its
                 host exists has nowhere to go. */}
             <StorageHealthNotice />
+            <LegacyBrowserImportNotice />
           </I18nProvider>
         </ThemeProvider>
       </body>

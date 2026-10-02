@@ -2,8 +2,12 @@ import { withAccessCode } from '@/lib/server/with-access-code';
 import { NextRequest } from 'next/server';
 
 import { settleWhiteboardVisibility } from '@/lib/chat/pi/whiteboard-visibility';
-import { authenticatePersistenceHeaders } from '@/lib/persistence/server-auth';
 import { apiError } from '@/lib/server/api-response';
+import { resolveRequestOwner } from '@/lib/server/identity/resolve';
+import {
+  attachOwnerCookies,
+  invalidOwnerCredentialResponse,
+} from '@/lib/server/identity/with-owner';
 
 export const runtime = 'nodejs';
 
@@ -30,11 +34,18 @@ function validBody(value: unknown): value is {
 }
 
 async function POSTHandler(req: NextRequest): Promise<Response> {
-  const principal = authenticatePersistenceHeaders(req.headers);
-  if (!principal?.learnerKey) {
-    return apiError('INVALID_CREDENTIALS', 401, 'Invalid persistence development binding');
+  // The pending query is keyed by the learner key the Pi request resolved,
+  // which is the request owner; only that owner can settle it.
+  const owner = await resolveRequestOwner(req);
+  if (!owner.ok) {
+    return invalidOwnerCredentialResponse();
   }
+  // Every answer carries the resolution's cookies (the anonymous owner's
+  // renewal), errors included.
+  return attachOwnerCookies(await settle(req, owner.principal.ownerId), owner.setCookies);
+}
 
+async function settle(req: NextRequest, learnerKey: string): Promise<Response> {
   let body: unknown;
   try {
     body = await req.json();
@@ -48,7 +59,7 @@ async function POSTHandler(req: NextRequest): Promise<Response> {
   if (
     !settleWhiteboardVisibility({
       ...body,
-      learnerKey: principal.learnerKey,
+      learnerKey,
     })
   ) {
     return apiError('INVALID_REQUEST', 404, 'Whiteboard visibility query is not pending here');

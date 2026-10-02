@@ -72,8 +72,8 @@ import {
 import { runOvertimeGeneration } from '@/lib/overtime/generation';
 import {
   createOrGetOvertimeExtension,
+  isOvertimeLeaseConflict,
   listOvertimeExtensions,
-  markActiveOvertimeExtensionsInterrupted,
 } from '@/lib/overtime/store';
 import type { OvertimeExtension, RequestLearningExtensionParams } from '@/lib/overtime/types';
 import {
@@ -379,27 +379,6 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
       return extensions;
     }, []);
 
-    useEffect(() => {
-      const stageId = stage?.id;
-      if (!stageId || revisitConfig) {
-        setOvertimeExtensions([]);
-        return;
-      }
-      let active = true;
-      void (async () => {
-        await markActiveOvertimeExtensionsInterrupted(stageId);
-        const extensions = await listOvertimeExtensions(stageId);
-        if (active && useStageStore.getState().stage?.id === stageId) {
-          setOvertimeExtensions(extensions);
-        }
-      })().catch((error) => {
-        console.error('[Overtime] Failed to restore extension tasks.', error);
-      });
-      return () => {
-        active = false;
-      };
-    }, [revisitConfig, stage?.id]);
-
     useEffect(
       () =>
         subscribeOvertimeLearningSignals(({ sceneId, signal }) => {
@@ -491,6 +470,7 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
             },
           });
         } catch (error) {
+          if (isOvertimeLeaseConflict(error)) return;
           console.error('[Overtime] Page generation failed.', error);
           toast.error(t('overtime.status.failed'), {
             description: error instanceof Error ? error.message : String(error),
@@ -502,6 +482,39 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
       },
       [refreshOvertimeExtensions, selectedAgents, t, updateOvertimeExtension],
     );
+
+    useEffect(() => {
+      const stageId = stage?.id;
+      if (!stageId || revisitConfig) {
+        setOvertimeExtensions([]);
+        return;
+      }
+      let active = true;
+      const refresh = async () => {
+        const extensions = await listOvertimeExtensions(stageId);
+        if (!active || useStageStore.getState().stage?.id !== stageId) return;
+        setOvertimeExtensions(extensions);
+        const resumable = extensions.find(
+          (item) =>
+            item.status === 'planning' ||
+            item.status === 'generating' ||
+            item.status === 'interrupted',
+        );
+        if (resumable) void runOvertimeTask(resumable);
+      };
+      void refresh().catch((error) =>
+        console.error('[Overtime] Failed to restore extension tasks.', error),
+      );
+      const timer = window.setInterval(() => {
+        void refresh().catch((error) =>
+          console.error('[Overtime] Failed to refresh extension tasks.', error),
+        );
+      }, 15_000);
+      return () => {
+        active = false;
+        window.clearInterval(timer);
+      };
+    }, [revisitConfig, runOvertimeTask, stage?.id]);
 
     const startOvertimeAppend = useCallback(
       async (request: RequestLearningExtensionParams, userPrompt: string) => {

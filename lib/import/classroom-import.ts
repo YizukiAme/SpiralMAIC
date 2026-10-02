@@ -13,6 +13,8 @@ import type { MediaFileRecord } from '@/lib/utils/database';
 import { db, mediaFileKey } from '@/lib/utils/database';
 import type { PersistedAgentConfig } from '@/lib/types/stage';
 import { isValidSpiralAgentRoster } from '@/lib/revisit/spiral-agents';
+import { completedClassroomImportOutline } from './classroom-import-outline';
+export { completedClassroomImportOutline } from './classroom-import-outline';
 
 export type ImportPhase =
   | 'idle'
@@ -33,16 +35,6 @@ export class ClassroomImportError extends Error {
 
 export interface ClassroomImportOptions {
   onPhase?: (phase: ImportPhase) => void;
-}
-
-/** Classroom ZIPs are complete snapshots; the format carries no resumable generation plan. */
-export function completedClassroomImportOutline(now: number): NonNullable<AppDocument['outline']> {
-  return {
-    outlines: [],
-    generationComplete: true,
-    createdAt: now,
-    updatedAt: now,
-  };
 }
 
 async function bestEffortRollback(created: {

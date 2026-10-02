@@ -114,6 +114,7 @@ async function POSTHandler(req: NextRequest) {
       modelInfo,
       modelString,
       thinkingConfig,
+      serverManaged,
     } = await resolveModelFromRequest(req, body, stage);
     outlineTitle = rawOutline?.title;
     resolvedModelString = modelString;
@@ -140,7 +141,7 @@ async function POSTHandler(req: NextRequest) {
         // ids, so the image srcs reach here as ids. Resolve them to the same
         // bytes the base64 path would send BEFORE prompt assembly, keeping the
         // vision prompt byte-identical in both modes (RFC #1153 part 2 B).
-        const resolvedImages = await resolveVisionImagesForPrompt(images, req.headers);
+        const resolvedImages = await resolveVisionImagesForPrompt(images, req);
         const result = await callLLM(
           {
             model: languageModel,
@@ -157,6 +158,7 @@ async function POSTHandler(req: NextRequest) {
           'scene-content',
           undefined,
           thinkingConfig,
+          { serverManaged },
         );
         return result.text;
       }
@@ -171,6 +173,7 @@ async function POSTHandler(req: NextRequest) {
         'scene-content',
         undefined,
         thinkingConfig,
+        { serverManaged },
       );
       return result.text;
     };
@@ -257,7 +260,7 @@ async function POSTHandler(req: NextRequest) {
                   ...(candidate.height !== undefined ? { height: candidate.height } : {}),
                 },
               ],
-              req.headers,
+              req,
             ),
             phaseBudget,
           ]);

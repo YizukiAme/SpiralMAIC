@@ -25,7 +25,7 @@ export async function registerNodeRuntime(): Promise<void> {
   resolveAssetPendingTtlMs();
 
   // Reject an unusable shared owner before any owner-scoped request or timer.
-  const { resolveSharedOwnerId } = await import('@/lib/server/agent-runtime/shared-owner');
+  const { resolveSharedOwnerId } = await import('@/lib/server/identity/shared-team');
   resolveSharedOwnerId();
 
   const { startAssetCollectorSchedule } =

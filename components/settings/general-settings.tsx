@@ -16,14 +16,16 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Loader2, Trash2, AlertTriangle } from 'lucide-react';
 import { useI18n } from '@/lib/hooks/use-i18n';
-import { clearDatabase } from '@/lib/utils/database';
-import { clearRevisitDatabase } from '@/lib/revisit/db';
+import {
+  clearLocalCache,
+  clearLocalStorageKeepingImportState,
+} from '@/lib/device-storage/clear-local-cache';
 import { useSettingsStore } from '@/lib/store/settings';
 import { useUserProfileStore } from '@/lib/store/user-profile';
 import { toast } from 'sonner';
 import { createLogger } from '@/lib/logger';
-import { clearCacheErrorMessage } from './clear-cache-error-message';
-import { runClearCache, shouldReloadAfterClear } from './clear-cache-workflow';
+import { runClearCache } from './clear-cache-workflow';
+import { LEGACY_IMPORT_OPEN_EVENT } from '@/lib/legacy-browser-import/consent';
 
 const log = createLogger('GeneralSettings');
 
@@ -64,9 +66,9 @@ export function GeneralSettings() {
     if (!isConfirmValid) return;
     setClearing(true);
     try {
-      const result = await runClearCache({
-        clearDatabase: () => Promise.all([clearDatabase(), clearRevisitDatabase()]).then(() => {}),
-        clearLocalStorage: () => localStorage.clear(),
+      await runClearCache({
+        clearLocalCache,
+        clearLocalStorage: clearLocalStorageKeepingImportState,
         clearSessionStorage: () => sessionStorage.clear(),
         clearPersistedStores: async () => {
           // The blanket clear only reaches these stores while their KV backend
@@ -77,19 +79,7 @@ export function GeneralSettings() {
           ]);
         },
       });
-
-      if (result.status === 'asset-pool-deferred') {
-        log.warn('Asset pool deletion deferred; remaining cache cleanup completed.');
-        toast.error(clearCacheErrorMessage(result.error, t));
-      } else {
-        toast.success(t('settings.clearCacheSuccess'));
-      }
-
-      if (!shouldReloadAfterClear(result)) {
-        // The retry stays actionable on this page; see shouldReloadAfterClear.
-        setClearing(false);
-        return;
-      }
+      toast.success(t('settings.clearCacheSuccess'));
 
       // Reload without waiting. The stores are still live in memory, so the
       // longer this page stays up the more chances a `set()` has to persist
@@ -100,7 +90,7 @@ export function GeneralSettings() {
       window.location.reload();
     } catch (error) {
       log.error('Failed to clear cache:', error);
-      toast.error(clearCacheErrorMessage(error, t));
+      toast.error(t('settings.clearCacheFailed'));
       setClearing(false);
     }
   }, [isConfirmValid, t]);
@@ -114,6 +104,23 @@ export function GeneralSettings() {
     <div className="flex flex-col gap-8">
       {/* Usage statistics dashboard */}
       <UsageDashboard />
+
+      <div className="flex flex-col gap-3 rounded-xl border p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-medium">{t('legacyImport.title')}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {t('legacyImport.settingsDescription')}
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="self-start sm:self-auto"
+          onClick={() => window.dispatchEvent(new Event(LEGACY_IMPORT_OPEN_EVENT))}
+        >
+          {t('legacyImport.review')}
+        </Button>
+      </div>
 
       {/* Danger Zone - Clear Cache */}
       <div className="relative rounded-xl border border-destructive/30 bg-destructive/[0.03] dark:bg-destructive/[0.06] overflow-hidden">
