@@ -1,5 +1,7 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { load } from 'js-yaml';
 import { describe, expect, it } from 'vitest';
 
@@ -108,5 +110,67 @@ describe('publish-package marker workflow contract', () => {
     const mutated = mutate(workflowSource);
     expect(mutated).not.toBe(workflowSource);
     expect(() => assertPublishedVersionHandoff(parseWorkflow(mutated))).toThrow();
+  });
+});
+
+describe('package validation source selection', () => {
+  function validate(environment: Record<string, string>) {
+    const directory = mkdtempSync(join(tmpdir(), 'spiral-package-workflow-'));
+    try {
+      mkdirSync(join(directory, 'scripts'));
+      // Exercise the actual workflow shell; record its package-check boundary
+      // without contacting the upstream registry or publishing anything.
+      writeFileSync(
+        join(directory, 'scripts/check-package-version-bumps.mjs'),
+        'console.log(JSON.stringify(process.argv.slice(2))); process.exit(process.argv[2] ? 0 : 2);',
+      );
+      return spawnSync(
+        'bash',
+        ['-c', step(parseWorkflow(), 'validate', 'Validate package versions').run!],
+        { cwd: directory, env: { ...process.env, ...environment }, encoding: 'utf8' },
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+
+  it('retains registry release validation for the upstream repository', () => {
+    const result = validate({
+      GITHUB_REPOSITORY: 'THU-MAIC/OpenMAIC',
+      GITHUB_EVENT_NAME: 'push',
+      PACKAGE_VERSION_BASE: 'a'.repeat(40),
+    });
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout.trim())).toEqual(['--release']);
+  });
+
+  it('validates a fork push against its own before-SHA, not the upstream registry', () => {
+    const base = 'b'.repeat(40);
+    const result = validate({
+      GITHUB_REPOSITORY: 'YizukiAme/SpiralMAIC',
+      GITHUB_EVENT_NAME: 'push',
+      PACKAGE_VERSION_BASE: base,
+    });
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout.trim())).toEqual([base]);
+  });
+
+  it('checks a manually requested fork validation against origin/main', () => {
+    const result = validate({
+      GITHUB_REPOSITORY: 'YizukiAme/SpiralMAIC',
+      GITHUB_EVENT_NAME: 'workflow_dispatch',
+      PACKAGE_VERSION_BASE: '',
+    });
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout.trim())).toEqual(['origin/main']);
+  });
+
+  it('does not silently waive a fork push with no usable base', () => {
+    const result = validate({
+      GITHUB_REPOSITORY: 'YizukiAme/SpiralMAIC',
+      GITHUB_EVENT_NAME: 'push',
+      PACKAGE_VERSION_BASE: '',
+    });
+    expect(result.status).not.toBe(0);
   });
 });

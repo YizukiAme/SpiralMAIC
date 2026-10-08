@@ -98,6 +98,8 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
+          # Fork validation compares against the real push range.
+          fetch-depth: 0
           persist-credentials: false
 
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
@@ -109,10 +111,21 @@ jobs:
 
       # ci.yml is a separate workflow, so its copy of the version check cannot
       # stop a release that reaches here with CI red, skipped, or never run.
-      # This decides, against the registry, which packages may be published, and
-      # refuses to reuse or downgrade a published version.
+      # Upstream checks its registry release intent. Forks do not own that
+      # namespace: keep the source version gate and every build/tarball/test
+      # check, but compare their own change range instead of upstream releases.
       - name: Validate package versions
-        run: node scripts/check-package-version-bumps.mjs --release
+        env:
+          PACKAGE_VERSION_BASE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REPOSITORY" = "THU-MAIC/OpenMAIC" ]; then
+            node scripts/check-package-version-bumps.mjs --release
+          elif [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            node scripts/check-package-version-bumps.mjs "$PACKAGE_VERSION_BASE"
+          else
+            node scripts/check-package-version-bumps.mjs origin/main
+          fi
 
       - run: pnpm install --frozen-lockfile
 
