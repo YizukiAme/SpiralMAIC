@@ -609,8 +609,9 @@ describe.skipIf(!contractUrl)('generation runs on PostgreSQL', () => {
 
       // Not before its deadline.
       expect(await confirmDueGenerationRunOutlines()).toBe(0);
-      await new Promise((resolve) => setTimeout(resolve, Math.max(0, deadline - Date.now()) + 50));
-      expect(await confirmDueGenerationRunOutlines()).toBe(1);
+      // PostgreSQL owns the deadline; the host and a Docker VM may have
+      // different clocks. Wait for the real confirmation, not host elapsed time.
+      await expect.poll(() => confirmDueGenerationRunOutlines(), UNTIL).toBe(1);
       const confirmed = (await readGenerationRun(run.id, OWNER))!;
       expect(confirmed.state).toBe('generating');
       expect(confirmed.outlineAutoConfirmAt).toBeUndefined();
@@ -2518,6 +2519,8 @@ describe.skipIf(!contractUrl)('generation runs on PostgreSQL', () => {
     it('places bytes a dead worker stored without generating them again', async () => {
       const blocked = gate();
       const reached = gate();
+      const imageRequested = gate();
+      const imageResult = gate();
       const first = mediaServices({
         mediaConnections: async () => ({ image: ready('seedream'), video: OFF }),
         sceneContent: async (owner, input, ctx) => {
@@ -2527,8 +2530,11 @@ describe.skipIf(!contractUrl)('generation runs on PostgreSQL', () => {
           }
           return fakeServices().services.sceneContent(owner, input, ctx);
         },
-        // The worker dies right after storing (before the image reaches the scene).
+        // Hold the fake provider until the crash. Returning a failure earlier
+        // lets the still-live worker overwrite the simulated stored checkpoint.
         generateImage: async () => {
+          imageRequested.release();
+          await imageResult.promise;
           throw new Error('not in this execution');
         },
       });
@@ -2540,6 +2546,7 @@ describe.skipIf(!contractUrl)('generation runs on PostgreSQL', () => {
         signal: abortA.signal,
       });
       await reached.promise;
+      await imageRequested.promise;
       // Simulate the crash window: the bytes and their checkpoint committed together.
       const stageId = (await readGenerationRun(run.id, OWNER))!.stageId!;
       const stored = await storeGeneratedAsset({
@@ -2560,8 +2567,16 @@ describe.skipIf(!contractUrl)('generation runs on PostgreSQL', () => {
         },
       });
       abortA.abort();
+      imageResult.release();
       blocked.release();
       expect(await executionA).toBe('interrupted');
+      expect(stored.status).toBe('stored');
+      const assetId = (stored as { assetId: string }).assetId;
+      expect((await mediaOf(run.id)).gen_img_1).toEqual({
+        mediaType: 'image',
+        status: 'stored',
+        assetId,
+      });
       await new Promise((resolve) => setTimeout(resolve, 10));
       const takeover = (await claim(run.id, 'worker-b', 1))!;
       const resumed = mediaServices({
@@ -2574,7 +2589,6 @@ describe.skipIf(!contractUrl)('generation runs on PostgreSQL', () => {
         }),
       ).toBe('completed');
       expect(resumed.media.image).toEqual([]);
-      const assetId = (stored as { assetId: string }).assetId;
       const document = (await documentStore(OWNER).loadDocument(stageId))!;
       expect(elementsOf(document.scenes[0]).find((element) => element.type === 'image')!.src).toBe(
         assetId,
