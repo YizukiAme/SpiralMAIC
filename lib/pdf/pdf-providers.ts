@@ -385,6 +385,7 @@ async function parseWithAliDocMind(
       llmEnhancement: true,
       enhancementMode: 'VLM',
       outputHtmlTable: true,
+      signal: config.signal,
     },
   );
 
@@ -681,7 +682,7 @@ export async function parseWithMinerUDocument(
   try {
     response = await providerFetch(
       `${config.baseUrl}/file_parse`,
-      { method: 'POST', headers, body: formData },
+      { method: 'POST', headers, body: formData, signal: config.signal },
       selfHostedMinerUPolicy(config.managed),
     );
   } catch (error) {
@@ -721,30 +722,6 @@ export async function parseWithMinerUDocument(
   }
 
   return extractMinerUResult(fileResult);
-}
-
-/**
- * Get current PDF parser configuration from settings store
- * Note: This function should only be called in browser context
- */
-export async function getCurrentPDFConfig(): Promise<PDFParserConfig> {
-  if (typeof window === 'undefined') {
-    throw new Error('getCurrentPDFConfig() can only be called in browser context');
-  }
-
-  // Dynamic import to avoid circular dependency
-  const { useSettingsStore } = await import('@/lib/store/settings');
-  const { pdfProviderId, pdfProvidersConfig } = useSettingsStore.getState();
-
-  const providerConfig = pdfProvidersConfig?.[pdfProviderId];
-
-  return {
-    providerId: pdfProviderId,
-    apiKey: providerConfig?.apiKey,
-    baseUrl: providerConfig?.baseUrl,
-    accessKeyId: (providerConfig as { accessKeyId?: string })?.accessKeyId,
-    accessKeySecret: (providerConfig as { accessKeySecret?: string })?.accessKeySecret,
-  };
 }
 
 // Re-export from constants for convenience

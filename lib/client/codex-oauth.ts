@@ -1,3 +1,5 @@
+import { modelSettingsClient, type ModelSettingsClient } from '@/lib/model-settings/client';
+import { modelRef, newProviderId } from '@/lib/model-settings/edit';
 import type {
   CodexAuthPublicStatus,
   CodexLoginAttempt,
@@ -17,6 +19,18 @@ export type CodexOAuthClientMessageKey =
   | 'testRateLimited'
   | 'testFailed'
   | 'testSuccess';
+
+/** Public probe status is sufficient; never display an upstream response body. */
+export function codexConnectionTestResult(response: Pick<Response, 'ok' | 'status'>): {
+  ok: boolean;
+  messageKey: CodexOAuthClientMessageKey;
+} {
+  if (response.ok) return { ok: true, messageKey: 'testSuccess' };
+  if (response.status === 401) return { ok: false, messageKey: 'testUnauthorized' };
+  if (response.status === 403) return { ok: false, messageKey: 'testForbidden' };
+  if (response.status === 429) return { ok: false, messageKey: 'testRateLimited' };
+  return { ok: false, messageKey: 'testFailed' };
+}
 
 export interface CodexOAuthClientSnapshot {
   auth: CodexAuthPublicStatus | null;
@@ -466,11 +480,7 @@ export class CodexOAuthClient {
     } catch {
       return { ok: false, messageKey: 'testFailed' };
     }
-    if (response.ok) return { ok: true, messageKey: 'testSuccess' };
-    if (response.status === 401) return { ok: false, messageKey: 'testUnauthorized' };
-    if (response.status === 403) return { ok: false, messageKey: 'testForbidden' };
-    if (response.status === 429) return { ok: false, messageKey: 'testRateLimited' };
-    return { ok: false, messageKey: 'testFailed' };
+    return codexConnectionTestResult(response);
   }
 
   dispose(): void {
@@ -481,30 +491,66 @@ export class CodexOAuthClient {
   }
 }
 
-interface CodexProviderState {
-  fetchServerProviders: (options?: {
-    reconcileOAuthImageSelectionImmediately?: boolean;
-  }) => Promise<void>;
-  providersConfig: Record<string, { isServerConfigured?: boolean; models?: Array<{ id: string }> }>;
-  setModel: (providerId: 'openai-codex', modelId: string) => void;
-}
-
+/** Sync server-owned OAuth catalogue after a user completes sign-in. */
 export async function syncCodexProviderAndSelect(
-  getState: () => CodexProviderState,
+  client: ModelSettingsClient = modelSettingsClient,
 ): Promise<void> {
-  await getState().fetchServerProviders();
-  const freshState = getState();
-  const codex = freshState.providersConfig['openai-codex'];
-  const firstModel = codex?.isServerConfigured ? codex.models?.[0]?.id : undefined;
-  if (firstModel) freshState.setModel('openai-codex', firstModel);
+  await syncCodexSelection(client);
 }
 
-export async function syncServerProvidersAfterAccessUnlock(
-  getState: () => Pick<CodexProviderState, 'fetchServerProviders'>,
+/** An explicit Use changes only the capability the user is configuring. */
+export async function selectCodexCapability(
+  capability: 'chat' | 'image',
+  client: ModelSettingsClient = modelSettingsClient,
 ): Promise<void> {
-  await getState().fetchServerProviders({
-    reconcileOAuthImageSelectionImmediately: true,
-  });
+  await syncCodexSelection(client, capability);
+}
+
+async function syncCodexSelection(client: ModelSettingsClient, explicit?: 'chat' | 'image') {
+  const state = await client.load({ fresh: true });
+  let view = state.view;
+  if (!view) throw new Error('Model settings could not be refreshed');
+  const capabilities = [
+    ['openai-codex', 'chat', 'llm'],
+    ['codex-image', 'image', 'image'],
+  ] as const;
+  const selected = capabilities.filter(([, capability]) => !explicit || capability === explicit);
+  for (const [preset, capability, slotId] of selected) {
+    if (explicit && view.slots.find((slot) => slot.slot === slotId)?.locked) continue;
+    if (view.providers.some((provider) => provider.capabilities[capability]?.registryId === preset))
+      continue;
+    const offered = view.presets.find((entry) => entry.id === preset);
+    if (!view.allowUserKeys || !offered?.capabilities[capability]?.models.length) continue;
+    const result = await client.apply(
+      { kind: 'provider', id: newProviderId(view, preset), preset },
+      view,
+    );
+    if (!result.ok) throw new Error('Codex provider could not be saved');
+    view = result.view;
+  }
+  const set: Record<string, string> = {};
+  for (const [preset, capability, slotId] of selected) {
+    const provider = view.providers.find(
+      (entry) => entry.capabilities[capability]?.registryId === preset && entry.connected,
+    );
+    const model = provider?.capabilities[capability]?.models[0]?.id;
+    const slot = view.slots.find((entry) => entry.slot === slotId);
+    if (!provider || !model || !slot || slot.locked) continue;
+    // Sign-in fills an empty image slot; explicit image Use replaces its choice.
+    if (!explicit && capability === 'image' && slot.effective.status !== 'unassigned') continue;
+    set[slotId] = modelRef(provider.id, model);
+  }
+  if (Object.keys(set).length) {
+    const result = await client.apply({ kind: 'slots', set }, view);
+    if (!result.ok) throw new Error('Codex model selection could not be saved');
+  }
+}
+
+/** Unlock/logout reloads account capability data without changing a saved selection. */
+export async function syncServerProvidersAfterAccessUnlock(
+  client: ModelSettingsClient = modelSettingsClient,
+): Promise<void> {
+  await client.load({ fresh: true });
 }
 
 export function getProviderBadgeTranslationKey(provider: {

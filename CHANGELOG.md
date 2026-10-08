@@ -4,7 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased] - 2026-09-27
+## [Unreleased] - 2026-10-08
+
+- Sync server-side course generation, persistent model slots and the material library.
+- Keep Spiral overtime, Revisit and Codex sign-in/Fast mode on the shared generation steps.
+- Require confirmation before importing old courses, learning records, model settings or agents.
+- Add offline HTML export, PPTX scene placeholders and WebKit chart fixes.
+- Preserve the deployment access gate on new APIs and strengthen stored-content and skill boundaries.
+- Patch Next.js to 16.3.8, Sharp to 0.35.5 and affected server transport dependencies.
+
+### Previous maintenance — 2026-09-27
 
 - Upgrade the app and docs site to Next.js 16.3.6 for security and standalone-build fixes.
 - Refresh the docs site's YAML parser and build tooling to patched compatible versions.

@@ -33,12 +33,9 @@ import { FolderNameError } from '@/lib/utils/folder-name-validation';
 
 import type { OwnedStage } from './course';
 import type { FolderApi } from './folders';
+import { BINDING_ENDPOINT, LEGACY_IMPORT_HEADER } from './protocol';
 
-/** The request header an importer request carries its browser id in. */
-export const LEGACY_IMPORT_HEADER = 'x-openmaic-legacy-import';
-
-/** Where the binding is asked for (without the header). */
-export const BINDING_ENDPOINT = '/api/identity/legacy-import-binding';
+export { BINDING_ENDPOINT, LEGACY_IMPORT_HEADER };
 
 /**
  * Every route the importer's fenced clients reach, with the route module that
@@ -127,6 +124,14 @@ export const FENCED_ENDPOINTS = [
     route: 'app/api/spiral/overtime/import/route.ts',
   },
   { method: 'POST', path: '/api/spiral/revisit', route: 'app/api/spiral/revisit/route.ts' },
+  // The model settings import (./model-settings-import.ts).
+  {
+    method: 'POST',
+    path: '/api/model-config/import',
+    route: 'app/api/model-config/import/route.ts',
+  },
+  // The custom agents import (./agents-import.ts).
+  { method: 'POST', path: '/api/agents/import', route: 'app/api/agents/import/route.ts' },
 ] as const;
 
 export interface ImportRecordsResult {

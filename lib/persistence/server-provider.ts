@@ -16,13 +16,16 @@ import { validateAppScene, validateAppStage } from '@/lib/document-store/validat
 import { configuredLazyAssetByteStore } from '@/lib/persistence/asset-byte-store';
 import { resolveAssetPendingTtlMs } from '@/lib/persistence/asset-pending-ttl';
 import { resolveAssetQuotaBytes } from '@/lib/persistence/asset-quota';
+import { ensureLegacyClassroomImportSchema } from '@/lib/persistence/legacy-classroom-imports';
 import { ensureOwnerMaterialSchema } from '@/lib/persistence/owner-materials';
 import { fenceOwnerWrite } from '@/lib/persistence/owner-merges';
 import { withSchemaBootstrapLock } from '@/lib/persistence/schema-bootstrap-lock';
+import { ensureWorkspaceModelConfigSchema } from '@/lib/persistence/workspace-model-config';
 import { ensureStageMetaSchema } from '@/lib/persistence/stage-meta';
 import { ensureRevisitSchema } from '@/lib/revisit/server-store';
 import { ensureServerOvertimeSchema } from '@/lib/overtime/server-store';
 import { APP_RUNTIME_PAYLOAD_VALIDATORS } from '@/lib/runtime/payload-validators';
+import { ensureOwnerAgentSchema } from '@/lib/server/agents/store';
 
 export type PersistencePoolFactory = (connectionString: string) => Pool;
 
@@ -83,6 +86,9 @@ async function createServerPersistenceProvider(
       await ensureServerOvertimeSchema(locked);
       await ensureOwnerMaterialSchema(locked);
       await ensureAssetSchema(locked);
+      await ensureLegacyClassroomImportSchema(locked);
+      await ensureWorkspaceModelConfigSchema(locked);
+      await ensureOwnerAgentSchema(locked);
     });
     const withTransaction = nodePostgresTransaction(queryable);
     const byteStore = configuredLazyAssetByteStore(queryable);

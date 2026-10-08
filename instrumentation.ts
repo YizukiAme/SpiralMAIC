@@ -37,6 +37,26 @@ export async function register(): Promise<void> {
     warnIfAccessCodeIsUnset(process.env.ACCESS_CODE);
   }
 
+  // Every store's recorded schema versions, read in the background: a database
+  // this release must not run against (upgraded by a newer release) stops the
+  // process here rather than failing every request that touches the store
+  // (lib/persistence/schema-boot-check.ts).
+  const { startSchemaBootCheck } = await import('@/lib/persistence/schema-boot-check');
+  void startSchemaBootCheck(process.env.DATABASE_URL ?? '');
+
+  // Warn-only: the instance secret that seals keys saved in the model settings
+  // (lib/server/instance-secret-check.ts), checked against the keys already
+  // stored with one query in the background. It never stops the server.
+  const { warnAboutInstanceSecret } = await import('@/lib/server/instance-secret-check');
+  void warnAboutInstanceSecret();
+
+  // The one-time import of classrooms earlier versions stored as files
+  // (lib/server/legacy-classroom-import.ts). It reads the disk and the
+  // database, so it runs in the background, retrying with backoff until it
+  // completes: `register` must not wait on it.
+  const { startLegacyClassroomImport } = await import('@/lib/server/legacy-classroom-import');
+  const legacyClassroomImport = startLegacyClassroomImport();
+
   // Imported dynamically so the Edge bundle never pulls in `pg`.
   const { startAssetCollectorSchedule } =
     await import('@/lib/persistence/asset-collector-schedule');
@@ -55,6 +75,33 @@ export async function register(): Promise<void> {
     | import('@/lib/server/material-extraction/runner').MaterialExtractionRunnerHandle
     | undefined;
   let stopAgentEventNotifyBus: (() => Promise<void>) | null = null;
+  let generationRunner:
+    | import('@/lib/server/generation/run/runner').GenerationRunnerHandle
+    | undefined;
+  let materialExtractor:
+    | import('@/lib/server/materials/extractor-wake').OwnerMaterialExtractorHandle
+    | undefined;
+  try {
+    // Course generation runs on the server in every deployment (classic
+    // generation is the default product), so its worker does not depend on
+    // the agent runtime being enabled. It only installs a timer; its tables
+    // are provisioned by the first scan.
+    const { startGenerationRunner } = await import('@/lib/server/generation/run/runner');
+    generationRunner = startGenerationRunner();
+  } catch (error) {
+    console.error('[instrumentation] Generation runner startup failed', error);
+  }
+  try {
+    // Uploaded materials are extracted in the background from their upload
+    // on (lib/server/materials/extraction.ts), wherever uploads are served.
+    const { isServerPersistenceConfigured } = await import('@/lib/config/feature-flags');
+    if (isServerPersistenceConfigured()) {
+      const { startOwnerMaterialExtractor } = await import('@/lib/server/materials/extraction');
+      materialExtractor = startOwnerMaterialExtractor();
+    }
+  } catch (error) {
+    console.error('[instrumentation] Material extractor startup failed', error);
+  }
   try {
     const { isAgentRuntimeConfigured } = await import('@/lib/config/feature-flags');
     if (isAgentRuntimeConfigured()) {
@@ -87,14 +134,34 @@ export async function register(): Promise<void> {
         console.error('[instrumentation] Material extraction runner drain failed', error);
       }
       try {
+        await materialExtractor?.stop();
+      } catch (error) {
+        console.error('[instrumentation] Material extractor drain failed', error);
+      }
+      try {
         await runner?.stop();
       } catch (error) {
         console.error('[instrumentation] Agent runner drain failed', error);
       }
       try {
-        await stopAgentEventNotifyBus?.();
+        await generationRunner?.stop();
+      } catch (error) {
+        console.error('[instrumentation] Generation runner drain failed', error);
+      }
+      try {
+        // Started at boot with the agent runtime, or on demand by the first
+        // stream that subscribes to it (a generation run's events).
+        await (
+          stopAgentEventNotifyBus ??
+          (await import('@/lib/server/agent-runtime/event-notify-bus')).stopAgentEventNotifyBus
+        )();
       } catch (error) {
         console.error('[instrumentation] Agent event notify bus drain failed', error);
+      }
+      try {
+        await legacyClassroomImport.stop();
+      } catch (error) {
+        console.error('[instrumentation] Legacy classroom import drain failed', error);
       }
       try {
         await assetSchedule?.stop();
@@ -139,6 +206,15 @@ async function validateBootConfiguration(): Promise<void> {
   const { requireDatabaseUrl } = await import('@/lib/server/database-requirement');
   runConfigurationCheck(() => requireDatabaseUrl());
 
+  // The deployment's model configuration: openmaic.yml (or the file named by
+  // OPENMAIC_CONFIG), else the legacy provider variables translated. A
+  // malformed file, an unset `${VAR}` or a slot pointing at an undeclared
+  // provider is refused here with every problem listed, and so is a
+  // MODEL_ROUTES left without openmaic.yml, rather than discovered by the
+  // first generation. Loaded once; the notices are printed here.
+  const { deploymentConfig } = await import('@/lib/server/model-config/runtime');
+  runConfigurationCheck(deploymentConfig);
+
   // The asset quota, read here rather than at the first persistence request.
   // The provider that consumes it is lazy and memoised, so a malformed ceiling
   // would otherwise let the process boot, pass its health check, and then fail
@@ -169,7 +245,8 @@ async function validateBootConfiguration(): Promise<void> {
   // A host that brings its own identity registers its owner auth methods
   // here, in the order they are asked, before validation and before the
   // server serves a request, and with them any host extension hooks (course
-  // creation, library listing, upload admission, the asset byte store):
+  // creation, library listing, upload admission, the asset byte store, and
+  // the admission, execution context and notifications of generation runs):
   //
   //   const { configureOwnerAuthentication } = await import('@/lib/server/identity');
   //   configureOwnerAuthentication({ methods: [myOwnerAuthMethod] });
@@ -177,6 +254,8 @@ async function validateBootConfiguration(): Promise<void> {
   //     await import('@/lib/server/persistence-hooks');
   //   configurePersistenceHooks(myPersistenceHooks);
   //   configureAssetByteStore(myAssetByteStore);
+  //   const { configureGenerationRunHooks } = await import('@/lib/server/generation-run-hooks');
+  //   configureGenerationRunHooks(myGenerationRunHooks);
   //
   // A registration that throws stops the process too, reported as a startup
   // failure with its stack (it is host code, not a setting).

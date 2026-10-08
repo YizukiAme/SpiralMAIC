@@ -2,12 +2,8 @@ import AxeBuilder from '@axe-core/playwright';
 import type { Page } from '@playwright/test';
 
 import { test, expect } from '../fixtures/base';
-import {
-  seedV032SpiralScenario,
-  SPIRAL_ARTIFACT_ID,
-  SPIRAL_ATTEMPT_ID,
-  SPIRAL_STAGE_ID,
-} from '../fixtures/spiral-scenario';
+import { seedV032SpiralScenario } from '../fixtures/spiral-scenario';
+import { readServerDocument } from '../fixtures/server-seed';
 
 const ACCESSIBILITY_VIEWPORTS = [
   { label: 'desktop', width: 1440, height: 900 },
@@ -42,25 +38,31 @@ async function expectNoCriticalOrSeriousViolations(page: Page, surface: string) 
       body: JSON.stringify(blocking, null, 2),
       contentType: 'application/json',
     });
-    expect(
-      blocking,
-      `${surface} (${viewport.label}) has blocking accessibility violations:\n${blockingDetails.join('\n')}`,
-    ).toEqual([]);
+    // Keep every violation fatal to the test, but inspect the remaining
+    // surfaces in the same browser run so one contrast issue hides no others.
+    expect
+      .soft(
+        blocking,
+        `${surface} (${viewport.label}) has blocking accessibility violations:\n${blockingDetails.join('\n')}`,
+      )
+      .toEqual([]);
   }
   if (originalViewport) await page.setViewportSize(originalViewport);
 }
 
 test.describe('Spiral v0.4 core loop', () => {
   test.setTimeout(120_000);
+  let scenario: Awaited<ReturnType<typeof seedV032SpiralScenario>>;
 
   test.beforeEach(async ({ page, mockApi }) => {
     await mockApi.mockRevisitChat();
     await mockApi.mockRevisitJudge();
-    await seedV032SpiralScenario(page);
+    scenario = await seedV032SpiralScenario(page);
   });
 
   test('reads v0.3.2 data and completes Reverse Challenge → report → Study Studio → overtime', async ({
     page,
+    mockApi,
   }) => {
     const courseCard = page.getByRole('button', { name: 'Review challenge' });
     await expect(courseCard).toBeVisible();
@@ -72,7 +74,7 @@ test.describe('Spiral v0.4 core loop', () => {
     await expect(page.getByRole('dialog')).toBeVisible();
     await page.getByRole('button', { name: 'Reverse 1' }).click();
     await page.waitForURL(
-      new RegExp(`/classroom/${SPIRAL_STAGE_ID}/revisit\\?attempt=${SPIRAL_ATTEMPT_ID}`),
+      new RegExp(`/classroom/${scenario.stageId}/revisit\\?attempt=${scenario.attemptId}`),
     );
     await expect(page.getByText('Explain photosynthesis', { exact: true }).first()).toBeVisible();
     await expectNoCriticalOrSeriousViolations(page, 'reverse-challenge');
@@ -131,7 +133,7 @@ test.describe('Spiral v0.4 core loop', () => {
     await expectNoCriticalOrSeriousViolations(page, 'study-studio');
     await page.getByRole('button', { name: /Photosynthesis study guide/ }).click();
     await page.waitForURL(
-      new RegExp(`/classroom/${SPIRAL_STAGE_ID}/study/${encodeURIComponent(SPIRAL_ARTIFACT_ID)}`),
+      new RegExp(`/classroom/${scenario.stageId}/study/${encodeURIComponent(scenario.artifactId)}`),
     );
     await expect(
       page.getByRole('article').getByRole('heading', { name: 'Photosynthesis study guide' }),
@@ -140,11 +142,54 @@ test.describe('Spiral v0.4 core loop', () => {
       page.getByText('Light energy is stored as chemical energy in sugar.'),
     ).toBeVisible();
 
-    await page.goto(`/classroom/${SPIRAL_STAGE_ID}`);
+    await page.goto(`/classroom/${scenario.stageId}`);
     await expect(
       page.getByTestId('scene-title').filter({ hasText: 'Overtime: photosynthesis at home' }),
     ).toBeVisible();
     await expectNoCriticalOrSeriousViolations(page, 'classroom-with-overtime');
+
+    const overtime = await mockApi.mockSpiralOvertime();
+    await page.getByText('Course complete', { exact: true }).first().click();
+    await page.keyboard.press('T');
+    const overtimeInput = page.getByPlaceholder('Type your message...', { exact: true });
+    await expect(overtimeInput).toBeVisible();
+    await overtimeInput.fill('Help me design a plant-light experiment.');
+    await overtimeInput.press('Enter');
+    await expect(page.getByTestId('scene-title').filter({ hasText: overtime.title })).toBeVisible({
+      timeout: 30_000,
+    });
+    expect(overtime.requests.map((request) => request.step)).toEqual([
+      'chat',
+      'plan',
+      'content',
+      'actions',
+    ]);
+    const overtimeConfig = overtime.requests[0].body.config as Record<string, unknown>;
+    expect(overtimeConfig.overtimeContext).toEqual({
+      stageId: scenario.stageId,
+      entry: 'course_complete',
+      formal: true,
+    });
+    const document = await readServerDocument(page, scenario.stageId);
+    expect(document?.scenes).toHaveLength(3);
+    expect(document?.scenes[2]).toMatchObject({
+      title: overtime.title,
+      order: 2,
+      overtime: {
+        sequence: 2,
+        teachingMove: 'apply',
+        conceptIds: ['photosynthesis'],
+        sourceSceneIds: ['source-scene-1'],
+      },
+    });
+    await page.reload();
+    await expect(page.getByTestId('scene-title').filter({ hasText: overtime.title })).toBeVisible();
+    expect(overtime.requests.map((request) => request.step)).toEqual([
+      'chat',
+      'plan',
+      'content',
+      'actions',
+    ]);
   });
 
   test('keeps Demo snapshots and clock local, and clearing them leaves formal challenges', async ({
@@ -153,6 +198,30 @@ test.describe('Spiral v0.4 core loop', () => {
     await page.getByRole('button', { name: 'Review challenge' }).click();
     await page.getByRole('button', { name: 'Demo box' }).click();
     await expect(page.getByText('No demo data yet')).toBeVisible();
+
+    const formalDocument = await readServerDocument(page, scenario.stageId);
+    expect(formalDocument?.stage.spiralAgentConfigs).toHaveLength(3);
+    const snapshot = async () => {
+      const response = await page.request.post('/api/spiral/revisit', {
+        headers: { origin: new URL(page.url()).origin },
+        data: { op: 'snapshotStage', args: { stageId: scenario.stageId } },
+      });
+      expect(response.ok()).toBe(true);
+      return (await response.json()).result;
+    };
+    const formalRevisit = await snapshot();
+    const writes: string[] = [];
+    page.on('request', (request) => {
+      const path = new URL(request.url()).pathname;
+      if (request.method() === 'GET') return;
+      if (path === '/api/spiral/revisit') {
+        const op = request.postDataJSON()?.op as string;
+        if (!op.startsWith('get') && !op.startsWith('list') && op !== 'snapshotStage')
+          writes.push(op);
+      } else if (path.startsWith('/api/persistence/') || path.startsWith('/api/spiral/overtime')) {
+        writes.push(`${request.method()} ${path}`);
+      }
+    });
 
     await page.getByRole('button', { name: '+1h' }).click();
     await expect(page.getByText(/Reverse 1 · reports 0 · materials 1/)).toBeVisible();
@@ -169,5 +238,8 @@ test.describe('Spiral v0.4 core loop', () => {
     await expect(page.getByText('No demo data yet')).toBeVisible();
     await page.getByRole('button', { name: 'Reverse Challenge' }).click();
     await expect(page.getByRole('button', { name: 'Reverse 1' })).toBeVisible();
+    expect(await readServerDocument(page, scenario.stageId)).toEqual(formalDocument);
+    expect(await snapshot()).toEqual(formalRevisit);
+    expect(writes).toEqual([]);
   });
 });

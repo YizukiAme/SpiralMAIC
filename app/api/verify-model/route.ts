@@ -2,7 +2,12 @@ import { withAccessCode } from '@/lib/server/with-access-code';
 import { NextRequest } from 'next/server';
 import { createLogger } from '@/lib/logger';
 import { apiError, apiSuccess } from '@/lib/server/api-response';
-import { getExpectedResolvedModelFromHeaders, resolveModel } from '@/lib/server/resolve-model';
+import { resolveModel } from '@/lib/server/resolve-model';
+import {
+  savedLanguageModel,
+  savedProviderRef,
+  savedProviderResponse,
+} from '@/lib/server/model-config/saved-provider';
 import { callLLM } from '@/lib/ai/llm';
 import { upstreamHttpStatus } from '@/lib/server/llm-error-response';
 const log = createLogger('Verify Model');
@@ -42,6 +47,7 @@ function codexErrorResponse(error: unknown) {
 
 async function POSTHandler(req: NextRequest) {
   let model: string | undefined;
+  let isCodex = false;
   try {
     const body = await req.json();
     const { apiKey, baseUrl, providerType, serviceTier } = body;
@@ -51,29 +57,50 @@ async function POSTHandler(req: NextRequest) {
       return apiError('MISSING_REQUIRED_FIELD', 400, 'Model name is required');
     }
 
-    // Parse model string and resolve server-side fallback
+    // The settings test a saved provider by its id (`provider`, with `model`
+    // its model id): the server's configuration supplies key and endpoint.
     let languageModel;
+    let savedRef: string | undefined;
     try {
-      const expectedResolvedModel = getExpectedResolvedModelFromHeaders(req);
-      const result = await resolveModel({
-        modelString: model,
-        apiKey: apiKey || '',
-        baseUrl: baseUrl || undefined,
-        providerType,
-        ...(expectedResolvedModel ? { expectedResolvedModel } : {}),
-        ...(model.startsWith('openai-codex:') && serviceTier === 'priority'
-          ? { serviceTier: 'priority' as const }
-          : {}),
-      });
-      languageModel = result.model;
+      savedRef = savedProviderRef(body.provider, model);
+      if (savedRef) {
+        const resolved = await savedLanguageModel(req, savedRef);
+        languageModel = resolved.model;
+        isCodex = resolved.providerId === 'openai-codex';
+      }
     } catch (error) {
-      if (model.startsWith('openai-codex:')) return codexErrorResponse(error);
+      const refused = savedProviderResponse(error, 'language model');
+      if (refused) return refused;
       return apiError(
         'INVALID_REQUEST',
         401,
         error instanceof Error ? error.message : String(error),
       );
     }
+    if (savedRef) {
+      model = savedRef;
+    } else {
+      // Parse model string and resolve server-side fallback
+      try {
+        const result = await resolveModel({
+          modelString: model,
+          apiKey: apiKey || '',
+          baseUrl: baseUrl || undefined,
+          providerType,
+          ...(serviceTier === 'priority' ? { serviceTier: 'priority' as const } : {}),
+        });
+        languageModel = result.model;
+        isCodex = result.providerId === 'openai-codex';
+      } catch (error) {
+        if (model.startsWith('openai-codex:')) return codexErrorResponse(error);
+        return apiError(
+          'INVALID_REQUEST',
+          401,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    }
+    if (!languageModel) return apiError('MISSING_MODEL', 400, 'Model name is required');
 
     // Send a minimal test message. Use the unified wrapper so compatible
     // providers can receive provider-specific request options.
@@ -96,11 +123,7 @@ async function POSTHandler(req: NextRequest) {
       response: text,
     });
   } catch (error) {
-    if (model?.startsWith('openai-codex:')) {
-      const status = getSafeCodexStatus(error) ?? 500;
-      log.error(`Codex model verification failed [status=${status}]`);
-      return codexErrorResponse(error);
-    }
+    if (isCodex || model?.startsWith('openai-codex:')) return codexErrorResponse(error);
     log.error(`Model verification failed [model="${model ?? 'unknown'}"]:`, error);
 
     // Classify by the provider's HTTP status only. Error messages can carry the

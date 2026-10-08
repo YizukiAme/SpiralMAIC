@@ -5,8 +5,8 @@ import {
   fetchSceneActions,
   fetchSceneContent,
   generateTTSForScene,
-} from '@/lib/hooks/use-scene-generator';
-import { generateMediaForOutlines } from '@/lib/media/media-orchestrator';
+} from '@/lib/overtime/generation-client';
+import { generateOvertimeMedia } from '@/lib/overtime/media';
 import { materializeOvertimePlan } from '@/lib/overtime/concepts';
 import {
   checkpointOvertimeExtension,
@@ -23,7 +23,7 @@ import type { LessonConcept } from '@/lib/revisit/types';
 import type { SceneOutline } from '@/lib/types/generation';
 import { makeScene, type Scene, type Stage } from '@/lib/types/stage';
 import { isAbortError } from '@openmaic/generation/generation-retry';
-import { getCurrentModelConfig } from '@/lib/utils/model-config';
+import { buildModelRequestHeaders, getCurrentModelConfig } from '@/lib/utils/model-config';
 
 type ContentResult = Awaited<ReturnType<typeof fetchSceneContent>>;
 type ActionsResult = Awaited<ReturnType<typeof fetchSceneActions>>;
@@ -45,7 +45,7 @@ export interface OvertimeGenerationDependencies {
   fetchContent: typeof fetchSceneContent;
   fetchActions: typeof fetchSceneActions;
   generateTTS: typeof generateTTSForScene;
-  generateMedia: typeof generateMediaForOutlines;
+  generateMedia: typeof generateOvertimeMedia;
   upsertConcepts: (concepts: LessonConcept[]) => Promise<void>;
   commit: typeof commitOvertimeExtension;
 }
@@ -61,22 +61,11 @@ const defaultDependencies: OvertimeGenerationDependencies = {
   fetchContent: fetchSceneContent,
   fetchActions: fetchSceneActions,
   generateTTS: generateTTSForScene,
-  generateMedia: generateMediaForOutlines,
+  generateMedia: generateOvertimeMedia,
   // Formal concepts commit in the same server transaction as the new page.
   upsertConcepts: async () => undefined,
   commit: commitOvertimeExtension,
 };
-
-function modelHeaders(): Record<string, string> {
-  const config = getCurrentModelConfig();
-  return {
-    'Content-Type': 'application/json',
-    'x-model': config.modelString || '',
-    'x-api-key': config.apiKey || '',
-    'x-base-url': config.baseUrl || '',
-    'x-provider-type': config.providerType || '',
-  };
-}
 
 export async function requestOvertimePlan(args: {
   stage: Stage;
@@ -87,7 +76,11 @@ export async function requestOvertimePlan(args: {
 }): Promise<OvertimePlanDraft> {
   const response = await fetch('/api/overtime/plan', {
     method: 'POST',
-    headers: modelHeaders(),
+    headers: {
+      'Content-Type': 'application/json',
+      ...buildModelRequestHeaders(getCurrentModelConfig()),
+    },
+    credentials: 'same-origin',
     signal: args.signal,
     body: JSON.stringify({
       stage: args.stage,
@@ -99,9 +92,6 @@ export async function requestOvertimePlan(args: {
         summary: concept.summary,
         sourceSceneIds: concept.sourceSceneIds,
       })),
-      ...(getCurrentModelConfig().thinkingConfig
-        ? { thinkingConfig: getCurrentModelConfig().thinkingConfig }
-        : {}),
     }),
   });
   const body = (await response.json().catch(() => ({}))) as {
@@ -136,7 +126,16 @@ export async function runOvertimeGeneration(args: {
   const now = args.now ?? Date.now;
   let extension = await dependencies.getExtension(args.extensionId);
   if (!extension) throw new Error(`Overtime extension ${args.extensionId} was not found.`);
-  if (extension.status === 'ready') return extension;
+  if (extension.status === 'ready') {
+    // A previous browser session may have ended after commit but before media.
+    // The media adapter skips already-filled references; never rerun paid steps.
+    if (extension.outline) {
+      await dependencies
+        .generateMedia([extension.outline], args.stage.id, args.signal)
+        .catch(() => undefined);
+    }
+    return extension;
+  }
   const extensionId = extension.id;
   if (dependencies.claim) extension = await dependencies.claim(extension.id);
   let heartbeatError: unknown;
@@ -152,6 +151,7 @@ export async function runOvertimeGeneration(args: {
     return dependencies.checkpoint(extensionId, patch);
   };
   args.onProgress?.(extension);
+  let narrationScene: Scene | undefined;
 
   try {
     let plan = extension.plan;
@@ -228,7 +228,6 @@ export async function runOvertimeGeneration(args: {
         updatedAt: now(),
       });
       args.onProgress?.(extension);
-      await dependencies.generateMedia([outline], args.stage.id, args.signal);
     }
 
     let scene = extension.scene;
@@ -288,8 +287,19 @@ export async function runOvertimeGeneration(args: {
     }
 
     if (extension.phase === 'tts') {
+      narrationScene = scene;
       const tts = await dependencies.generateTTS(scene, args.stage.languageDirective, args.signal);
-      if (!tts.success) throw new Error(tts.error || 'Overtime page TTS generation failed.');
+      if (!tts.success) {
+        // Completed clips are paid for already; persist them before marking
+        // failure so a resumed task synthesizes only the missing lines.
+        extension = await checkpoint({
+          status: 'generating',
+          phase: 'tts',
+          scene,
+          updatedAt: now(),
+        });
+        throw new Error(tts.error || 'Overtime page TTS generation failed.');
+      }
       extension = await checkpoint({
         status: 'generating',
         phase: 'commit',
@@ -309,6 +319,9 @@ export async function runOvertimeGeneration(args: {
     });
     args.onProgress?.(ready);
     args.onReady?.(scene, outline);
+    // Media writes back into an existing scene. A failed media request keeps
+    // its placeholder and Retry; it cannot undo this committed page.
+    await dependencies.generateMedia([outline], args.stage.id, args.signal).catch(() => undefined);
     return ready;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -319,6 +332,7 @@ export async function runOvertimeGeneration(args: {
       extension = await dependencies.checkpoint(extension.id, {
         status: 'interrupted',
         phase: extension.phase,
+        ...(narrationScene ? { scene: narrationScene } : {}),
         updatedAt: now(),
       });
       args.onProgress?.(extension);

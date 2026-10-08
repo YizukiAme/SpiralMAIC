@@ -1,21 +1,46 @@
 import { withAccessCode } from '@/lib/server/with-access-code';
 
 /**
+ * GET /api/materials/[id] — one of the caller's own library uploads (the ids
+ * `POST /api/materials` returns) with its extraction (reading it keeps an
+ * upload in use from the unused-upload sweep): `idle`, `extracting`,
+ * `ready` (with what it found and what a course would leave out of it), or
+ * `failed` (with the extractor's error). Needs only server persistence; an id
+ * the owner does not have answers a plain 404.
+ *
  * GET /api/materials/[id]?sessionId= — one owned session's material, in the
  * same public projection the list and the agent's `list_materials` tool use.
  *
  * Materials are session-scoped; the client names the session and the session's
  * owner row is the authorization. A foreign or missing session, and a material
  * id that does not exist or belongs to another session, all answer the same
- * plain 404 (no existence oracle).
+ * plain 404 (no existence oracle). Session materials live with the agent
+ * runtime, so the read sits behind its gate.
  *
- * Deletion is deliberately not exposed: the session-material store from the
- * materials slice has no delete operation, and this slice adds no persistence
- * — a later slice grows deletion on the store, then the route.
+ * DELETE /api/materials/[id] — delete one of the caller's own library uploads
+ * (the ids `POST /api/materials` returns), releasing its quota, with its
+ * extraction result; an extraction still running is dropped. It needs only
+ * server persistence. Session material rows are not deletable: an agent
+ * session keeps its own copy of a bound upload, and binding a deleted id
+ * fails as unavailable.
  */
 import type { NextRequest } from 'next/server';
 
-import { isAgentRuntimeConfigured } from '@/lib/config/feature-flags';
+import {
+  isAgentRuntimeConfigured,
+  isServerPersistenceConfigured,
+} from '@/lib/config/feature-flags';
+import type { ConnectableQueryable } from '@openmaic/storage/server/reference';
+
+import {
+  deleteOwnerMaterial,
+  publicMaterial,
+  touchOwnerMaterial,
+} from '@/lib/persistence/owner-materials';
+import { ownerWriteErrorResponse } from '@/lib/persistence/owner-merges';
+import { getServerPersistenceProvider } from '@/lib/persistence/server-provider';
+import { deleteMaterialObjects, getMaterialByteStore } from '@/lib/server/materials/bytes';
+import { isMaterialId } from '@/lib/server/materials/material-id';
 import { apiError } from '@/lib/server/api-response';
 import {
   getSessionMaterial,
@@ -26,15 +51,30 @@ import { ownerJson, ownerNotFound } from '@/lib/server/agent-runtime/route-respo
 import { withRequestOwner } from '@/lib/server/identity/with-owner';
 
 export const runtime = 'nodejs';
-export const GET = withAccessCode(GETHandler);
 
 type Params = { params: Promise<{ id: string }> };
 
 async function GETHandler(req: NextRequest, { params }: Params) {
+  const searchParams = new URL(req.url).searchParams;
+  const sessionId = searchParams.get('sessionId')?.trim();
+  // A session named but empty is a mistake, not a request for the library.
+  if (searchParams.has('sessionId') && !sessionId) {
+    return apiError('MISSING_REQUIRED_FIELD', 400, 'sessionId must not be empty');
+  }
+  if (!sessionId) {
+    if (!isServerPersistenceConfigured()) return new Response('Not found', { status: 404 });
+    return withRequestOwner(req, async ({ ownerId }, responseHeaders) => {
+      const { id } = await params;
+      if (!isMaterialId(id)) return ownerNotFound(responseHeaders);
+      const provider = await getServerPersistenceProvider(process.env.DATABASE_URL ?? '');
+      // Reading it says the owner still holds it: the unused-upload sweep
+      // counts its age from now.
+      const record = await touchOwnerMaterial(provider.pool, ownerId, id);
+      if (!record) return ownerNotFound(responseHeaders);
+      return ownerJson({ material: publicMaterial(record) }, 200, responseHeaders);
+    });
+  }
   if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
-
-  const sessionId = new URL(req.url).searchParams.get('sessionId')?.trim();
-  if (!sessionId) return apiError('MISSING_REQUIRED_FIELD', 400, 'sessionId is required');
 
   return withRequestOwner(req, async ({ ownerId }, responseHeaders) => {
     const session = await resolveOwnedSession(sessionId, ownerId);
@@ -45,3 +85,31 @@ async function GETHandler(req: NextRequest, { params }: Params) {
     return ownerJson({ material: publicMaterialView(material) }, 200, responseHeaders);
   });
 }
+
+export async function DELETE(req: NextRequest, { params }: Params) {
+  if (!isServerPersistenceConfigured()) return new Response('Not found', { status: 404 });
+
+  return withRequestOwner(req, async ({ ownerId }, responseHeaders) => {
+    const { id } = await params;
+    if (!isMaterialId(id)) return ownerNotFound(responseHeaders);
+    const provider = await getServerPersistenceProvider(process.env.DATABASE_URL ?? '');
+    const byteStore = getMaterialByteStore();
+    let deleted: boolean;
+    try {
+      deleted = await deleteOwnerMaterial(
+        provider.pool as unknown as ConnectableQueryable,
+        ownerId,
+        id,
+        (ossKey) => deleteMaterialObjects(byteStore, ossKey),
+      );
+    } catch (error) {
+      const claimed = ownerWriteErrorResponse(error, responseHeaders);
+      if (claimed) return claimed;
+      throw error;
+    }
+    if (!deleted) return ownerNotFound(responseHeaders);
+    return ownerJson({ materialId: id, deleted: true }, 200, responseHeaders);
+  });
+}
+
+export const GET = withAccessCode(GETHandler);

@@ -81,6 +81,7 @@ cd SpiralMAIC
 corepack enable
 pnpm install
 cp .env.example .env.local
+cp openmaic.example.yml openmaic.yml
 pnpm db:up
 ```
 
@@ -90,17 +91,29 @@ pnpm db:up
 DATABASE_URL=postgres://openmaic:openmaic-dev@127.0.0.1:5432/openmaic
 ```
 
-然后启动：
-
-```bash
-pnpm dev
-```
-
-想最快用 API Key 开始，可以在 `.env.local` 放一个模型配置：
+启动前，把模型服务的 Key 放进 `.env.local`：
 
 ```env
 OPENAI_API_KEY=sk-...
-DEFAULT_MODEL=openai:your-model
+```
+
+在 `openmaic.yml` 的 `slots.llm` 里选择模型：
+
+```yaml
+providers:
+  openai:
+    preset: openai
+    apiKey: ${OPENAI_API_KEY}
+slots:
+  llm: openai:gpt-5.5
+```
+
+也可以不创建 YAML，
+直接在应用的模型服务设置里配置。设置现在跟着服务器走：换个浏览器也不用重填，
+请求里不用再夹带 API Key。
+
+```bash
+pnpm dev
 ```
 
 然后打开 [http://localhost:3000](http://localhost:3000)，生成一门课，开始转第一圈。
@@ -108,7 +121,8 @@ DEFAULT_MODEL=openai:your-model
 可以点“稍后”，再从设置里回来；浏览器原件会保留，中断后也能接着导入。
 
 Gemini、Anthropic、Bedrock、DeepSeek、Qwen、Kimi、MiniMax、GLM、小米 MiMo、
-OpenRouter、Ollama、Lemonade 等也都可以用。最新配置清单直接看 [`.env.example`](.env.example)。
+OpenRouter、Ollama、Lemonade 等也都可以用。配置清单见
+[`openmaic.example.yml`](openmaic.example.yml) 和 [`.env.example`](.env.example)。
 
 <details>
 <summary><strong>Docker、持久化和生产部署</strong></summary>
@@ -127,6 +141,9 @@ docker compose up --build
 ```
 
 Docker Compose 默认包含 PostgreSQL；隔离 MP4 渲染服务是可选项。
+课程在服务器生成，关掉标签页也能继续；部署请使用常驻 Node 进程或容器。
+备份时一起保存 PostgreSQL 和 `data/`，包括保护已保存 Key 的 `instance-secret.key`。
+使用 YAML 配置时，将自己的 `openmaic.yml` 挂载到容器里。
 细节见[存储说明](packages/@openmaic/storage/README.md)和
 [渲染服务说明](render-service/README.md)。
 

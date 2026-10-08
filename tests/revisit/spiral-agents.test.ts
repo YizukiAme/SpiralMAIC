@@ -261,6 +261,19 @@ describe('Spiral agent roster persistence', () => {
     ).toEqual(['gen-course-teacher']);
   });
 
+  it('does not persist a Demo-generated roster into its formal source course', async () => {
+    await mutateDocument(stage.id, async (_document, store) =>
+      store.saveDocument({ stage, scenes: [] }),
+    );
+    await saveStageSpiralAgents(stage.id, [assistant, ...students], 20, {
+      kind: 'demo',
+      sessionId: 'demo-roster',
+    });
+    const loaded = await loadStageData(stage.id);
+    expect(loaded?.stage.spiralAgentConfigs).toBeUndefined();
+    expect(loaded?.stage.updatedAt).toBe(stage.updatedAt);
+  });
+
   it('hydrates only the runtime registry and leaves normal generated records intact', async () => {
     await db.generatedAgents.put({
       id: 'gen-course-teacher',

@@ -203,6 +203,12 @@ export interface ModelConfig {
   /** Server-validated request tier for catalog-gated providers such as Codex. */
   serviceTier?: ModelServiceTier;
   /**
+   * Whether the call needs a key, when the caller's configuration says so
+   * (a self-hosted OpenAI-compatible server needs none, although the
+   * registry entry it rides on does). Omitted: the registry decides.
+   */
+  requiresApiKey?: boolean;
+  /**
    * Optional server-side fetch implementation used for the model's outbound
    * requests (e.g. a wrapper that re-validates redirect hops). When omitted the
    * global fetch is used. Never set by client-side consumers.

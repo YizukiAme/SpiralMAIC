@@ -31,7 +31,7 @@ describe('runAgentLoop logical sessions', () => {
     await runAgentLoop(
       {
         config: { agentIds: ['agent-1'] },
-        apiKey: 'key',
+        serviceTier: 'priority',
         session: { kind: 'chat', id: 'persisted-chat-session-1' },
       },
       {
@@ -51,6 +51,10 @@ describe('runAgentLoop logical sessions', () => {
     );
 
     expect(fetchChat).toHaveBeenCalledTimes(2);
+    expect(fetchChat.mock.calls.map(([body]) => body.serviceTier)).toEqual([
+      'priority',
+      'priority',
+    ]);
     expect(fetchChat.mock.calls.map(([body]) => body.session)).toEqual([
       { kind: 'chat', id: 'persisted-chat-session-1' },
       { kind: 'chat', id: 'persisted-chat-session-1' },

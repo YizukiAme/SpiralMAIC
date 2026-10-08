@@ -28,8 +28,8 @@ import { getStudyArtifact } from '@/lib/revisit/db';
 import type { StudyArtifact } from '@/lib/revisit/types';
 import type { Scene } from '@/lib/types/stage';
 import { useArtifactGenerationStore } from '@/lib/store/artifact-generation';
-import { useSettingsStore } from '@/lib/store/settings';
-import { hasUsableLLMProvider } from '@/lib/store/settings-validation';
+import { useModelCapabilities } from '@/lib/model-settings/use-model-settings';
+import { slotsUsable } from '@/lib/model-settings/capabilities';
 import { loadStageData } from '@/lib/utils/stage-storage';
 import { parseRevisitScope, serializeRevisitScope } from '@/lib/revisit/scope';
 import { buildRevisitPanelReturnUrl, parseRevisitPanelSection } from '@/lib/revisit/home-surface';
@@ -57,8 +57,7 @@ export default function StudyArtifactPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [exporting, setExporting] = useState<StudyArtifactVisualExportFormat | null>(null);
   const [requestedJobId, setRequestedJobId] = useState<string | null>(null);
-  const providersConfig = useSettingsStore((state) => state.providersConfig);
-  const canGenerate = hasUsableLLMProvider(providersConfig);
+  const canGenerate = slotsUsable(useModelCapabilities(), ['llm']);
   const jobs = useArtifactGenerationStore((state) => state.jobs);
   const enqueue = useArtifactGenerationStore((state) => state.enqueue);
 

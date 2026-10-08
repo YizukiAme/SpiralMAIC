@@ -1,10 +1,14 @@
 'use client';
 
+import { useModelCapabilities } from '@/lib/model-settings/use-model-settings';
+import { requireModelCapabilities } from '@/lib/model-settings/capabilities';
+import { startClassicRun } from '@/lib/generation-run-client/start';
 import {
   forwardRef,
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -219,6 +223,7 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
     } = useStageStore();
     const failedOutlines = useStageStore.use.failedOutlines();
     const generationComplete = useStageStore.use.generationComplete();
+    const generationInterrupted = useStageStore.use.generationInterrupted();
 
     const currentScene = getCurrentScene();
     const piChatEnabled = isPiChatEnabled();
@@ -349,7 +354,8 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
     // Selected agents from settings store (Zustand)
     const selectedAgentIds = useSettingsStore((s) => s.selectedAgentIds);
     const ttsMuted = useSettingsStore((s) => s.ttsMuted);
-    const ttsEnabled = useSettingsStore((s) => s.ttsEnabled);
+    // Narration is on when the workspace's tts slot resolves to a provider.
+    const ttsEnabled = !!useModelCapabilities().tts;
 
     // Generate participants from selected agents
     const participants = useMemo(
@@ -551,7 +557,7 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
       [startOvertimeAppend],
     );
 
-    const createOvertimeCourse = useCallback(() => {
+    const createOvertimeCourse = useCallback(async () => {
       const live = useStageStore.getState();
       if (!live.stage || !pendingNewCourse) return;
       const session = buildOvertimeCourseGenerationSession({
@@ -561,10 +567,24 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
         userPrompt: pendingNewCourse.userPrompt,
         topic: pendingNewCourse.request.topic,
       });
-      sessionStorage.setItem('generationSession', JSON.stringify(session));
       setPendingNewCourse(null);
-      router.push('/generation-preview');
-    }, [pendingNewCourse, router]);
+      try {
+        const capabilities = await requireModelCapabilities();
+        if (!capabilities) throw new Error(t('generation.modelSettingsUnavailable'));
+        const run = await startClassicRun({
+          requirement: session.requirements.requirement,
+          materialIds: [],
+          interactive: live.stage.interactiveMode === true,
+          taskEngine: live.stage.taskEngineMode === true,
+          capabilities,
+        });
+        router.push(`/generation-preview?run=${encodeURIComponent(run.id)}`);
+      } catch (error) {
+        toast.error(t('overtime.status.failed'), {
+          description: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }, [pendingNewCourse, router, t]);
 
     // Discussion TTS: audio indicator state
     const [audioIndicatorState, setAudioIndicatorState] = useState<AudioIndicatorState>('idle');
@@ -2113,6 +2133,17 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
       if (!canPickElement) setElementPickActive(false);
     }, [canPickElement, setElementPickActive, whiteboardOpen]);
 
+    // An armed picker belongs to the surface it was armed on. Opening or closing
+    // the whiteboard (student toggle, Teacher action, or runtime visibility) ends
+    // it instead of moving it to the other surface; a selected draft is kept.
+    // Layout timing keeps the destination picker from painting for a frame.
+    const previousWhiteboardOpenRef = useRef(whiteboardOpen);
+    useLayoutEffect(() => {
+      if (previousWhiteboardOpenRef.current === whiteboardOpen) return;
+      previousWhiteboardOpenRef.current = whiteboardOpen;
+      setElementPickActive(false);
+    }, [setElementPickActive, whiteboardOpen]);
+
     useEffect(() => {
       if (showElementReference) return;
       setElementPickActive(false);
@@ -2200,7 +2231,6 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
 
     // whiteboard toggle
     const handleWhiteboardToggle = () => {
-      if (!whiteboardOpen) setElementPickActive(false);
       setWhiteboardOpenManually(!whiteboardOpen);
     };
 
@@ -2477,6 +2507,7 @@ export const PlaybackChromeRoot = forwardRef<PlaybackChromeRootHandle, PlaybackC
               isGenerationFailed={
                 isPendingScene && failedOutlines.some((f) => f.id === generatingOutlines[0]?.id)
               }
+              isGenerationInterrupted={isPendingScene && generationInterrupted}
               onRetryGeneration={
                 onRetryOutline && generatingOutlines[0]
                   ? () => onRetryOutline(generatingOutlines[0].id)

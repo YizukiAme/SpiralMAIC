@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/lib/utils/model-config', () => ({
+  buildModelRequestHeaders: () => ({}),
   getCurrentModelConfig: () => ({
     modelString: 'openai/test',
     apiKey: 'test-key',

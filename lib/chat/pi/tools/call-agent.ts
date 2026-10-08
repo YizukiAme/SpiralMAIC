@@ -39,6 +39,9 @@ import { buildNativeSpotlightTool } from './native-spotlight';
 import { buildNativeWhiteboardTools } from './native-whiteboard';
 import type { WhiteboardRuntimeService } from '@/lib/whiteboard/runtime/store';
 import type { ElementReferenceEvidence } from '../element-reference';
+import { validateOvertimeChatContext } from '@/lib/overtime/chat';
+import { parseRequestLearningExtensionParams } from '@/lib/overtime/types';
+import { buildLearningExtensionTools } from './learning-extension';
 
 const CallAgentParams = Type.Object({
   agentId: Type.String({
@@ -253,6 +256,12 @@ function validateActionParams(action: ParsedAction): string | null {
   const params = action.params;
   if (!params || typeof params !== 'object' || Array.isArray(params)) {
     return 'params must be an object';
+  }
+
+  if (action.actionName === 'request_learning_extension') {
+    return parseRequestLearningExtensionParams(params)
+      ? null
+      : 'Invalid learning extension parameters';
   }
 
   if (action.actionName === 'spotlight') {
@@ -744,33 +753,44 @@ export function buildCallAgentTool(opts: {
           agent.allowedActions.includes('spotlight') &&
           spotlightTargets.size > 0,
         );
-        const nativeTools: AgentTool[] = [
-          ...(spotlightEnabled
-            ? [
-                buildNativeSpotlightTool({
-                  agent,
-                  messageId,
-                  send: opts.send,
-                  authorizedElementIds: spotlightTargets,
-                }),
-              ]
-            : []),
-          ...(opts.nativeWhiteboardService &&
-          opts.nativeWhiteboardStageId &&
-          opts.nativeWhiteboardLearnerKey
-            ? buildNativeWhiteboardTools({
-                agent,
-                messageId,
-                send: opts.send,
-                service: opts.nativeWhiteboardService,
-                stageId: opts.nativeWhiteboardStageId,
-                learnerKey: opts.nativeWhiteboardLearnerKey,
-                requestStartManualVisibilityRevision:
-                  opts.requestStartManualVisibilityRevision ?? 0,
-              })
-            : []),
-          buildNativeWebSearchTool({ config: opts.nativeWebSearchConfig }),
-        ];
+        const overtimeContext = validateOvertimeChatContext(
+          opts.body.config.overtimeContext,
+          opts.body.storeState,
+        );
+        const nativeTools: AgentTool[] = overtimeContext
+          ? buildLearningExtensionTools({
+              body: opts.body,
+              agent,
+              messageId,
+              send: opts.send,
+            })
+          : [
+              ...(spotlightEnabled
+                ? [
+                    buildNativeSpotlightTool({
+                      agent,
+                      messageId,
+                      send: opts.send,
+                      authorizedElementIds: spotlightTargets,
+                    }),
+                  ]
+                : []),
+              ...(opts.nativeWhiteboardService &&
+              opts.nativeWhiteboardStageId &&
+              opts.nativeWhiteboardLearnerKey
+                ? buildNativeWhiteboardTools({
+                    agent,
+                    messageId,
+                    send: opts.send,
+                    service: opts.nativeWhiteboardService,
+                    stageId: opts.nativeWhiteboardStageId,
+                    learnerKey: opts.nativeWhiteboardLearnerKey,
+                    requestStartManualVisibilityRevision:
+                      opts.requestStartManualVisibilityRevision ?? 0,
+                  })
+                : []),
+              buildNativeWebSearchTool({ config: opts.nativeWebSearchConfig }),
+            ];
         const availableToolNames = nativeTools.map((tool) => tool.name);
         const sanitizeNativeDelta = createVisibleSpeechDeltaSanitizer();
         let nativeResult: Awaited<ReturnType<typeof runNativeChild>>;

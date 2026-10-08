@@ -1,62 +1,43 @@
 import { restoreAgentSelection } from '@/lib/orchestration/registry/agent-selection';
-import { applyGeneratedAgentsToRegistry } from '@/lib/orchestration/registry/store';
 import {
-  applyHydratedClassroomFallbackScenes,
-  hydrateClassroomFallbackChats,
-  type ApplyHydratedClassroomFallbackScenesArgs,
-} from '@/lib/classroom/pbl-fallback-hydration';
-import type { ChatStorageSnapshot } from '@/lib/utils/chat-storage';
-import type { ChatSession } from '@/lib/types/chat';
+  applyGeneratedAgentsToRegistry,
+  whenAgentRegistryLoaded,
+} from '@/lib/orchestration/registry/store';
 import { useMediaGenerationStore, type MediaTask } from '@/lib/store/media-generation';
 import {
   markStagePersistenceDirty,
   useStageStore,
   type StageSceneLoadToken,
 } from '@/lib/store/stage';
-import { resolveStageFallbackAccess } from '@/lib/classroom/stage-ownership-signal';
 import type { MediaFileRecord } from '@/lib/device-storage/database';
-import { unmarkStageDeleted } from '@/lib/utils/deleted-stages';
 import type { GeneratedAgentConfig, Scene, Stage } from '@/lib/types/stage';
-import type { DocumentMigrationDeps } from '@/lib/document-store/migration';
+import type { SceneOutline } from '@/lib/types/generation';
 import type { PPTElement, Slide } from '@openmaic/dsl';
 import {
   collectDocumentMediaElements,
   withDocumentLegacyVideoRecovery,
 } from '@/lib/media/media-task-resolution';
 import { slideMediaReferenceSlots } from '@/lib/media/slide-media-slots';
+import {
+  sceneCarriesMediaReference,
+  stageCarriesMediaReference,
+} from '@/lib/media/generated-media-references';
 import { isConcreteMediaAddress } from '@/lib/media/resolve-media-ref';
 import { createLogger } from '@/lib/logger';
 
 const moduleLog = createLogger('ClassroomLoad');
 
-export interface ClassroomPayload {
-  stage: Stage;
-  scenes: Scene[];
-}
-
-/**
- * What `/api/classroom` had to say. This uses the same three-way vocabulary as
- * stage-meta, with endpoint-specific HTTP classification. Callers must not
- * collapse `'unavailable'` into absence: an HTTP rejection or transport
- * failure is not proof the course does not exist (#1450).
- */
-export type ClassroomFetchResult =
-  | { outcome: 'found'; classroom: ClassroomPayload }
-  | { outcome: 'absent' }
-  | { outcome: 'unavailable'; status?: number };
-
 /**
  * What a classroom load concluded about the document itself.
  *
- * `'ready'` means this course is in the store (local and/or server).
- * `'absent'` is a positive miss (404/410 or an empty success body).
- * `'unavailable'` means no usable classroom was returned. It stays on the
- * retryable error path and never becomes "not found".
+ * `'ready'` means this course is in the store. `'absent'` is a positive miss:
+ * the server has no readable course under this id. A load that could not get
+ * an answer throws inside `loadFromStorage` and ends `'failed'`, never
+ * `'absent'`.
  */
 export type ClassroomLoadResult =
   | { outcome: 'ready' }
   | { outcome: 'absent' }
-  | { outcome: 'unavailable' }
   | { outcome: 'failed' }
   | { outcome: 'cancelled' };
 
@@ -85,15 +66,6 @@ export interface RunClassroomLoadArgs<TMediaTasks = unknown> {
   isCurrent: () => boolean;
   loadFromStorage: (classroomId: string, loadToken: StageSceneLoadToken) => Promise<void>;
   getCurrentStage: () => Stage | null;
-  fetchClassroom: (
-    classroomId: string,
-    shouldConvert?: () => boolean,
-  ) => Promise<ClassroomFetchResult>;
-  applyFallbackScenes: (args: {
-    loadToken: StageSceneLoadToken;
-    stage: Stage;
-    scenes: readonly Scene[];
-  }) => Promise<boolean>;
   loadRestoredMediaTasks: (stageId: string) => Promise<TMediaTasks>;
   applyRestoredMediaTasks: (tasks: TMediaTasks) => void;
   discardRestoredMediaTasks: (tasks: TMediaTasks) => void;
@@ -111,6 +83,12 @@ export interface RunClassroomLoadArgs<TMediaTasks = unknown> {
   applyGeneratedAgents: (stageId: string, configs: readonly GeneratedAgentConfig[]) => string[];
   getSettings: () => ClassroomLoadSettings;
   getAgent: (agentId: string) => AgentLookupResult | undefined;
+  /**
+   * Whether the owner's custom agents are in the registry (waited for, with a
+   * bound). While they are not, an id the registry does not know may be one of
+   * them, so a selection naming it is kept rather than downgraded.
+   */
+  agentsReady?: () => Promise<boolean>;
   restoreAgentSelection: typeof restoreAgentSelection;
   setError: (message: string) => void;
   setLoading: (loading: boolean) => void;
@@ -140,8 +118,6 @@ export async function runClassroomLoad<TMediaTasks = unknown>({
   isCurrent,
   loadFromStorage,
   getCurrentStage,
-  fetchClassroom,
-  applyFallbackScenes,
   loadRestoredMediaTasks,
   applyRestoredMediaTasks,
   discardRestoredMediaTasks,
@@ -150,6 +126,7 @@ export async function runClassroomLoad<TMediaTasks = unknown>({
   applyGeneratedAgents,
   getSettings,
   getAgent,
+  agentsReady,
   restoreAgentSelection: restoreSelection,
   setError,
   setLoading,
@@ -159,41 +136,10 @@ export async function runClassroomLoad<TMediaTasks = unknown>({
     await loadFromStorage(classroomId, loadToken);
     if (!isCurrent()) return { outcome: 'cancelled' };
 
-    if (!getCurrentStage()) {
-      log.info('No IndexedDB data, trying server-side storage for:', classroomId);
-      // The fetch path converts and commits under the per-stage document lock.
-      // Once it returns, the document owns every allocation; a later
-      // navigation may discard only this in-memory apply, never the durable
-      // assets -- so nothing here rolls allocations back.
-      const fetchResult = await fetchClassroom(classroomId, isCurrent);
-      if (!isCurrent()) return { outcome: 'cancelled' };
+    // The server document store is the only place a course lives: nothing
+    // loaded means the server has no readable course under this id.
+    if (!getCurrentStage()) return { outcome: 'absent' };
 
-      if (fetchResult.outcome === 'unavailable') {
-        // Do not continue into media/roster hydration or let the surface treat
-        // this as not-found: we never got a positive answer about the course.
-        return { outcome: 'unavailable' };
-      }
-
-      if (fetchResult.outcome === 'found') {
-        const { stage, scenes } = fetchResult.classroom;
-        const applied = await applyFallbackScenes({ loadToken, stage, scenes });
-        if (!isCurrent()) return { outcome: 'cancelled' };
-        if (!applied) {
-          log.info('Stage changed during server-side fallback hydration, skipping load:', {
-            requestedStageId: stage.id,
-            latestStageId: getCurrentStage()?.id,
-          });
-          return { outcome: 'cancelled' };
-        }
-        log.info('Loaded from server-side storage:', classroomId);
-      } else {
-        // Positive absence from the server (and nothing local). Stop before
-        // inventing a loaded empty classroom.
-        return { outcome: 'absent' };
-      }
-    }
-
-    if (!isCurrent()) return { outcome: 'cancelled' };
     // Metadata-only on the critical path: the default loader defers object-URL
     // creation for non-priority blobs, so this await is a table read, not a
     // full media hydration (the rest hydrates in the background after apply).
@@ -203,6 +149,7 @@ export async function runClassroomLoad<TMediaTasks = unknown>({
       return { outcome: 'cancelled' };
     }
     applyRestoredMediaTasks(mediaTasks);
+    offerOutstandingMediaRetries(classroomId);
 
     // ── Roster hydration: the stage document is the source of truth ──
     // The legacy IndexedDB mirror is consulted as a read-only, per-stage
@@ -256,6 +203,7 @@ export async function runClassroomLoad<TMediaTasks = unknown>({
     if (!isCurrent()) return { outcome: 'cancelled' };
     const generatedAgentIds = applyGeneratedAgents(classroomId, effectiveConfigs);
 
+    const agentsKnown = agentsReady ? await agentsReady() : true;
     if (!isCurrent()) return { outcome: 'cancelled' };
     const settings = getSettings();
     const { selection: next, isUserSet } = restoreSelection({
@@ -265,7 +213,9 @@ export async function runClassroomLoad<TMediaTasks = unknown>({
       stageAgentIds: getCurrentStage()?.agentIds,
       isPresetAgent: (id) => {
         const agent = getAgent(id);
-        return !!agent && !agent.isGenerated;
+        // Unknown before the custom agents arrived: possibly one of them.
+        if (!agent) return !agentsKnown;
+        return !agent.isGenerated;
       },
     });
 
@@ -288,78 +238,6 @@ export async function runClassroomLoad<TMediaTasks = unknown>({
     if (isCurrent()) {
       setLoading(false);
     }
-  }
-}
-
-export async function fetchClassroomFromApi(
-  classroomId: string,
-  _shouldConvert: () => boolean = () => true,
-  _deps: DocumentMigrationDeps = {},
-  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
-): Promise<ClassroomFetchResult> {
-  try {
-    const res = await fetchImpl(`/api/classroom?id=${encodeURIComponent(classroomId)}`);
-    if (!res.ok) {
-      // These responses positively establish that this immutable id cannot
-      // resolve to a classroom. Authentication, authorization, conflict, and
-      // other 4xx responses do not prove absence and stay on the error path.
-      if ([400, 404, 410, 422].includes(res.status)) {
-        return { outcome: 'absent' };
-      }
-      return { outcome: 'unavailable', status: res.status };
-    }
-
-    const json = (await res.json()) as {
-      success?: boolean;
-      classroom?: ClassroomPayload;
-    };
-    if (!json.success || !json.classroom) return { outcome: 'absent' };
-    return { outcome: 'found', classroom: json.classroom };
-  } catch {
-    return { outcome: 'unavailable' };
-  }
-}
-
-export function applyClassroomStageAndScenes(
-  stage: Stage,
-  scenes: readonly Scene[],
-  options: {
-    persist?: boolean;
-    chats?: ChatSession[];
-    chatSnapshot?: ChatStorageSnapshot;
-  } = {},
-): void {
-  // Explicit document (re)creation point: deletion only removes client-side
-  // data, so revisiting the classroom URL restores the server copy under the
-  // SAME id. Lift any same-session deleted flag before the store write, or
-  // every subsequent edit of the restored classroom would be silently dropped
-  // until a reload. This is a deliberate restore, not an in-flight flush —
-  // exactly the distinction `deleted-stages.ts` requires. The deletion EPOCH
-  // stays bumped: a pre-delete flush still in flight remains permanently
-  // stale and cannot overwrite the restored document, while the
-  // `saveToStorage` below (and every later edit) captures the current epoch
-  // and persists normally.
-  unmarkStageDeleted(stage.id);
-  const nextScenes = [...scenes];
-  // A server fallback is a fresh classroom boundary. Never inherit access or
-  // producer state from whichever course previously occupied the singleton
-  // store; these defaults match an ordinary cold load (the stage-meta sidecar
-  // probe corrects them when it answers).
-  const access = resolveStageFallbackAccess(stage.id);
-  useStageStore.setState((state) => ({
-    stage,
-    scenes: nextScenes,
-    currentSceneId: nextScenes[0]?.id ?? null,
-    chats: options.chats ?? [],
-    chatSnapshot: options.chatSnapshot ?? { sessions: [], restoreMarker: null },
-    generationComplete: false,
-    isOwner: access.isOwner,
-    readOnly: !access.isOwner,
-    generationEpoch: state.generationEpoch + 1,
-    mode: 'playback',
-  }));
-  if (options.persist !== false) {
-    void useStageStore.getState().saveToStorage();
   }
 }
 
@@ -530,6 +408,72 @@ export function applyRestoredMediaTasks(
       moduleLog.warn('Deferred media hydration failed:', error);
     });
   }
+}
+
+/** Why an outstanding element shows as failed: nothing generated it. */
+export const OUTSTANDING_MEDIA_ERROR = 'This media was not generated';
+
+/**
+ * The media a course still waits for that nothing will generate: a course no
+ * generation run produces (made in the browser before 1.2.0) whose slides
+ * still carry an outline's generation placeholder with no task restored for
+ * it (no refusal record, no cached bytes). Each becomes a failed, retryable
+ * task, so the element offers Retry; nothing is generated until the author
+ * asks. A course a server job produces has its job's tasks instead.
+ */
+export function outstandingMediaRetryTasks(input: {
+  stageId: string;
+  stage: Pick<Stage, 'whiteboard'> | null;
+  scenes: readonly Scene[];
+  outlines: readonly SceneOutline[];
+  serverProduced: boolean;
+  tasks: Readonly<Record<string, MediaTask>>;
+}): Record<string, MediaTask> {
+  if (input.serverProduced) return {};
+  const known = new Set<string>();
+  for (const [key, task] of Object.entries(input.tasks)) {
+    known.add(key);
+    if (task.placeholderRef) known.add(task.placeholderRef);
+  }
+  const outstanding: Record<string, MediaTask> = {};
+  for (const outline of input.outlines) {
+    for (const request of outline.mediaGenerations ?? []) {
+      const ref = request.elementId;
+      if (known.has(ref) || outstanding[ref]) continue;
+      const carried =
+        input.scenes.some(
+          (scene) => scene.order === outline.order && sceneCarriesMediaReference(scene, ref),
+        ) || stageCarriesMediaReference(input.stage, ref);
+      if (!carried) continue;
+      outstanding[ref] = {
+        elementId: ref,
+        type: request.type,
+        status: 'failed',
+        prompt: request.prompt,
+        params: { aspectRatio: request.aspectRatio, style: request.style },
+        error: OUTSTANDING_MEDIA_ERROR,
+        retryCount: 0,
+        stageId: input.stageId,
+      };
+    }
+  }
+  return outstanding;
+}
+
+/** Offer Retry for the open course's outstanding media (see outstandingMediaRetryTasks). */
+export function offerOutstandingMediaRetries(stageId: string): void {
+  const { stage, scenes, outlines, outlineProducer } = useStageStore.getState();
+  if (stage?.id !== stageId) return;
+  const outstanding = outstandingMediaRetryTasks({
+    stageId,
+    stage,
+    scenes,
+    outlines,
+    serverProduced: outlineProducer === 'server-job',
+    tasks: useMediaGenerationStore.getState().tasks,
+  });
+  if (Object.keys(outstanding).length === 0) return;
+  useMediaGenerationStore.setState((state) => ({ tasks: { ...outstanding, ...state.tasks } }));
 }
 
 export function discardRestoredMediaTasks(restored: RestoredMediaTasks): void {
@@ -722,17 +666,12 @@ export function commitMigratedAgentConfigsToStore(
 }
 
 export const defaultClassroomLoadDeps = {
-  applyFallbackScenes: (args: ApplyHydratedClassroomFallbackScenesArgs) =>
-    applyHydratedClassroomFallbackScenes({
-      ...args,
-      hydrateChats: hydrateClassroomFallbackChats,
-    }),
-  fetchClassroom: fetchClassroomFromApi,
   loadRestoredMediaTasks: loadRestoredMediaTasksFromDB,
   applyRestoredMediaTasks,
   discardRestoredMediaTasks,
   loadLegacyAgentFallbacks: loadLegacyAgentFallbacksFromDB,
   commitMigratedAgentConfigs: commitMigratedAgentConfigsToStore,
   applyGeneratedAgents: applyGeneratedAgentsToRegistry,
+  agentsReady: () => whenAgentRegistryLoaded(),
   restoreAgentSelection,
 };

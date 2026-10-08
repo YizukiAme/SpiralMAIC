@@ -30,54 +30,56 @@ import { apiError, apiSuccess } from '@/lib/server/api-response';
 import { createLogger } from '@/lib/logger';
 import { validateClientBaseUrl } from '@/lib/server/ssrf-guard';
 import { withMediaProviderFetch } from '@/lib/server/media-provider-fetch';
-import { getCodexOAuthAvailability } from '@/lib/server/codex/availability';
-import { getCodexAuthRuntime } from '@/lib/server/codex/runtime';
 import {
-  CODEX_OAUTH_ERROR_CODES,
-  CodexOAuthError,
-  type CodexOAuthErrorCode,
-} from '@/lib/server/codex/token-provider';
+  savedMediaConnection,
+  savedProviderRef,
+  savedProviderResponse,
+} from '@/lib/server/model-config/saved-provider';
+import { requestProvidersAllowed } from '@/lib/server/model-config/runtime';
+import { REQUEST_PROVIDERS_REFUSED } from '@/lib/server/resolve-model';
 
+import { nativeImageProviderFor } from '@/lib/server/image-provider-adapters';
 const log = createLogger('VerifyImageProvider');
-
-// Connectivity probes are lightweight and each underlying request is bounded by
-// its own AbortSignal, but the route had no ceiling at all — cap it so a stalled
-// upstream can't tie up the function indefinitely.
-export const maxDuration = 30;
-
-const CODEX_REAUTH_ERROR_CODES = new Set<CodexOAuthErrorCode>([
-  CODEX_OAUTH_ERROR_CODES.CREDENTIALS_MISSING,
-  CODEX_OAUTH_ERROR_CODES.SIGNED_OUT,
-  CODEX_OAUTH_ERROR_CODES.INVALID_GRANT,
-  CODEX_OAUTH_ERROR_CODES.REFRESH_REJECTED,
-]);
-
-function requiresCodexReauthentication(error: unknown): boolean {
-  return error instanceof CodexOAuthError && CODEX_REAUTH_ERROR_CODES.has(error.code);
-}
-
-async function verifyCodexImageProvider() {
-  try {
-    const availability = await getCodexOAuthAvailability();
-    if (!availability.available) {
-      return apiError('PROVIDER_DISABLED', 503, 'Codex OAuth image generation is unavailable');
-    }
-  } catch {
-    return apiError('PROVIDER_DISABLED', 503, 'Codex OAuth image generation is unavailable');
-  }
-
-  try {
-    await getCodexAuthRuntime().tokenProvider.getValidCredentials();
-    return apiSuccess({ message: 'Codex OAuth connection is ready' });
-  } catch (error) {
-    return requiresCodexReauthentication(error)
-      ? apiError('INVALID_CREDENTIALS', 401, 'Reconnect Codex to generate images')
-      : apiError('PROVIDER_DISABLED', 503, 'Codex OAuth connection could not be verified');
-  }
-}
 
 async function POSTHandler(request: NextRequest) {
   try {
+    // The settings test a saved provider by its id (JSON body `provider`, with
+    // an optional `model`): the server's configuration supplies key and endpoint.
+    const body = request.headers.get('content-type')?.includes('application/json')
+      ? ((await request.json().catch(() => null)) as { provider?: unknown; model?: unknown } | null)
+      : null;
+    if (body?.provider !== undefined) {
+      let connection;
+      try {
+        const ref = savedProviderRef(body.provider, body.model);
+        if (!ref) return apiError('MISSING_PROVIDER', 400, 'No image provider named');
+        connection = await savedMediaConnection(request, 'image', ref);
+      } catch (error) {
+        const refused = savedProviderResponse(error, 'image');
+        if (refused) return refused;
+        throw error;
+      }
+      const providerId = connection.providerId as ImageProviderId;
+      const nativeProvider = nativeImageProviderFor(providerId);
+      if (nativeProvider) return nativeProvider.verifyConnection();
+      const model = connection.modelId ?? IMAGE_PROVIDERS[providerId]?.models?.[0]?.id;
+      const result = await testImageConnectivity(
+        withMediaProviderFetch(
+          { providerId, apiKey: connection.apiKey ?? '', baseUrl: connection.baseUrl, model },
+          connection.managed,
+        ),
+      );
+      if (!result.success) return apiError('UPSTREAM_ERROR', 500, result.message);
+      return apiSuccess({ message: result.message });
+    }
+
+    // The old header form tests a provider the request names: not under
+    // `allowUserKeys: false`, which leaves only the
+    // configuration's providers (tested by id above).
+    if (!requestProvidersAllowed()) {
+      return apiError('PROVIDER_DISABLED', 403, REQUEST_PROVIDERS_REFUSED);
+    }
+
     const providerId = (request.headers.get('x-image-provider')?.trim() ||
       resolveServerImageProviderId()) as ImageProviderId;
     if (!providerId) {
@@ -89,7 +91,8 @@ async function POSTHandler(request: NextRequest) {
       return apiError('PROVIDER_DISABLED', 403, 'This image provider is disabled by the server');
     }
     const clientModel = request.headers.get('x-image-model')?.trim() || undefined;
-    if (providerId === 'codex-image') return verifyCodexImageProvider();
+    const nativeProvider = nativeImageProviderFor(providerId);
+    if (nativeProvider) return nativeProvider.verifyConnection();
     // Managed providers are admin-owned: ignore any client-sent key/baseUrl.
     const managed = isServerConfiguredProvider('image', providerId);
     const clientApiKey = managed ? undefined : request.headers.get('x-api-key') || undefined;

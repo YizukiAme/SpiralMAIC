@@ -1,5 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import { fakeModel, testLogger } from './generation-steps/helpers';
+import { generateAgentProfiles } from '@/lib/server/generation/steps/agent-profiles';
 
 const callLLM = vi.fn();
 
@@ -8,21 +10,25 @@ vi.mock('@/lib/ai/llm', () => ({
 }));
 
 vi.mock('@/lib/server/resolve-model', () => ({
-  resolveModelFromRequest: async () => ({
-    model: {},
-    modelString: 'test-model',
-    thinkingConfig: undefined,
-  }),
+  resolveModelFromRequest: async () => fakeModel(),
+}));
+vi.mock('@/lib/overtime/generation-server', () => ({ ownsGenerationCourse: async () => true }));
+vi.mock('@/lib/server/identity/with-owner', () => ({
+  withRequestOwner: async (
+    _req: Request,
+    handler: (principal: { ownerId: string }, headers: Headers) => Promise<Response>,
+  ) => handler({ ownerId: 'test-owner' }, new Headers()),
 }));
 
-import { POST } from '@/app/api/generate/agent-profiles/route';
+import { POST } from '@/app/api/revisit/agent-profiles/route';
 
 function makeRequest(mode: 'course' | 'spiral' = 'spiral'): NextRequest {
-  return new NextRequest('http://localhost/api/generate/agent-profiles', {
+  return new NextRequest('http://localhost/api/revisit/agent-profiles', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       mode,
+      stageId: 'stage-1',
       stageInfo: { name: 'Intro to Algebra' },
       sceneOutlines: [{ title: 'Linear equations', description: 'Explain balancing.' }],
       languageDirective: 'Respond in English.',
@@ -43,7 +49,11 @@ function agent(name: string, role: string, priority: number) {
 }
 
 describe('agent-profiles route — Spiral mode', () => {
-  beforeEach(() => callLLM.mockReset());
+  beforeEach(() => {
+    callLLM.mockReset();
+    vi.stubEnv('ACCESS_CODE', '');
+  });
+  afterEach(() => vi.unstubAllEnvs());
 
   it('generates one assistant and two students with Spiral IDs', async () => {
     callLLM.mockResolvedValue({
@@ -100,7 +110,7 @@ describe('agent-profiles route — Spiral mode', () => {
     const response = await POST(makeRequest());
     const body = await response.json();
 
-    expect(response.status).toBe(500);
+    expect(response.status).toBe(422);
     expect(body.success).toBe(false);
   });
 
@@ -111,10 +121,16 @@ describe('agent-profiles route — Spiral mode', () => {
       }),
     });
 
-    const response = await POST(makeRequest('course'));
-    const body = await response.json();
-
-    expect(response.status).toBe(200);
-    expect(body.agents[0].id).toMatch(/^gen-/);
+    const agents = await generateAgentProfiles(
+      {
+        mode: 'course',
+        stageInfo: { name: 'Intro to Algebra' },
+        languageDirective: 'English',
+        availableAvatars: ['/a.png'],
+        model: fakeModel(),
+      },
+      { log: testLogger() },
+    );
+    expect(agents[0].id).toMatch(/^gen-/);
   });
 });

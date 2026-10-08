@@ -1,45 +1,39 @@
 import { describe, expect, it } from 'vitest';
+import { serviceEntries } from '@/lib/model-settings/services';
+import type { ProviderView } from '@/lib/model-settings/client';
+import { makeView, workspaceProvider } from '../model-settings/fixtures';
 
-import { orderProvidersForSettings } from '@/components/settings/utils';
+const provider = (id: string, registryId: string): ProviderView => ({
+  ...workspaceProvider(id),
+  preset: registryId,
+  capabilities: { chat: { registryId, models: [{ id: 'live-model', name: 'Model' }] } },
+});
 
-describe('settings provider order', () => {
-  it('keeps OpenAI first and pins Codex second without reordering the remaining providers', () => {
-    const providers = [
-      { id: 'openai', label: 'OpenAI' },
-      { id: 'anthropic', label: 'Claude' },
-      { id: 'google', label: 'Gemini' },
-      { id: 'openai-codex', label: 'Codex' },
-      { id: 'custom-provider', label: 'Custom' },
-    ];
-
-    expect(orderProvidersForSettings(providers).map((provider) => provider.id)).toEqual([
-      'openai',
-      'openai-codex',
-      'anthropic',
-      'google',
-      'custom-provider',
-    ]);
+describe('settings service order from the server view', () => {
+  it('follows registry order for built-ins while keeping custom accounts first', () => {
+    const view = makeView({
+      presets: [],
+      providers: [
+        provider('anthropic', 'anthropic'),
+        provider('openai-codex', 'openai-codex'),
+        provider('openai', 'openai'),
+        provider('custom-account', 'google'),
+      ],
+    });
+    expect(
+      serviceEntries(view, 'chat', ['openai', 'openai-codex', 'anthropic']).map(
+        (entry) => entry.id,
+      ),
+    ).toEqual(['custom-account', 'openai', 'openai-codex', 'anthropic']);
   });
 
-  it('leaves provider order unchanged when Codex is absent', () => {
-    const providers = [{ id: 'openai' }, { id: 'anthropic' }, { id: 'google' }];
-
-    expect(orderProvidersForSettings(providers)).toEqual(providers);
-  });
-
-  it('keeps Codex in the absolute second position for legacy persisted orders', () => {
-    const providers = [
-      { id: 'anthropic' },
-      { id: 'google' },
-      { id: 'openai' },
-      { id: 'openai-codex' },
-    ];
-
-    expect(orderProvidersForSettings(providers).map((provider) => provider.id)).toEqual([
-      'anthropic',
-      'openai-codex',
-      'google',
-      'openai',
-    ]);
+  it('does not let stale workspace order change built-in service positions', () => {
+    const view = makeView({
+      presets: [],
+      providers: [provider('openai-codex', 'openai-codex'), provider('openai', 'openai')],
+    });
+    expect(
+      serviceEntries(view, 'chat', ['openai', 'openai-codex']).map((entry) => entry.id),
+    ).toEqual(['openai', 'openai-codex']);
   });
 });

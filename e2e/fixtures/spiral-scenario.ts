@@ -1,12 +1,8 @@
 import type { Page } from '@playwright/test';
 
 import { createSettingsStorage } from './test-data/settings';
-import { defaultTheme } from './test-data/scene-content';
+import { defaultTheme } from './test-data/slide-theme';
 import { uniqueStageId } from './server-seed';
-
-export const SPIRAL_STAGE_ID = uniqueStageId('spiral-v032-stage');
-export const SPIRAL_ATTEMPT_ID = `${SPIRAL_STAGE_ID}-attempt`;
-export const SPIRAL_ARTIFACT_ID = `${SPIRAL_STAGE_ID}:studyGuide:v1`;
 
 const SETTINGS_STORAGE = createSettingsStorage({
   sidebarCollapsed: false,
@@ -15,6 +11,10 @@ const SETTINGS_STORAGE = createSettingsStorage({
 });
 
 function createScenario(now: number) {
+  const stageId = uniqueStageId('spiral-v032-stage');
+  const attemptId = `${stageId}-attempt`;
+  const artifactId = `${stageId}:studyGuide:v1`;
+  const overtimeId = `${stageId}-overtime-1`;
   const spiralAgentConfigs = [
     {
       id: 'spiral-assistant',
@@ -45,7 +45,7 @@ function createScenario(now: number) {
     },
   ];
   const stage = {
-    id: SPIRAL_STAGE_ID,
+    id: stageId,
     name: 'Photosynthesis review',
     description: 'A v0.3.2-compatible Spiral learning record',
     languageDirective: 'en-US',
@@ -55,7 +55,7 @@ function createScenario(now: number) {
   };
   const makeSlide = (id: string, title: string, order: number, overtime = false) => ({
     id,
-    stageId: SPIRAL_STAGE_ID,
+    stageId,
     type: 'slide',
     title,
     order,
@@ -82,7 +82,7 @@ function createScenario(now: number) {
     ...(overtime
       ? {
           overtime: {
-            extensionId: 'overtime-v032-1',
+            extensionId: overtimeId,
             sequence: 1,
             teachingMove: 'apply',
             conceptIds: ['photosynthesis'],
@@ -98,7 +98,7 @@ function createScenario(now: number) {
   const reviewScene = makeSlide('review-scene-1', 'Explain photosynthesis', 0);
   const blueprint = {
     id: 'blueprint-v032-1',
-    stageId: SPIRAL_STAGE_ID,
+    stageId,
     generatedAt: now - 7 * 24 * 60 * 60 * 1000,
     language: 'en-US',
     sourceHash: 'v032-source-hash',
@@ -139,8 +139,8 @@ function createScenario(now: number) {
     },
   };
   const attempt = {
-    attemptId: SPIRAL_ATTEMPT_ID,
-    stageId: SPIRAL_STAGE_ID,
+    attemptId,
+    stageId,
     sequence: 1,
     status: 'ready',
     sourceStage: stage,
@@ -152,8 +152,8 @@ function createScenario(now: number) {
     updatedAt: blueprint.generatedAt,
   };
   const artifact = {
-    id: SPIRAL_ARTIFACT_ID,
-    stageId: SPIRAL_STAGE_ID,
+    id: artifactId,
+    stageId,
     kind: 'studyGuide',
     version: 1,
     title: 'Photosynthesis study guide',
@@ -181,8 +181,8 @@ function createScenario(now: number) {
     },
   };
   const overtimeExtension = {
-    id: 'overtime-v032-1',
-    stageId: SPIRAL_STAGE_ID,
+    id: overtimeId,
+    stageId,
     sequence: 1,
     reservedOrder: 1,
     status: 'ready',
@@ -387,4 +387,9 @@ export async function seedV032SpiralScenario(page: Page) {
   await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).last().click();
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.getByText(scenario.stage.name, { exact: true }).first().waitFor();
+  return {
+    stageId: scenario.stage.id,
+    attemptId: scenario.attempt.attemptId,
+    artifactId: scenario.artifact.id,
+  };
 }

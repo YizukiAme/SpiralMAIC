@@ -7,6 +7,7 @@ import {
   isQwenVoiceCloneModel,
   resolveTTSModelForVoice,
   TTS_PROVIDERS,
+  voiceServesModel,
 } from '@/lib/audio/constants';
 import {
   BROWSER_NATIVE_TTS_PROVIDER_ID,
@@ -36,7 +37,7 @@ export interface AgentVoiceOverride {
 /** Persisted per-agent voice picks, keyed by agent id (settings store). */
 export type AgentVoiceOverrides = Record<string, AgentVoiceOverride>;
 
-type ProviderConfigMap = Record<string, TTSEnablementConfig | undefined>;
+type ProviderConfigMap = Record<string, (TTSEnablementConfig & { modelId?: string }) | undefined>;
 
 /** Prefer a persisted narrator binding, retaining the global fallback when it is unusable. */
 export function resolveNarratorVoiceBinding(
@@ -47,7 +48,13 @@ export function resolveNarratorVoiceBinding(
   if (
     bound &&
     bound.voiceId.trim() &&
-    isTTSProviderEnabled(bound.providerId, providerConfigs[bound.providerId])
+    isTTSProviderEnabled(bound.providerId, providerConfigs[bound.providerId]) &&
+    // A voice the provider's model in use cannot speak is not usable.
+    voiceServesModel(
+      bound.providerId,
+      bound.voiceId,
+      providerConfigs[bound.providerId]?.modelId || bound.modelId,
+    )
   ) {
     // Qwen clone IDs are account-scoped but self-contained: local IndexedDB is
     // not an authority. Catalog voices remain validated against the catalog.
@@ -135,7 +142,10 @@ export function resolveAgentVoice(
     const modelCompatible =
       matchingModelGroup?.voices.some((voice) => voice.id === choice.voiceId) ??
       staleModelCanUseDefault;
-    if (allVoiceIds.has(choice.voiceId) && modelCompatible) {
+    // The provider's list holds only the voices its model in use can speak.
+    const offered =
+      !declaredVoice || fromEnabled.voices.some((voice) => voice.id === choice.voiceId);
+    if (allVoiceIds.has(choice.voiceId) && modelCompatible && offered) {
       return {
         providerId: choice.providerId,
         ...(matchingModelGroup ? { modelId: choice.modelId } : {}),
@@ -172,6 +182,55 @@ export function resolveDeterministicFallbackVoice(
   };
 }
 
+/** Whether a narrator binding names a voice other than the global one. */
+export function narratorBindingDiffers(
+  bound: { providerId: string; voiceId: string } | undefined,
+  globalVoice: { providerId: string; voiceId: string },
+): boolean {
+  return (
+    !!bound &&
+    (bound.providerId !== globalVoice.providerId || bound.voiceId !== globalVoice.voiceId)
+  );
+}
+
+/** The deterministic last-resort narrator voice among the enabled providers, or null. */
+export function deterministicNarratorVoice(
+  providerConfigs: ProviderConfigMap,
+): ResolvedVoice | null {
+  return resolveDeterministicFallbackVoice(
+    getEnabledProvidersWithVoices(
+      providerConfigs as Parameters<typeof getEnabledProvidersWithVoices>[0],
+    ),
+    0,
+  );
+}
+
+/**
+ * The one voice a narration clip is retried with after the provider said the
+ * voice clone it used does not exist (QWEN_VC_VOICE_NOT_FOUND), or null when
+ * no retry applies. Only a clip that used the bound narrator voice is
+ * retried: with the global voice when the binding differs from it, else (a
+ * pinned narrator, bound == global) with the deterministic enabled-provider
+ * pick — unless the clip already used an explicit fallback voice.
+ */
+export function narratorVoiceAfterMissingClone(input: {
+  bound: AgentConfig['voiceConfig'] | undefined;
+  globalVoice: ResolvedVoice;
+  failed: ResolvedVoice;
+  providerConfigs: ProviderConfigMap;
+  usedFallbackVoice: boolean;
+}): ResolvedVoice | null {
+  const { bound, globalVoice, failed } = input;
+  if (!bound || bound.providerId !== failed.providerId || bound.voiceId !== failed.voiceId) {
+    return null;
+  }
+  if (narratorBindingDiffers(bound, globalVoice)) {
+    return resolveNarratorVoiceBinding(undefined, globalVoice, input.providerConfigs);
+  }
+  if (input.usedFallbackVoice) return null;
+  return deterministicNarratorVoice(input.providerConfigs);
+}
+
 /**
  * The narrator (teacher) voice to pin at agent-profile generation time.
  *
@@ -190,6 +249,7 @@ export function resolveNarratorVoiceForGeneration(
   const trimmed = voiceId?.trim();
   if (!providerId || !trimmed) return undefined;
   if (!isTTSProviderEnabled(providerId, providerConfig)) return undefined;
+  if (!voiceServesModel(providerId, trimmed, providerConfig?.modelId)) return undefined;
   const modelId =
     providerId === 'qwen-tts' && isQwenCloneVoice(trimmed)
       ? resolveTTSModelForVoice(providerId, trimmed, providerConfig?.modelId)
@@ -333,6 +393,29 @@ export function getEnabledProvidersWithVoices(
           modelName: config.name,
           voices: allVoices,
         });
+      }
+
+      // A provider used with one model (the tts slot's) offers only the
+      // voices that model can speak, under that model.
+      const inUse = providerConfig?.modelId;
+      if (inUse) {
+        const speaks = (voice: { id: string }) => voiceServesModel(providerId, voice.id, inUse);
+        const voices = allVoices.filter(speaks);
+        const own = modelGroups.filter(
+          (group) =>
+            group.modelId === inUse ||
+            // Qwen clones switch to the clone model whatever the slot's model.
+            (providerId === 'qwen-tts' && isQwenVoiceCloneModel(group.modelId)),
+        );
+        result.push({
+          providerId,
+          providerName: config.name,
+          voices,
+          modelGroups: own.length
+            ? own.map((group) => ({ ...group, voices: group.voices.filter(speaks) }))
+            : [{ modelId: inUse, modelName: inUse, voices }],
+        });
+        continue;
       }
 
       result.push({

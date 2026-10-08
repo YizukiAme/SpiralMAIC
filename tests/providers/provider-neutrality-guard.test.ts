@@ -72,9 +72,13 @@ const PROVIDER_NEUTRAL_FILES = [
   'app/api/generate/video/route.ts',
   'app/api/verify-image-provider/route.ts',
   'app/api/verify-video-provider/route.ts',
-  'app/api/web-search/route.ts',
-  'app/api/extract-document/route.ts',
   'app/api/parse-pdf/route.ts',
+  // The generation steps (lib/server/generation/steps)
+  'lib/server/generation/steps/narration.ts',
+  'lib/server/generation/steps/image.ts',
+  'lib/server/generation/steps/video.ts',
+  'lib/server/generation/steps/research.ts',
+  'lib/server/generation/steps/material-analysis.ts',
   'lib/audio/voice-registration-client.ts',
   'lib/web-search/index.ts',
   'lib/server/web-search-config.ts',
@@ -215,49 +219,21 @@ const TEMPORARY_VENDOR_DEBT: readonly AllowedVendorDebt[] = [
     ],
   ),
   ...groupedDebt(
-    'lib/server/resolve-model.ts',
-    'Temporary: the downstream native Codex transport is still bridged inside shared model resolution.',
-    [
-      ['codex', 27],
-      ['openai', 1],
-    ],
-  ),
-  ...groupedDebt(
-    'app/api/generate/image/route.ts',
-    'Temporary: the downstream Codex OAuth image transport has not moved behind the image-provider adapter.',
-    [
-      ['codex', 57],
-      ['local', 3],
-    ],
-  ),
-  ...groupedDebt(
-    'app/api/verify-image-provider/route.ts',
-    'Temporary: the downstream Codex OAuth health check has not moved behind the image-provider adapter.',
-    [['codex', 28]],
-  ),
-  ...groupedDebt(
     'app/api/generate/tts/route.ts',
-    'Temporary: TTS request preparation and error behavior have not moved behind adapters.',
+    'Temporary: TTS error behavior has not moved behind adapters.',
     [
-      ['qwen', 14],
-      ['voxcpm', 12],
+      ['qwen', 7],
+      ['voxcpm', 1],
+    ],
+  ),
+  ...groupedDebt(
+    'lib/server/generation/steps/narration.ts',
+    'Temporary: TTS request preparation has not moved behind adapters.',
+    [
+      ['qwen', 7],
+      ['voxcpm', 11],
       ['browser-native-tts', 2],
       ['browser-native', 2],
-    ],
-  ),
-  ...groupedDebt(
-    'app/api/web-search/route.ts',
-    'Temporary: web-search credentials and request options have not moved behind adapters.',
-    [
-      ['baidu', 9],
-      ['claude', 8],
-      ['tavily', 3],
-      ['searxng', 5],
-      ['bocha', 2],
-      ['brave', 2],
-      ['minimax', 2],
-      ['doubao', 2],
-      ['exa', 2],
     ],
   ),
   ...groupedDebt(
@@ -266,8 +242,8 @@ const TEMPORARY_VENDOR_DEBT: readonly AllowedVendorDebt[] = [
     [['local', 3]],
   ),
   ...groupedDebt(
-    'app/api/extract-document/route.ts',
-    'Temporary: managed document-provider configuration and fallback policy remain in the route.',
+    'lib/server/generation/steps/material-analysis.ts',
+    'Temporary: managed document-provider configuration and fallback policy remain in material analysis.',
     [
       ['alidocmind', 6],
       ['mineru', 15],
@@ -313,11 +289,11 @@ const TEMPORARY_VENDOR_DEBT: readonly AllowedVendorDebt[] = [
     'lib/server/web-search-config.ts',
     'Temporary: web-search URL and option validation are still provider-specific.',
     [
-      ['baidu', 11],
+      ['baidu', 8],
       ['tavily', 3],
       ['bocha', 7],
       ['brave', 4],
-      ['claude', 5],
+      ['claude', 3],
       ['anthropic', 2],
       ['minimax', 9],
       ['doubao', 1],

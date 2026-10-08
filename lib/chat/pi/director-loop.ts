@@ -21,6 +21,7 @@ import {
 import type { NativeWebSearchConfig } from './tools/web-search';
 import type { WhiteboardRuntimeService } from '@/lib/whiteboard/runtime/store';
 import type { ResolvedElementReference } from './element-reference';
+import { validateOvertimeChatContext } from '@/lib/overtime/chat';
 
 function formatSceneEvidenceForDelegation(evidence: DirectorSceneEvidencePacket[]): string {
   return evidence.map((packet) => packet.content).join('\n\n');
@@ -50,6 +51,14 @@ export async function runPiDirectorLoop(opts: {
   nativeWhiteboardLearnerKey?: string;
   requestStartManualVisibilityRevision?: number;
 }): Promise<void> {
+  if (validateOvertimeChatContext(opts.body.config.overtimeContext, opts.body.storeState)) {
+    opts = {
+      ...opts,
+      agentConfigs: opts.agentConfigs.filter(
+        (agent) => agent.role === 'teacher' || agent.role === 'assistant',
+      ),
+    };
+  }
   let totalAgents = 0;
   let totalActions = 0;
   let agentHadContent = false;

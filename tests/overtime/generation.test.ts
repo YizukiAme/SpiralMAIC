@@ -6,6 +6,7 @@ import {
 } from '@/lib/overtime/generation';
 import type { OvertimeExtension, OvertimePlanDraft } from '@/lib/overtime/types';
 import type { Scene, Stage } from '@/lib/types/stage';
+import type { SceneOutline } from '@/lib/types/generation';
 
 const stage: Stage = {
   id: 'stage-1',
@@ -247,6 +248,99 @@ describe('overtime generation pipeline', () => {
     ).rejects.toThrow('content failed');
 
     expect(dependencies.markFailed).toHaveBeenCalledWith('extension-1', 'content failed', 20);
+    expect(dependencies.commit).not.toHaveBeenCalled();
+  });
+
+  it('checkpoints completed narration before a failed TTS pass is retried', async () => {
+    const record = { current: extension({ plan }) };
+    const dependencies = deps(record);
+    vi.mocked(dependencies.generateTTS).mockImplementation(async (scene) => {
+      scene.actions = [
+        { id: 'paid-clip', type: 'speech', text: 'Already narrated', audioId: 'asset-paid' },
+      ];
+      return { success: false, failedCount: 1, error: 'Next clip failed' };
+    });
+    await expect(
+      runOvertimeGeneration({
+        extensionId: record.current.id,
+        stage,
+        scenes: [sourceScene],
+        existingOutlines: [],
+        knownConcepts: [],
+        dependencies,
+        now: () => 20,
+      }),
+    ).rejects.toThrow('Next clip failed');
+    expect(dependencies.checkpoint).toHaveBeenCalledWith(
+      'extension-1',
+      expect.objectContaining({
+        phase: 'tts',
+        scene: expect.objectContaining({
+          actions: [expect.objectContaining({ audioId: 'asset-paid' })],
+        }),
+      }),
+    );
+    expect(dependencies.commit).not.toHaveBeenCalled();
+  });
+
+  it('generates media after the durable page is revealed and keeps a committed page ready on media failure', async () => {
+    const record = { current: extension({ plan }) };
+    const dependencies = deps(record);
+    const onReady = vi.fn();
+    vi.mocked(dependencies.generateMedia).mockImplementation(async () => {
+      expect(record.current.status).toBe('ready');
+      expect(onReady).toHaveBeenCalledOnce();
+      throw new Error('Image provider unavailable');
+    });
+    await expect(
+      runOvertimeGeneration({
+        extensionId: record.current.id,
+        stage,
+        scenes: [sourceScene],
+        existingOutlines: [],
+        knownConcepts: [],
+        dependencies,
+        onReady,
+        now: () => 20,
+      }),
+    ).resolves.toMatchObject({ status: 'ready' });
+    expect(dependencies.markFailed).not.toHaveBeenCalled();
+  });
+
+  it('resumes pending media on an already committed page without repeating paid generation or commit', async () => {
+    const readyOutline: SceneOutline = {
+      id: 'overtime-extension-1',
+      order: 2,
+      ...plan.outline,
+      mediaGenerations: [{ elementId: 'image-pending', type: 'image', prompt: 'Motion arrows' }],
+    };
+    const record = {
+      current: extension({
+        status: 'ready',
+        phase: 'commit',
+        outline: readyOutline,
+        scene: generatedScene(),
+      }),
+    };
+    const dependencies = deps(record);
+    dependencies.claim = vi.fn();
+    await expect(
+      runOvertimeGeneration({
+        extensionId: record.current.id,
+        stage,
+        scenes: [sourceScene],
+        existingOutlines: [],
+        knownConcepts: [],
+        dependencies,
+        now: () => 20,
+      }),
+    ).resolves.toMatchObject({ status: 'ready' });
+    expect(dependencies.generateMedia).toHaveBeenCalledWith([readyOutline], stage.id, undefined);
+    expect(dependencies.claim).not.toHaveBeenCalled();
+    expect(dependencies.requestPlan).not.toHaveBeenCalled();
+    expect(dependencies.fetchContent).not.toHaveBeenCalled();
+    expect(dependencies.fetchActions).not.toHaveBeenCalled();
+    expect(dependencies.generateTTS).not.toHaveBeenCalled();
     expect(dependencies.commit).not.toHaveBeenCalled();
   });
 });

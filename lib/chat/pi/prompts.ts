@@ -7,6 +7,11 @@ import { buildVirtualWhiteboardContext } from '@/lib/orchestration/summarizers/w
 import { getActionDescriptions } from '@/lib/orchestration/tool-schemas';
 import type { AgentTurnSummary, WhiteboardActionRecord } from '@/lib/orchestration/types';
 import type { StatelessChatRequest } from '@/lib/types/chat';
+import { validateOvertimeChatContext } from '@/lib/overtime/chat';
+import {
+  buildOvertimeStateContext,
+  buildOvertimeTeachingSection,
+} from '@/lib/orchestration/prompt-builder';
 
 function compactOutlineText(value: string, maxLength: number): string {
   const compact = value.replace(/\s+/g, ' ').trim();
@@ -72,6 +77,7 @@ export function buildDirectorPrompt(
   agents: AgentConfig[],
   maxAgentTurns: number,
 ): string {
+  const overtimeContext = validateOvertimeChatContext(body.config.overtimeContext, body.storeState);
   const agentList = agents
     .map(
       (agent) =>
@@ -95,7 +101,9 @@ export function buildDirectorPrompt(
   const triggerAgentId = body.config.triggerAgentId;
 
   return [
-    'You are the director of an in-class multi-agent classroom.',
+    overtimeContext
+      ? 'You are directing a post-class follow-up for one learner. Delegate only to a teacher or assistant, normally once; do not invite student discussion.'
+      : 'You are the director of an in-class multi-agent classroom.',
     'Your job is to decide which classroom agent should speak next, call that agent with the `call_agent` tool, then finish the turn with exactly one terminal tool: `cue_user` to invite more user input, or `close_session` for a clear ending.',
     'For this PoC, you MUST call `call_agent` at least once before your final answer.',
     `You may call at most ${maxAgentTurns} classroom agent turns in this server-side loop.`,
@@ -151,6 +159,7 @@ export function buildDirectorPrompt(
     '',
     'Available agents:',
     agentList || '(none)',
+    buildOvertimeTeachingSection(overtimeContext, body.storeState),
   ].join('\n');
 }
 
@@ -161,6 +170,7 @@ export function buildChildPrompt(
   whiteboardLedger: WhiteboardActionRecord[],
   availableActions: string[] = [],
 ): string {
+  const overtimeContext = validateOvertimeChatContext(body.config.overtimeContext, body.storeState);
   const currentScene = body.storeState.currentSceneId
     ? body.storeState.scenes.find((scene) => scene.id === body.storeState.currentSceneId)
     : null;
@@ -171,7 +181,9 @@ export function buildChildPrompt(
     agent.persona,
     '',
     '# Classroom Role',
-    buildRoleGuideline(agent.role),
+    overtimeContext
+      ? 'You are the teaching agent answering one learner after class.'
+      : buildRoleGuideline(agent.role),
     '',
     buildPeerContextSection(agentResponses, agent.name),
     buildLanguageConstraint(body.storeState.stage?.languageDirective),
@@ -201,8 +213,9 @@ export function buildChildPrompt(
     '[{"type":"action","name":"spotlight","params":{"elementId":"text_1"}},{"type":"text","content":"看这里，这一步是后面机制成立的关键。"}]',
     '',
     '# Current State',
-    buildThinChildContext(body),
-    buildVirtualWhiteboardContext(body.storeState, whiteboardLedger),
+    overtimeContext ? buildOvertimeStateContext(body.storeState) : buildThinChildContext(body),
+    overtimeContext ? '' : buildVirtualWhiteboardContext(body.storeState, whiteboardLedger),
+    buildOvertimeTeachingSection(overtimeContext, body.storeState),
     '',
     `Current scene: ${currentScene?.title ?? currentScene?.id ?? 'none'}`,
     `Stage title: ${body.storeState.stage?.name ?? 'unknown'}`,
@@ -219,6 +232,7 @@ export function buildNativeChildPrompt(
   availableTools: string[],
   requestStartScene?: { sceneId: string; sceneType: string },
 ): string {
+  const overtimeContext = validateOvertimeChatContext(body.config.overtimeContext, body.storeState);
   const nativeToolInventory =
     availableTools.length === 0
       ? 'No Native tools are available. Respond with speech only.'
@@ -240,7 +254,9 @@ export function buildNativeChildPrompt(
     agent.persona,
     '',
     '# Classroom Role',
-    buildRoleGuideline(agent.role),
+    overtimeContext
+      ? 'You are the teaching agent answering one learner after class.'
+      : buildRoleGuideline(agent.role),
     '',
     buildPeerContextSection(agentResponses, agent.name),
     buildLanguageConstraint(body.storeState.stage?.languageDirective),
@@ -265,6 +281,7 @@ export function buildNativeChildPrompt(
     `Current scene: ${requestStartScene ? `${requestStartScene.sceneId} (${requestStartScene.sceneType})` : 'none'}`,
     `Stage title: ${body.storeState.stage?.name ?? 'unknown'}`,
     body.userProfile?.nickname ? `User nickname: ${body.userProfile.nickname}` : '',
+    buildOvertimeTeachingSection(overtimeContext, body.storeState),
   ]
     .filter(Boolean)
     .join('\n');

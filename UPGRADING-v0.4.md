@@ -13,6 +13,13 @@ Demo sessions remain in the browser.
   `DATABASE_URL=postgres://openmaic:openmaic-dev@127.0.0.1:5432/openmaic` in `.env.local`.
   Docker Compose includes PostgreSQL by default.
 - Preserve your current environment variables and provider configuration.
+- Model services now use server-side capability slots. Copy `openmaic.example.yml` to
+  `openmaic.yml`, reference keys as `${VAR}`, and choose the default model in `slots.llm`,
+  or configure the workspace in Settings. YAML is read at startup; restart after editing.
+  The `lock` and `allowUserKeys` options control which settings users may change.
+- Back up `data/instance-secret.key` with the database (or preserve `OPENMAIC_SECRET_KEY`
+  when set explicitly). Saved provider keys cannot be decrypted with a different secret.
+  Keep uploaded materials in `data/`; instances sharing a database must share that directory.
 
 Then install and validate the production build:
 
@@ -27,6 +34,21 @@ On the first visit, review the import prompt and choose **Start import** when yo
 **Later** leaves browser data untouched and uploads nothing. The import resumes after a
 network interruption, keeps the browser originals, and shows records it could not move.
 Settings offers the prompt again. Keep the same server and account while importing.
+The same confirmation also covers old model settings and custom agents. Provider keys are
+copied to encrypted server storage only after confirmation; unsupported settings stay local.
+
+## Server-side generation and API changes
+
+New courses use persistent server generation runs instead of browser-only generation.
+Use a long-running Node process or container, not a short-lived serverless deployment.
+Closing the tab no longer stops a course run. Overtime still uses its own checkpointed task
+and commits the appended page before storing generated media references.
+
+The former `/api/classroom`, `/api/extract-document`, `/api/web-search` and browser scene
+generation endpoints are replaced by document, material and generation-run APIs. Integrations
+must use the current API contracts. Legacy environment provider configuration still works
+without `openmaic.yml`; `MODEL_ROUTES` has no legacy fallback and must move to capability slots.
+No schema reset or destructive production migration is required.
 
 ## Access-code behavior
 

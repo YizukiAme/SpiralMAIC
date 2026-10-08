@@ -27,7 +27,10 @@ vi.mock('@/lib/export/classroom-zip-utils', async (importOriginal) => {
   };
 });
 
-import { buildClassroomExportZip } from '@/lib/export/use-export-classroom';
+import {
+  buildClassroomExportSnapshot,
+  buildClassroomExportZip,
+} from '@/lib/export/use-export-classroom';
 import type { ClassroomManifest } from '@/lib/export/classroom-zip-types';
 import type { Scene, Stage } from '@/lib/types/stage';
 
@@ -84,6 +87,33 @@ beforeEach(() => {
 });
 
 describe('buildClassroomExportZip missing-audio reporting', () => {
+  it('carries the authoritative Spiral roster through the shared snapshot and ZIP', async () => {
+    const { stage, scenes } = fixture();
+    const spiralAgent = {
+      id: 'spiral-assistant',
+      name: 'Current assistant',
+      role: 'assistant',
+      persona: 'Asks the learner to explain each step.',
+      avatar: '/avatars/assist.png',
+      color: '#6d28d9',
+      priority: 7,
+    };
+    stage.spiralAgentConfigs = [{ ...spiralAgent, name: 'Older assistant' }];
+    mocks.accessDocument.mockResolvedValue({
+      document: { stage: { ...stage, spiralAgentConfigs: [spiralAgent] } },
+    });
+
+    const snapshot = await buildClassroomExportSnapshot(stage, scenes);
+    const result = await buildClassroomExportZip(stage, scenes);
+    const zip = await JSZip.loadAsync(await result.zip.arrayBuffer());
+    const manifest = JSON.parse(
+      await zip.file('manifest.json')!.async('string'),
+    ) as ClassroomManifest;
+
+    expect(snapshot.manifest.spiralAgents?.[0]?.name).toBe('Current assistant');
+    expect(manifest.spiralAgents).toEqual(snapshot.manifest.spiralAgents);
+  });
+
   it('does not report an id-backed narration as missing when its legacy URL supplied bytes', async () => {
     const { stage, scenes } = fixture();
 

@@ -24,6 +24,7 @@ import {
 } from '@/lib/chat/pi/config';
 import { runPiDirectorLoop } from '@/lib/chat/pi/director-loop';
 import type { SendEvent } from '@/lib/chat/pi/types';
+import { requestWorkspaceId } from '@/lib/server/model-config/runtime';
 import { resolveModel } from '@/lib/server/resolve-model';
 import { parseExternalCodexLogicalSession } from '@/lib/server/codex/logical-session';
 import { parseUserStageRoutes } from '@/lib/server/model-routes';
@@ -155,6 +156,7 @@ async function chat(req: NextRequest, principal: OwnerPrincipal): Promise<Respon
     } = await resolveModel({
       modelString: body.model,
       stage: 'chat-adapter',
+      workspaceId: await requestWorkspaceId(req),
       // Honor the classroom-interaction per-stage override the client sends in
       // `x-model-routes`. A routed stage brings its own key and base URL; otherwise the body credentials are used (never x-* headers).
       userRoutes: parseUserStageRoutes(req.headers.get('x-model-routes')),
@@ -246,11 +248,11 @@ async function chat(req: NextRequest, principal: OwnerPrincipal): Promise<Respon
         log.warn('Native whiteboard capability unavailable: persistence initialization failed');
       }
     }
-    let nativeWebSearchConfig: ReturnType<typeof resolveClassroomWebSearchConfig>;
+    let nativeWebSearchConfig: Awaited<ReturnType<typeof resolveClassroomWebSearchConfig>>;
     try {
       nativeWebSearchConfig =
         childRuntimeMode === 'native'
-          ? resolveClassroomWebSearchConfig({
+          ? await resolveClassroomWebSearchConfig(await requestWorkspaceId(req), {
               webSearchProviderId: body.webSearchProviderId,
               webSearchApiKey: body.webSearchApiKey,
               webSearchBaseUrl: body.webSearchBaseUrl,

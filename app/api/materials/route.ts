@@ -32,9 +32,18 @@ import { withAccessCode } from '@/lib/server/with-access-code';
  *   upload's 24-hour sweep.
  * - Every response echoes the `x-request-id` header so the uploader can pair
  *   a failure with its log line.
+ * - Extraction starts with the upload: the row is finalized `extracting` and
+ *   the background extractor (`lib/server/materials/extraction.ts`) extracts
+ *   it; `GET /api/materials/{id}` reports its state. `?extract=false` defers
+ *   it (`idle`): a run that uses the material starts it then.
  *
- * The configured runtime gates the family (the workbench is agent-runtime
- * territory): off, or on without a DATABASE_URL, answers the same plain 404.
+ * Gates: the upload writes only the owner-scoped material library, so it is
+ * served whenever server persistence is configured (a DATABASE_URL), with the
+ * agent runtime on or off — `POST /api/generate-classroom` consumes these
+ * uploads by id; so is the owner's own list (no `sessionId`). A session's
+ * list stays behind the agent runtime gate: it names an agent session
+ * (`sessionId`) and reads that session's materials, which only exist with
+ * the runtime on. Either gate closed answers the same plain 404.
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { basename } from 'node:path';
@@ -45,7 +54,10 @@ import { NextResponse } from 'next/server';
 import { createMaterialId } from '@openmaic/storage';
 import type { ConnectableQueryable } from '@openmaic/storage/server/reference';
 
-import { isAgentRuntimeConfigured } from '@/lib/config/feature-flags';
+import {
+  isAgentRuntimeConfigured,
+  isServerPersistenceConfigured,
+} from '@/lib/config/feature-flags';
 import { apiError } from '@/lib/server/api-response';
 import { agentRuntimeConfig } from '@/lib/server/agent-runtime/config';
 import { ownerJson, ownerNotFound } from '@/lib/server/agent-runtime/route-response';
@@ -58,6 +70,7 @@ import {
 import {
   abandonOwnerMaterial,
   finalizeOwnerMaterial,
+  listOwnerMaterials,
   MaterialQuotaExceededError,
   publicMaterial,
   reclaimStaleOwnerMaterialUploads,
@@ -65,7 +78,12 @@ import {
 } from '@/lib/persistence/owner-materials';
 import { ownerWriteErrorResponse } from '@/lib/persistence/owner-merges';
 import { getServerPersistenceProvider } from '@/lib/persistence/server-provider';
-import { getMaterialByteStore } from '@/lib/server/materials/bytes';
+import { deleteMaterialObjects, getMaterialByteStore } from '@/lib/server/materials/bytes';
+import { wakeOwnerMaterialExtractor } from '@/lib/server/materials/extractor-wake';
+import {
+  MATERIAL_DOCUMENT_UPLOAD_LIMIT,
+  MATERIAL_MEDIA_UPLOAD_LIMIT,
+} from '@/lib/server/materials/upload-limits';
 import {
   isWorkbenchMaterialMime,
   MEDIA_MIME_TYPES,
@@ -73,13 +91,7 @@ import {
 } from '@/lib/workbench/material-upload-policy';
 
 export const runtime = 'nodejs';
-export const GET = withAccessCode(GETHandler);
-export const POST = withAccessCode(POSTHandler);
 
-const DOCUMENT_UPLOAD_LIMIT = Math.min(
-  agentRuntimeConfig.maxDocumentBytes,
-  agentRuntimeConfig.maxUploadBytes,
-);
 const MEDIA_MIME_SET = new Set<string>(MEDIA_MIME_TYPES);
 
 /** The store's keyset-paging ceiling (default 50, capped at 200). */
@@ -136,14 +148,28 @@ function parseLimit(raw: string | null): { limit?: number } | { invalid: true } 
   return { limit: parsed };
 }
 
+// GET /api/materials — the caller's own library uploads, newest first, each
+// with its extraction (served with server persistence).
 // GET /api/materials?sessionId=&limit=&before= — list one owned session's
 // materials, newest first, keyset-paged (the agent-tools list surface).
 async function GETHandler(req: NextRequest) {
+  const searchParams = new URL(req.url).searchParams;
+  // A session named but empty is a mistake, not a request for the library.
+  if (searchParams.has('sessionId') && !searchParams.get('sessionId')?.trim()) {
+    return apiError('MISSING_REQUIRED_FIELD', 400, 'sessionId must not be empty');
+  }
+  if (!searchParams.has('sessionId')) {
+    if (!isServerPersistenceConfigured()) return new Response('Not found', { status: 404 });
+    return withRequestOwner(req, async ({ ownerId }, responseHeaders) => {
+      const provider = await getServerPersistenceProvider(process.env.DATABASE_URL ?? '');
+      const records = await listOwnerMaterials(provider.pool, ownerId);
+      return ownerJson({ materials: records.map(publicMaterial) }, 200, responseHeaders);
+    });
+  }
   if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
 
   const url = new URL(req.url);
-  const sessionId = url.searchParams.get('sessionId')?.trim();
-  if (!sessionId) return apiError('MISSING_REQUIRED_FIELD', 400, 'sessionId is required');
+  const sessionId = url.searchParams.get('sessionId')!.trim();
 
   const parsedLimit = parseLimit(url.searchParams.get('limit'));
   if ('invalid' in parsedLimit) {
@@ -201,11 +227,14 @@ async function POSTHandler(req: NextRequest) {
     return response;
   };
 
-  if (!isAgentRuntimeConfigured()) return new Response('Not found', { status: 404 });
+  if (!isServerPersistenceConfigured()) return new Response('Not found', { status: 404 });
 
   return withRequestOwner(req, async ({ ownerId }, responseHeaders) => {
     try {
       phase = 'validate_request';
+      // Extraction starts with the upload unless the uploader defers it (the
+      // agent workspace, which extracts what a session binds itself).
+      const extract = new URL(req.url).searchParams.get('extract') !== 'false';
       const rawMime = (req.headers.get('content-type') ?? '').split(';', 1)[0];
       declaredMime = rawMime;
       const originalName = materialFilename(req);
@@ -226,8 +255,8 @@ async function POSTHandler(req: NextRequest) {
         );
       }
       const uploadLimit = MEDIA_MIME_SET.has(mime)
-        ? agentRuntimeConfig.maxUploadBytes
-        : DOCUMENT_UPLOAD_LIMIT;
+        ? MATERIAL_MEDIA_UPLOAD_LIMIT
+        : MATERIAL_DOCUMENT_UPLOAD_LIMIT;
 
       declaredBytes = Number(req.headers.get('content-length') ?? 0);
       if (Number.isFinite(declaredBytes) && declaredBytes > uploadLimit) {
@@ -272,7 +301,7 @@ async function POSTHandler(req: NextRequest) {
         ownerId,
         async (objectKey) => {
           try {
-            await byteStore.delete(objectKey);
+            await deleteMaterialObjects(byteStore, objectKey);
           } catch (error) {
             console.warn(
               'material stale byte deletion failed; keeping its reservation for the next pass',
@@ -380,7 +409,9 @@ async function POSTHandler(req: NextRequest) {
           createdMaterialId,
           bytes.byteLength,
           hash,
+          { extract },
         );
+        if (extract) wakeOwnerMaterialExtractor();
         const view = publicMaterial(row);
         const res = NextResponse.json(
           {
@@ -388,6 +419,7 @@ async function POSTHandler(req: NextRequest) {
             originalName: view.originalName,
             bytes: view.bytes,
             mime: view.mime,
+            mediaKind: view.mediaKind,
             extraction: view.extraction,
           },
           { status: 201 },
@@ -446,3 +478,6 @@ async function readMeteredBody(req: NextRequest, limit: number): Promise<Buffer>
   }
   return Buffer.concat(chunks);
 }
+
+export const GET = withAccessCode(GETHandler);
+export const POST = withAccessCode(POSTHandler);

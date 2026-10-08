@@ -18,7 +18,6 @@ import Dexie, { type EntityTable, type Table } from 'dexie';
 import type {
   AudioFileRecord,
   AutoVoiceCacheRecord,
-  ImageFileRecord,
   MediaFileRecord,
   Snapshot,
   VoiceProfileRecord,
@@ -48,11 +47,20 @@ export type {
   AudioFileRecord,
   AutoVoiceCacheRecord,
   FolderRecord,
-  ImageFileRecord,
   MediaFileRecord,
   Snapshot,
   VoiceProfileRecord,
 };
+
+/** Image bytes 1.1.x staged between upload and generation. Never imported. */
+export interface ImageFileRecord {
+  id: string;
+  blob: Blob | ArrayBuffer;
+  filename: string;
+  mimeType: string;
+  size: number;
+  createdAt: number;
+}
 
 /**
  * Stage table - Course basic info

@@ -1,5 +1,5 @@
 import { CURRENT_SLIDE_CONTENT_SCHEMA_VERSION } from '@/lib/edit/slide-schema';
-import { fetchSceneContent } from '@/lib/hooks/use-scene-generator';
+import { fetchSceneContent } from '@/lib/overtime/generation-client';
 import type { RevisitExamBlueprint, RevisitSkeletonPage } from '@/lib/revisit/types';
 import type { GeneratedSlideContent, SceneOutline } from '@/lib/types/generation';
 import type { Scene, Stage } from '@/lib/types/stage';
@@ -191,8 +191,7 @@ async function requestSkeletonSlideContent(args: {
   timeoutMs: number;
   signal?: AbortSignal;
 }): Promise<GeneratedSlideContent> {
-  // Delegate to the normal classroom generation client (fetchSceneContent):
-  // same headers, retry/backoff, and error taxonomy as forward generation.
+  // Share the appended-page content adapter's retry/backoff and error taxonomy.
   // Revisit only adds a whole-page time budget and forces thinking off —
   // sparse outline pages gain nothing from provider reasoning, which pushed
   // per-page latency past any sane budget.

@@ -1,4 +1,5 @@
 import { withAccessCode } from '@/lib/server/with-access-code';
+
 /**
  * Media Proxy API
  *
@@ -20,8 +21,6 @@ import { apiError } from '@/lib/server/api-response';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('ProxyMedia');
-
-export const maxDuration = 60;
 
 async function POSTHandler(request: NextRequest) {
   let url: string | undefined;
@@ -118,3 +117,4 @@ async function POSTHandler(request: NextRequest) {
 }
 
 export const POST = withAccessCode(POSTHandler);
+export const maxDuration = 60;

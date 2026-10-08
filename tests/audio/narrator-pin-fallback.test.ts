@@ -11,8 +11,9 @@
  */
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 
+import { setModelSettingsViewForTests } from '../helpers/model-settings-view';
+
 const mocks = vi.hoisted(() => ({
-  getCurrentModelConfig: vi.fn(),
   settingsState: vi.fn(),
   audioPut: vi.fn(),
   audioDelete: vi.fn(),
@@ -24,11 +25,6 @@ const mocks = vi.hoisted(() => ({
   resolveAgentVoiceOptions: vi.fn(),
   listAgents: vi.fn(),
   toastWarning: vi.fn(),
-}));
-
-vi.mock('@/lib/utils/model-config', () => ({
-  getCurrentModelConfig: mocks.getCurrentModelConfig,
-  getStageRoutesHeaderValue: () => undefined,
 }));
 
 vi.mock('@/lib/store/settings', () => ({
@@ -127,7 +123,6 @@ describe('generateAndStoreTTS — pinned narrator fallback (bound == global)', (
     mocks.poolPut.mockReset().mockResolvedValue('ast_audio_allocated');
     mocks.poolReplace.mockReset().mockResolvedValue(undefined);
     mocks.poolRemove.mockReset().mockResolvedValue(undefined);
-    mocks.getCurrentModelConfig.mockReturnValue({});
     mocks.pickNarratorAgent.mockReturnValue(undefined);
     mocks.resolveAgentVoiceOptions.mockResolvedValue({});
     mocks.listAgents.mockReturnValue([]);
@@ -136,14 +131,18 @@ describe('generateAndStoreTTS — pinned narrator fallback (bound == global)', (
   });
 
   it('falls back with a notice when the pinned ghost clone is missing (bound == global)', async () => {
-    const { generateAndStoreTTS } = await import('@/lib/hooks/use-scene-generator');
+    const { generateAndStoreTTS } = await import('@/lib/audio/narration-tts');
     mocks.settingsState.mockReturnValue({
-      ttsProviderId: 'qwen-tts',
+      ttsVoiceProviderId: 'qwen-tts',
       ttsProvidersConfig: {
         'qwen-tts': { apiKey: 'tts-key', modelId: QWEN_TTS_VOICE_CLONE_MODEL },
       },
       ttsVoice: 'clone-ghost',
       ttsSpeed: 1,
+    });
+    // The workspace's tts slot resolves to this provider.
+    setModelSettingsViewForTests({
+      tts: { registryId: 'qwen-tts', modelId: QWEN_TTS_VOICE_CLONE_MODEL },
     });
     // Everything enabled → the deterministic pick is the first enabled provider
     // in canonical order: openai-tts / 'marin'.
@@ -175,21 +174,24 @@ describe('generateAndStoreTTS — pinned narrator fallback (bound == global)', (
     const secondBody = JSON.parse(String(mockFetch.mock.calls[1][1]?.body));
     expect(firstBody).toMatchObject({
       ttsVoice: 'clone-ghost',
-      ttsModelId: QWEN_TTS_VOICE_CLONE_MODEL,
     });
     expect(secondBody).toMatchObject({ ttsVoice: 'marin' });
     expect(mocks.toastWarning).toHaveBeenCalledOnce();
   });
 
   it('falls back to the enabled provider instead of silently skipping when the pinned provider is disabled', async () => {
-    const { generateAndStoreTTS } = await import('@/lib/hooks/use-scene-generator');
+    const { generateAndStoreTTS } = await import('@/lib/audio/narration-tts');
     mocks.settingsState.mockReturnValue({
-      ttsProviderId: 'qwen-tts',
+      ttsVoiceProviderId: 'qwen-tts',
       ttsProvidersConfig: {
         'qwen-tts': { apiKey: '', modelId: QWEN_TTS_VOICE_CLONE_MODEL },
       },
       ttsVoice: 'clone-pinned',
       ttsSpeed: 1,
+    });
+    // The workspace's tts slot resolves to this provider.
+    setModelSettingsViewForTests({
+      tts: { registryId: 'qwen-tts', modelId: QWEN_TTS_VOICE_CLONE_MODEL },
     });
     // qwen unconfigured/disabled; openai enabled → deterministic pick = openai/marin.
     mocks.isTTSProviderEnabled.mockImplementation(
@@ -224,7 +226,6 @@ describe('generateAndStoreTTS — bound clone dead, global clone dead (review fi
     mocks.poolPut.mockReset().mockResolvedValue('ast_audio_allocated');
     mocks.poolReplace.mockReset().mockResolvedValue(undefined);
     mocks.poolRemove.mockReset().mockResolvedValue(undefined);
-    mocks.getCurrentModelConfig.mockReturnValue({});
     mocks.pickNarratorAgent.mockReturnValue(undefined);
     mocks.resolveAgentVoiceOptions.mockResolvedValue({});
     mocks.listAgents.mockReturnValue([]);
@@ -233,14 +234,18 @@ describe('generateAndStoreTTS — bound clone dead, global clone dead (review fi
   });
 
   it('rejects after exactly 2 attempts when the bound clone differs from the global clone and both are missing', async () => {
-    const { generateAndStoreTTS } = await import('@/lib/hooks/use-scene-generator');
+    const { generateAndStoreTTS } = await import('@/lib/audio/narration-tts');
     mocks.settingsState.mockReturnValue({
-      ttsProviderId: 'qwen-tts',
+      ttsVoiceProviderId: 'qwen-tts',
       ttsProvidersConfig: {
         'qwen-tts': { apiKey: 'tts-key', modelId: QWEN_TTS_VOICE_CLONE_MODEL },
       },
       ttsVoice: 'clone-global-dead',
       ttsSpeed: 1,
+    });
+    // The workspace's tts slot resolves to this provider.
+    setModelSettingsViewForTests({
+      tts: { registryId: 'qwen-tts', modelId: QWEN_TTS_VOICE_CLONE_MODEL },
     });
     // Bound voice differs from the global voice; every synthesis is missing.
     mocks.isTTSProviderEnabled.mockReturnValue(true);
@@ -268,11 +273,9 @@ describe('generateAndStoreTTS — bound clone dead, global clone dead (review fi
     const secondBody = JSON.parse(String(mockFetch.mock.calls[1][1]?.body));
     expect(firstBody).toMatchObject({
       ttsVoice: 'clone-bound-dead',
-      ttsModelId: QWEN_TTS_VOICE_CLONE_MODEL,
     });
     expect(secondBody).toMatchObject({
       ttsVoice: 'clone-global-dead',
-      ttsModelId: QWEN_TTS_VOICE_CLONE_MODEL,
     });
     expect(mocks.toastWarning).toHaveBeenCalledOnce();
   });

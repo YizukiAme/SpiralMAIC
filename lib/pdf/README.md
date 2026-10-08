@@ -146,14 +146,11 @@ await generateSceneOutlinesFromRequirements(
   aiCall,
 );
 
-// 4. 生成场景（含图片）
-await buildSceneFromOutline(
-  outline,
-  aiCall,
-  stageId,
-  assignedImages, // 从 pdfImages 筛选
-  imageMapping, // 用于解析 img_1 到实际 URL
-);
+// 4. Generate a scene's content (with images)
+await generateSceneContent(outline, aiCall, {
+  assignedImages, // filtered from pdfImages
+  imageMapping, // resolves img_1 to the actual image
+});
 ```
 
 ## 图片处理流程
@@ -169,30 +166,24 @@ MinerU 的图片处理：
 
 ## 配置
 
-### 全局设置
+Document extraction is the workspace's `document` slot, resolved on the
+server; the browser keeps no extractor settings and requests name no
+provider, key or base URL. Configure it in `openmaic.yml` (or per workspace
+in Settings → Model Services and Course Model Config):
 
-```typescript
-import { useSettingsStore } from '@/lib/store/settings';
-
-useSettingsStore.setState({
-  pdfProviderId: 'mineru',
-  pdfProvidersConfig: {
-    mineru: {
-      baseUrl: 'http://localhost:8080',
-      apiKey: 'optional-if-needed',
-    },
-  },
-});
+```yaml
+providers:
+  mineru:
+    preset: mineru
+    baseUrl: http://localhost:8080   # self-hosted MinerU: deployment only
+    apiKey: ${MINERU_API_KEY}        # optional
+slots:
+  document: mineru
 ```
 
-### 请求级配置
-
-```typescript
-// 在 API 调用时覆盖全局设置
-formData.append('providerId', 'mineru');
-formData.append('baseUrl', 'http://your-server:8080');
-formData.append('apiKey', 'optional');
-```
+`/api/parse-pdf` takes only the file; with the `document` slot unassigned the
+server picks a built-in extractor for the file type. (The request fields `providerId`, `apiKey` and `baseUrl` are still
+accepted from API clients while the slot is unassigned, and are deprecated.)
 
 ## 添加新的提供商
 

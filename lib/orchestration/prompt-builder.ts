@@ -189,7 +189,7 @@ export function buildStructuredPrompt(
   );
 }
 
-function buildOvertimeTeachingSection(
+export function buildOvertimeTeachingSection(
   context: OvertimeChatContext | undefined,
   storeState: StatelessChatRequest['storeState'],
 ): string {
@@ -213,7 +213,7 @@ Do not call the action merely because it is available. Prefer no action for smal
 Calling request_learning_extension submits a generation request; it does not mean the page is ready. When you call it, say only that the request was submitted and the page is being prepared. Never say it has already been generated, is visible, or is ready. The application state is the only source of truth for planning, generation, failure, and readiness.`;
 }
 
-function buildOvertimeStateContext(storeState: StatelessChatRequest['storeState']): string {
+export function buildOvertimeStateContext(storeState: StatelessChatRequest['storeState']): string {
   return `# Current State
 Mode: post-class overtime
 Course: ${storeState.stage?.name || 'Untitled course'}

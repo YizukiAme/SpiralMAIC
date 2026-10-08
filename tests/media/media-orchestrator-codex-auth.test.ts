@@ -36,8 +36,21 @@ const mocks = vi.hoisted(() => {
   };
 });
 
-vi.mock('@/lib/store/settings', () => ({
-  useSettingsStore: { getState: () => mocks.settingsState },
+vi.mock('@/lib/model-settings/capabilities', () => ({
+  currentModelCapabilities: () => ({ image: { registryId: mocks.settingsState.imageProviderId } }),
+  requireModelCapabilities: async () => ({
+    image: mocks.settingsState.imageGenerationEnabled
+      ? { registryId: mocks.settingsState.imageProviderId }
+      : null,
+    video: null,
+  }),
+}));
+vi.mock('@/lib/client/codex-oauth', () => ({
+  syncServerProvidersAfterAccessUnlock: () =>
+    mocks.settingsState.fetchServerProviders({ reconcileOAuthImageSelectionImmediately: true }),
+}));
+vi.mock('@/lib/classroom/generation-permission', () => ({
+  mayGenerateForStage: () => true,
 }));
 
 vi.mock('@/lib/store/media-generation', () => ({
@@ -71,13 +84,24 @@ vi.mock('@/lib/media/pending-media-allocations', async (importOriginal) => ({
 
 vi.mock('@/lib/document-store', () => {
   const document = {
-    stage: { id: 'stage-1', name: 'Test', createdAt: 0, updatedAt: 0 },
+    stage: {
+      id: 'stage-1',
+      name: 'Test',
+      createdAt: 0,
+      updatedAt: 0,
+      whiteboard: [
+        { elements: ['image-1', 'image-2'].map((id) => ({ type: 'image', id, src: id })) },
+      ],
+    },
     scenes: [],
   };
   return {
     accessDocument: vi.fn(async () => ({ document })),
     mutateDocument: vi.fn(async (_stageId, work) =>
-      work(document, { saveDocument: vi.fn(async () => undefined) }),
+      work(document, {
+        putStage: vi.fn(async () => undefined),
+        putScene: vi.fn(async () => undefined),
+      }),
     ),
   };
 });
@@ -99,7 +123,7 @@ vi.mock('@/lib/logger', () => ({
   }),
 }));
 
-import { generateMediaForOutlines } from '@/lib/media/media-orchestrator';
+import { generateMediaForScene } from '@/lib/media/media-orchestrator';
 import type { SceneOutline } from '@/lib/types/generation';
 
 function imageOutline(...elementIds: string[]): SceneOutline[] {
@@ -113,6 +137,12 @@ function imageOutline(...elementIds: string[]): SceneOutline[] {
       })),
     } as SceneOutline,
   ];
+}
+
+async function generateMediaForOutlines(outlines: SceneOutline[], stageId: string) {
+  for (const request of outlines.flatMap((outline) => outline.mediaGenerations ?? [])) {
+    await generateMediaForScene(request, stageId);
+  }
 }
 
 describe('media orchestrator Codex auth invalidation', () => {
@@ -238,7 +268,10 @@ describe('media orchestrator Codex auth invalidation', () => {
     );
     vi.stubGlobal('fetch', fetchMock);
 
-    await generateMediaForOutlines(imageOutline('image-1', 'image-2'), 'stage-1');
+    const generating = generateMediaForOutlines(imageOutline('image-1', 'image-2'), 'stage-1');
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    releaseSync();
+    await generating;
 
     expect(mocks.settingsState).toMatchObject({
       imageProviderId: '',
@@ -246,7 +279,6 @@ describe('media orchestrator Codex auth invalidation', () => {
       imageGenerationEnabled: false,
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    releaseSync();
   });
 
   it('logs validated Codex failure diagnostics without changing or persisting the safe error', async () => {

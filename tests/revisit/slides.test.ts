@@ -132,7 +132,7 @@ describe('revisit skeleton slide scenes', () => {
     expect(scene.content.canvas.background).toEqual({ type: 'solid', color: '#123456' });
   });
 
-  test('generates skeleton slides through the normal scene-content route progressively', async () => {
+  test('generates skeleton slides through the owner-scoped scene-content adapter progressively', async () => {
     const onScene = vi.fn();
     const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
       const body = JSON.parse(String(init.body)) as { outline: { title: string } };
@@ -173,7 +173,7 @@ describe('revisit skeleton slide scenes', () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/generate/scene-content',
+      '/api/overtime/scene-content',
       expect.objectContaining({ method: 'POST' }),
     );
     const requestBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));

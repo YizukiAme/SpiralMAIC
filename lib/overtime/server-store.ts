@@ -13,6 +13,7 @@ import { upsertRevisitLessonConceptsForStage } from '@/lib/revisit/server-store'
 import type { LessonConcept } from '@/lib/revisit/types';
 import type { SceneOutline } from '@/lib/types/generation';
 import type { Scene, Stage } from '@/lib/types/stage';
+import { sanitizeSceneContent } from '@/lib/server/sanitize-scene-content';
 
 import type { OvertimeExtension } from './types';
 
@@ -65,7 +66,7 @@ export async function deleteOvertimeForStage(tx: Queryable, stageId: string): Pr
 }
 
 function versioned(row: OvertimeRow): VersionedOvertimeExtension {
-  return { extension: row.body, version: Number(row.version) };
+  return { extension: sanitizeSceneContent(row.body), version: Number(row.version) };
 }
 
 function validId(value: string): boolean {
@@ -114,7 +115,8 @@ export function createServerOvertimeStore(options: {
       'SELECT body, version, stage_id, lease_token, lease_expires_at FROM overtime_extensions WHERE id = $1 FOR UPDATE',
       [id],
     );
-    return rows.rows[0] ?? null;
+    const row = rows.rows[0];
+    return row ? { ...row, body: sanitizeSceneContent(row.body) } : null;
   }
 
   function assertLease(row: OvertimeRow, token: string, now: number): void {
@@ -308,7 +310,7 @@ export function createServerOvertimeStore(options: {
         const now = args.now ?? Date.now();
         assertLease(current, args.leaseToken, now);
         const { phase, status, updatedAt, plan, outline, content, scene, error } = args.patch;
-        const next: OvertimeExtension = {
+        const next: OvertimeExtension = sanitizeSceneContent({
           ...current.body,
           phase,
           status,
@@ -322,7 +324,7 @@ export function createServerOvertimeStore(options: {
             : error === undefined
               ? {}
               : { error }),
-        };
+        });
         const result = await tx.query<OvertimeRow>(
           `UPDATE overtime_extensions SET body = $2::jsonb, status = $3, version = version + 1,
             lease_token = CASE WHEN $3 IN ('failed', 'interrupted') THEN NULL ELSE lease_token END,
@@ -390,7 +392,7 @@ export function createServerOvertimeStore(options: {
         if (args.concepts?.length) {
           await upsertRevisitLessonConceptsForStage(tx, ownerId, stageId, args.concepts);
         }
-        const ready: OvertimeExtension = {
+        const ready: OvertimeExtension = sanitizeSceneContent({
           ...extension,
           status: 'ready',
           phase: 'commit',
@@ -399,7 +401,7 @@ export function createServerOvertimeStore(options: {
           error: undefined,
           updatedAt: now,
           completedAt: now,
-        };
+        });
         const result = await tx.query<OvertimeRow>(
           `UPDATE overtime_extensions SET body = $2::jsonb, status = 'ready', version = version + 1,
             lease_token = NULL, lease_expires_at = NULL
@@ -420,11 +422,11 @@ export function createServerOvertimeStore(options: {
         const conflictingIds: string[] = [];
         for (const source of args.extensions) {
           if (!validId(source.id)) throw new OvertimeConflictError('Invalid overtime task id.');
-          const extension: OvertimeExtension = {
+          const extension: OvertimeExtension = sanitizeSceneContent({
             ...source,
             stageId: args.stageId,
             ...(source.scene ? { scene: { ...source.scene, stageId: args.stageId } } : {}),
-          };
+          });
           const result = await tx.query<{ id: string } & Record<string, unknown>>(
             `INSERT INTO overtime_extensions (id, stage_id, sequence, reserved_order, status, body)
              VALUES ($1, $2, $3, $4, $5, $6::jsonb)

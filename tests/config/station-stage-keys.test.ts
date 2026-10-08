@@ -17,24 +17,19 @@ const interactionRoute: UserStageRoute = { model: 'minimax-m2.7' };
  * Stages intentionally not covered by any Course Model Config station. Each
  * exception is deliberate, not a missed knob:
  * - conversation-title: reuses the agent-driver connection, not a course stage;
- * - generate-classroom / maic-agent: mainline / legacy entry points;
  * - maic-agent-driver: operator-only. It is resolved exclusively from the
  *   operator's MODEL_ROUTES (with an explicit api dialect and contextWindow) in
  *   agent-runtime/agent-driver-model.ts, so the UI deliberately offers no
  *   user-level override for it.
- * - revisit-* / overtime-outline: Spiral's post-class learning stages retain
- *   their main-model fallback; the course-generation stations do not control
- *   them. Explicit operator MODEL_ROUTES remain available independently.
  */
 const STAGES_WITHOUT_A_STATION = [
   'conversation-title',
-  'generate-classroom',
-  'maic-agent',
   'maic-agent-driver',
   'revisit-blueprint',
   'revisit-judge',
   'revisit-materials',
   'overtime-outline',
+  'pbl-chat',
 ] as const;
 
 /** 模拟 UI 写入：互动站点覆盖时整组键一起落同一个路由。 */
@@ -77,14 +72,6 @@ describe('station stage keys contract', () => {
     const covered = new Set(Object.values(STATION_STAGE_KEYS).flat());
     expect(covered.has('maic-agent-driver')).toBe(false);
   });
-
-  it.each(['revisit-blueprint', 'revisit-judge', 'revisit-materials', 'overtime-outline'])(
-    'course station overrides leave Spiral stage %s following the main model',
-    (stage) => {
-      const routes = routesFor(Object.values(STATION_STAGE_KEYS).flat());
-      expect(getUserStageRoute(routes, stage)).toBeUndefined();
-    },
-  );
 });
 
 describe('classroom interaction override reaches every runtime stage (review P0)', () => {
@@ -93,7 +80,6 @@ describe('classroom interaction override reaches every runtime stage (review P0)
   it.each([
     'chat-adapter',
     'quiz-grade',
-    'pbl-chat',
     'pbl-v2-runtime',
     'pbl-v2-runtime:instructor',
     'pbl-v2-runtime:open-task',

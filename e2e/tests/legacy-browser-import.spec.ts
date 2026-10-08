@@ -99,7 +99,7 @@ async function seedLegacyDatabase(page: Page, stageId: string, name: string): Pr
   );
 }
 
-test('a course stored only in the browser moves to the server on first load', async ({
+test('a course stored only in the browser moves to the server only after confirmation', async ({
   page,
   browser,
 }) => {
@@ -107,14 +107,31 @@ test('a course stored only in the browser moves to the server on first load', as
   const stageId = uniqueStageId('legacy-import-e2e');
   const name = `Legacy course ${stageId.slice(-8)}`;
   await seedLegacyDatabase(page, stageId, name);
+  const uploads: string[] = [];
+  page.on('request', (request) => {
+    const path = new URL(request.url()).pathname;
+    if (
+      request.method() !== 'GET' &&
+      (path.startsWith('/api/persistence/') || path === '/api/identity/legacy-import-binding')
+    ) {
+      uploads.push(`${request.method()} ${path}`);
+    }
+  });
 
   await page.goto('/');
+  await expect(page.getByRole('button', { name: /Start import|开始导入/ })).toBeVisible();
   await expect(page.getByText(name).first()).not.toBeVisible();
   expect(await readServerDocument(page, stageId)).toBeNull();
+  expect(uploads).toEqual([]);
+  expect(
+    await page.evaluate(() => localStorage.getItem('spiral:legacy-import-consent:v1')),
+  ).toBeNull();
   await page.getByRole('button', { name: /Start import|开始导入/ }).click();
 
   // The course appears once the approved import has run.
   await expect(page.getByText(name).first()).toBeVisible({ timeout: 60_000 });
+  expect(uploads).toContain('POST /api/identity/legacy-import-binding');
+  expect(uploads.some((request) => request.startsWith('POST /api/persistence/assets'))).toBe(true);
 
   // On the server, its narration now names an allocated asset whose bytes
   // are the clip that was only in the browser.

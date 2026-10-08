@@ -1,5 +1,6 @@
 import type { PersistedAgentConfig, Stage } from '@/lib/types/stage';
 import type { RevisitAttemptStatus } from '@/lib/revisit/types';
+import { FORMAL_REVISIT_SCOPE, type RevisitDataScope } from '@/lib/revisit/scope';
 import { mutateDocument } from '@/lib/document-store';
 import {
   applyGeneratedAgentsToRegistry,
@@ -80,10 +81,13 @@ export async function saveStageSpiralAgents(
   stageId: string,
   agents: readonly PersistedAgentConfig[],
   now = Date.now(),
+  scope: RevisitDataScope = FORMAL_REVISIT_SCOPE,
 ): Promise<void> {
   if (!isValidSpiralAgentRoster(agents)) {
     throw new Error('Invalid Spiral agent roster.');
   }
+  // Demo keeps its roster in the local attempt snapshot, not the formal course.
+  if (scope.kind === 'demo') return;
   await mutateDocument(stageId, async (document, store) => {
     if (!document) throw new Error(`Could not persist Spiral agents for stage ${stageId}.`);
     const nextStage: Stage = {

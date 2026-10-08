@@ -31,15 +31,30 @@ pnpm install
 cp .env.example .env.local
 ```
 
-Откройте `.env.local` и заполните данные провайдера, для которого у вас есть ключ. Например:
+Затем настройте модель. Проще всего с файлом: положите рядом с `.env.local` минимальный `openmaic.yml`, а ключ запишите в `.env.local`:
 
 ```bash title=".env.local"
 OPENAI_API_KEY=sk-...
-# или
-ANTHROPIC_API_KEY=sk-ant-...
-# или локальный Ollama (ключ не требуется)
-OLLAMA_BASE_URL=http://localhost:11434/v1
 ```
+
+```yaml title="openmaic.yml"
+providers:
+  openai:
+    preset: openai
+    apiKey: ${OPENAI_API_KEY}
+
+slots:
+  llm: openai:gpt-5.5
+```
+
+`openmaic.example.yml` — та же отправная точка, в которой дополнительные провайдеры и слоты закомментированы. Без файла устаревшие переменные провайдеров продолжают работать, если `DEFAULT_MODEL` указывает модель:
+
+```bash title=".env.local"
+ANTHROPIC_API_KEY=sk-ant-...
+DEFAULT_MODEL=anthropic:claude-sonnet-4-6
+```
+
+Чтобы обойтись без того и другого, запустите приложение и введите ключ тарифа в **Настройки → Token Plan** или ключ сервиса в **Настройки → Сервисы моделей**. Без `openmaic.yml`, `DEFAULT_MODEL` или настроенного там сервиса модель не настроена, и генерация завершится ошибкой.
 
 Полные настройки провайдеров, генерации изображений/видео, TTS, ASR, парсинга документов, веб-поиска, контроля доступа и feature flags смотрите в разделе [Конфигурация](./configuration.mdx).
 
@@ -70,10 +85,10 @@ pnpm build
 DATABASE_URL=postgres://... pnpm start
 ```
 
-Также можно развернуть OpenMAIC на Vercel, Docker или собственном сервере — см. [Руководство по развертыванию](./deployment.mdx).
+Также можно развернуть OpenMAIC в Docker или на собственном сервере — см. [Руководство по развертыванию](./deployment.mdx).
 
 ## Дальше
 
 - [Настройка провайдера, TTS и ACCESS_CODE →](./configuration.mdx)
-- [Развёртывание на Vercel или Docker →](./deployment.mdx)
+- [Развёртывание в Docker или на собственном сервере →](./deployment.mdx)
 - Хотите узнать архитектуру или внести вклад? Посетите [GitHub](https://github.com/THU-MAIC/OpenMAIC#-contributing)

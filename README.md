@@ -82,6 +82,7 @@ cd SpiralMAIC
 corepack enable
 pnpm install
 cp .env.example .env.local
+cp openmaic.example.yml openmaic.yml
 pnpm db:up
 ```
 
@@ -91,17 +92,28 @@ Set the local database URL in `.env.local`:
 DATABASE_URL=postgres://openmaic:openmaic-dev@127.0.0.1:5432/openmaic
 ```
 
-Then start the app:
-
-```bash
-pnpm dev
-```
-
-For a quick API-key setup, add a provider to `.env.local`:
+Before starting, put your provider key in `.env.local`:
 
 ```env
 OPENAI_API_KEY=sk-...
-DEFAULT_MODEL=openai:your-model
+```
+
+In `openmaic.yml`, pick your model under `slots.llm`:
+
+```yaml
+providers:
+  openai:
+    preset: openai
+    apiKey: ${OPENAI_API_KEY}
+slots:
+  llm: openai:gpt-5.5
+```
+
+Or skip the YAML file and set up model services in the app. Settings now live on the server,
+so your next browser gets the same workspace configuration—without carrying API keys in requests.
+
+```bash
+pnpm dev
 ```
 
 Then open [http://localhost:3000](http://localhost:3000), make a classroom, and start the loop.
@@ -111,7 +123,7 @@ originals are kept; a partial import can resume without creating duplicate cours
 
 There are plenty of other options—Gemini, Anthropic, Bedrock, DeepSeek, Qwen, Kimi,
 MiniMax, GLM, Xiaomi MiMo, OpenRouter, Ollama, Lemonade, and more. The always-current list
-lives in [`.env.example`](.env.example).
+lives in [`openmaic.example.yml`](openmaic.example.yml) and [`.env.example`](.env.example).
 
 <details>
 <summary><strong>Docker, persistence, and production</strong></summary>
@@ -130,6 +142,9 @@ docker compose up --build
 ```
 
 Docker Compose includes PostgreSQL by default. The isolated MP4 render service is optional.
+Courses generate on the server and keep going when the tab closes; use a long-running Node
+process or container. Back up both PostgreSQL and `data/`, including `instance-secret.key`,
+which protects saved provider keys. Mount your `openmaic.yml` into the container if using one.
 See the [storage guide](packages/@openmaic/storage/README.md) and
 [render-service guide](render-service/README.md).
 

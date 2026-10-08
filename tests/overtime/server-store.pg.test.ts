@@ -4,6 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { validateAppScene, validateAppStage } from '@/lib/document-store/validators';
 import { createOwnerBoundDocumentStore } from '@/lib/persistence/owner-bound-document-store';
 import { getServerPersistenceProvider } from '@/lib/persistence/server-provider';
+import { ensureGenerationRunSchema } from '@/lib/persistence/generation-runs';
 import { ensureRevisitSchema } from '@/lib/revisit/server-store';
 import type { LessonConcept } from '@/lib/revisit/types';
 import { createServerOvertimeStore, OvertimeConflictError } from '@/lib/overtime/server-store';
@@ -54,6 +55,43 @@ const scene = {
   },
 } as Scene;
 
+const SAFE_HTML = '<p><strong>Motion</strong></p>';
+const EXECUTABLE_HTML = SAFE_HTML + '<img src=x onerror="alert(1)"><script>alert(1)</script>';
+
+function htmlScene(): Scene {
+  const content = scene.content as SlideContent;
+  return {
+    ...scene,
+    type: 'slide',
+    content: {
+      ...content,
+      canvas: {
+        ...content.canvas,
+        elements: [
+          {
+            id: 'overtime-text',
+            type: 'text',
+            left: 0,
+            top: 0,
+            width: 800,
+            height: 200,
+            rotate: 0,
+            defaultFontName: 'Inter',
+            defaultColor: '#111111',
+            content: EXECUTABLE_HTML,
+          },
+        ],
+      },
+    },
+  };
+}
+
+function expectSafeHtml(value: unknown): void {
+  const serialized = JSON.stringify(value);
+  expect(serialized).toContain(SAFE_HTML);
+  expect(serialized).not.toMatch(/onerror|<img|<script/i);
+}
+
 describe.skipIf(!url)('server overtime store on PostgreSQL', () => {
   let admin: Pool;
   let pool: Pool;
@@ -65,10 +103,11 @@ describe.skipIf(!url)('server overtime store on PostgreSQL', () => {
     pool = new Pool({ connectionString: url, options: `-c search_path=${schema}` });
     await getServerPersistenceProvider(`${url}?application_name=spiral-overtime-test`, () => pool);
     await ensureRevisitSchema(pool);
+    await ensureGenerationRunSchema(pool);
   });
 
   beforeEach(async () => {
-    await pool.query('TRUNCATE stage_meta, document_stages CASCADE');
+    await pool.query('TRUNCATE stage_meta, document_stages, generation_runs CASCADE');
     const store = createOwnerBoundDocumentStore<Scene, Stage>({
       pool,
       ownerId: ownerA,
@@ -97,6 +136,169 @@ describe.skipIf(!url)('server overtime store on PostgreSQL', () => {
     await pool?.end();
     await admin?.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
     await admin?.end();
+  });
+
+  async function activeRun() {
+    await pool.query(
+      `INSERT INTO generation_runs (id, owner_id, input, state, stage_id)
+      VALUES ('run-course', $1, '{}'::jsonb, 'generating', 'stage-1')`,
+      [ownerA],
+    );
+  }
+
+  it('refuses creating a task during a producing run without inserting anything, then allows a completed run', async () => {
+    const store = createServerOvertimeStore({ pool, ownerId: ownerA });
+    await activeRun();
+    const request = {
+      id: 'task-1',
+      stageId: 'stage-1',
+      userPrompt: 'Teach approach',
+      decision,
+      now: 10,
+    };
+    await expect(store.createOrGet(request)).rejects.toMatchObject({ code: 'COURSE_GENERATING' });
+    expect((await pool.query('SELECT id FROM overtime_extensions')).rows).toEqual([]);
+    expect((await pool.query('SELECT id FROM document_scenes')).rows).toEqual([{ id: 'scene-1' }]);
+    await pool.query("UPDATE generation_runs SET state = 'completed' WHERE id = 'run-course'");
+    await expect(store.createOrGet(request)).resolves.toMatchObject({
+      version: 1,
+      extension: { status: 'planning' },
+    });
+  });
+
+  it('refuses committing into a producing run atomically, then allows the same lease after completion', async () => {
+    const store = createServerOvertimeStore({ pool, ownerId: ownerA });
+    await store.createOrGet({
+      id: 'task-1',
+      stageId: 'stage-1',
+      userPrompt: 'Teach approach',
+      decision,
+      now: 10,
+    });
+    const lease = await store.claim({ id: 'task-1', version: 1, now: 11 });
+    await activeRun();
+    const request = {
+      id: 'task-1',
+      version: lease.version,
+      leaseToken: lease.leaseToken,
+      outline,
+      scene,
+      now: 20,
+    };
+    await expect(store.commit(request)).rejects.toMatchObject({ code: 'COURSE_GENERATING' });
+    expect((await pool.query('SELECT id FROM document_scenes')).rows).toEqual([{ id: 'scene-1' }]);
+    expect(await store.get('task-1')).toEqual({
+      version: lease.version,
+      extension: lease.extension,
+    });
+    await pool.query("UPDATE generation_runs SET state = 'completed' WHERE id = 'run-course'");
+    await expect(store.commit(request)).resolves.toMatchObject({ extension: { status: 'ready' } });
+  });
+
+  it('sanitizes pinned transaction reads and writes as the normal document boundary does', async () => {
+    const documents = createOwnerBoundDocumentStore<Scene, Stage>({
+      pool,
+      ownerId: ownerA,
+      validateScene: validateAppScene,
+      validateStage: validateAppStage,
+    });
+    const poisoned = { ...htmlScene(), id: 'scene-1', order: 2 };
+    await pool.query("UPDATE document_scenes SET data = $1::jsonb WHERE id = 'scene-1'", [
+      JSON.stringify(poisoned),
+    ]);
+    await documents.withMutationTransaction('stage-1', async (_tx, document) => {
+      const current = await document.loadDocument();
+      expectSafeHtml(current?.scenes);
+      await document.saveDocument({ ...current!, scenes: [poisoned] });
+    });
+    expectSafeHtml((await pool.query('SELECT data FROM document_scenes')).rows);
+  });
+
+  it('persists sanitized checkpoints so a resumed task cannot reintroduce executable slide HTML', async () => {
+    const store = createServerOvertimeStore({ pool, ownerId: ownerA });
+    await store.createOrGet({
+      id: 'task-1',
+      stageId: 'stage-1',
+      userPrompt: 'Teach approach',
+      decision,
+      now: 10,
+    });
+    const lease = await store.claim({ id: 'task-1', version: 1, now: 11 });
+    const poisoned = htmlScene();
+    const checkpoint = await store.checkpoint({
+      id: 'task-1',
+      version: lease.version,
+      leaseToken: lease.leaseToken,
+      now: 12,
+      patch: {
+        status: 'generating',
+        phase: 'tts',
+        updatedAt: 12,
+        scene: poisoned,
+        content: (poisoned.content as SlideContent).canvas,
+      },
+    });
+    expectSafeHtml(checkpoint.extension.scene);
+    expectSafeHtml(checkpoint.extension.content);
+    const rows = await pool.query<{ body: OvertimeExtension }>(
+      'SELECT body FROM overtime_extensions',
+    );
+    expectSafeHtml(rows.rows[0]?.body.scene);
+    expectSafeHtml(rows.rows[0]?.body.content);
+    const released = await store.release({ id: 'task-1', leaseToken: lease.leaseToken, now: 13 });
+    const resumed = await store.claim({ id: 'task-1', version: released.version, now: 14 });
+    expectSafeHtml(resumed.extension.scene);
+    expectSafeHtml(resumed.extension.content);
+  });
+
+  it('stores sanitized committed document rows and the durable ready-task snapshot', async () => {
+    const store = createServerOvertimeStore({ pool, ownerId: ownerA });
+    await store.createOrGet({
+      id: 'task-1',
+      stageId: 'stage-1',
+      userPrompt: 'Teach approach',
+      decision,
+      now: 10,
+    });
+    const lease = await store.claim({ id: 'task-1', version: 1, now: 11 });
+    const ready = await store.commit({
+      id: 'task-1',
+      version: lease.version,
+      leaseToken: lease.leaseToken,
+      outline,
+      scene: htmlScene(),
+      now: 20,
+    });
+    expectSafeHtml(
+      (await pool.query("SELECT data FROM document_scenes WHERE id = 'overtime-task-1'")).rows,
+    );
+    expectSafeHtml(ready.extension.scene);
+    expectSafeHtml((await pool.query('SELECT body FROM overtime_extensions')).rows);
+  });
+
+  it('sanitizes legacy imported scene and content snapshots while retaining their remapped stage', async () => {
+    const store = createServerOvertimeStore({ pool, ownerId: ownerA });
+    const poisoned = htmlScene();
+    const original: OvertimeExtension = {
+      id: 'imported-task',
+      stageId: 'legacy-stage',
+      sequence: 1,
+      reservedOrder: 3,
+      status: 'ready',
+      phase: 'commit',
+      userPrompt: 'Original',
+      decision,
+      createdAt: 1,
+      updatedAt: 2,
+      scene: { ...poisoned, stageId: 'legacy-stage' },
+      content: (poisoned.content as SlideContent).canvas,
+    };
+    await store.import({ stageId: 'stage-1', extensions: [original] });
+    const stored = await store.get('imported-task');
+    expect(stored?.extension.scene?.stageId).toBe('stage-1');
+    expectSafeHtml(stored?.extension.scene);
+    expectSafeHtml(stored?.extension.content);
+    expectSafeHtml((await pool.query('SELECT body FROM overtime_extensions')).rows);
   });
 
   it('allows one unfinished task per owned course and reserves the next order', async () => {

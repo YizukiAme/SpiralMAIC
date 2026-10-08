@@ -18,8 +18,6 @@ import { withAccessCode } from '@/lib/server/with-access-code';
  * No LLM involvement. Stateless.
  */
 
-export const maxDuration = 60;
-
 import type { NextRequest } from 'next/server';
 
 import { apiError, apiSuccess } from '@/lib/server/api-response';

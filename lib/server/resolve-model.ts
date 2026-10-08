@@ -6,10 +6,10 @@
  */
 
 import type { NextRequest } from 'next/server';
+import { resolveNativeLanguageModel } from '@/lib/server/model-config/native-language';
+import type { ModelLogicalSession } from '@/lib/server/model-config/request-context';
 import { getModel, getProvider, parseModelString, type ModelWithInfo } from '@/lib/ai/providers';
 import type { ModelServiceTier, ProviderType, ThinkingConfig } from '@/lib/types/provider';
-import { rebuildCodexModelInfo } from '@/lib/ai/codex-catalog';
-import { bindCodexLanguageModelMetadata } from '@/lib/ai/codex-model';
 import {
   isServerConfiguredProvider,
   resolveApiKey,
@@ -18,17 +18,8 @@ import {
 } from '@/lib/server/provider-config';
 import { validateClientBaseUrl, validateUrlForSSRF } from '@/lib/server/ssrf-guard';
 import { fetchWithRedirectValidation } from '@/lib/server/fetch-with-redirect-validation';
-import { getCodexOAuthAvailability } from '@/lib/server/codex/availability';
-import { getCodexAuthRuntime } from '@/lib/server/codex/runtime';
-import { createCodexResponsesTransport } from '@/lib/server/codex/transport';
-import {
-  createEphemeralCodexLogicalSession,
-  deriveCodexUpstreamSessionId,
-  type CodexLogicalSession,
-} from '@/lib/server/codex/logical-session';
 import { clientBaseUrlLlmFetch } from '@/lib/server/llm-provider-fetch';
 import {
-  getStageRoute,
   getUserStageRoute,
   parseUserStageRoutes,
   type LlmStage,
@@ -48,56 +39,34 @@ export interface ResolvedModel extends ModelWithInfo {
   baseUrl?: string;
   /** Optional per-request thinking configuration from the client. */
   thinkingConfig?: ThinkingConfig;
-  /** Server-validated Codex request tier. */
   serviceTier?: ModelServiceTier;
-  /** Only operator-selected models may use the configured fallback. */
+  /**
+   * Whether the primary comes from server configuration: a capability slot, or
+   * (on the deprecated request path) a server-configured provider. A model and
+   * key the client sent are not. Only server-managed primaries may arm the
+   * retryable-failure fallback in callLLM: a client-supplied model with a
+   * garbage key must never be allowed to burn the operator's fallback key.
+   * Callers pass this through to callLLM's `fallbackOptions.serverManaged`.
+   */
   serverManaged: boolean;
 }
 
-export interface ExpectedResolvedModel {
-  providerId: string;
-  modelId: string;
-}
-
-class ResolvedModelAssertionError extends Error {
-  readonly code = 'RESOLVED_MODEL_MISMATCH';
-
-  constructor() {
-    super('Resolved model does not match the request assertion');
-    this.name = 'ResolvedModelAssertionError';
-  }
-}
-
-export function getExpectedResolvedModelFromHeaders(
-  req: Pick<NextRequest, 'headers'>,
-): ExpectedResolvedModel | undefined {
-  const providerId = req.headers.get('x-openmaic-expected-provider');
-  const modelId = req.headers.get('x-openmaic-expected-model');
-  if (providerId === null && modelId === null) return undefined;
-  if (!providerId || !modelId) throw new ResolvedModelAssertionError();
-  return { providerId, modelId };
-}
-
-/**
- * Resolve a language model from explicit parameters.
- *
- * Use this when model config comes from the request body.
- */
-export async function resolveModel(params: {
+export interface ModelRequest {
   modelString?: string;
   /**
-   * Optional generation stage (a `callLLM` source label, e.g. 'scene-content').
-   * When set and a route is configured via `MODEL_ROUTES`, the route wins for
-   * this call — even over a client-sent `modelString` (x-model). Unrouted
-   * stages fall back to `modelString` then `DEFAULT_MODEL`. See
-   * lib/server/model-routes.ts.
+   * The generation stage (a `callLLM` source label, e.g. 'scene-content'). A
+   * stage resolves through its capability slot (lib/config/model-slots.ts):
+   * the deployment and workspace configuration first; the model the request
+   * names only when the configuration leaves the slot unassigned; then the
+   * defaults an older deployment set with DEFAULT_MODEL.
    */
   stage?: LlmStage;
+  /** Whose web settings apply; null for none. */
+  workspaceId?: string | null;
   /**
-   * User-level per-stage routes (parsed from the `x-model-routes` header by
-   * resolveModelFromHeaders/FromRequest). Precedence: operator MODEL_ROUTES >
-   * these user routes > x-model > DEFAULT_MODEL. A user route carries its own
-   * connection params (apiKey/baseUrl/providerType) for the routed provider;
+   * User-level per-stage routes (the browser's `x-model-routes`), deprecated
+   * with the other request fields. A user route carries its own connection
+   * params (apiKey/baseUrl/providerType) for the routed provider;
    * server-managed providers still resolve credentials authoritatively.
    */
   userRoutes?: Record<string, UserStageRoute>;
@@ -106,92 +75,76 @@ export async function resolveModel(params: {
   providerType?: string;
   thinkingConfig?: ThinkingConfig;
   serviceTier?: ModelServiceTier;
-  logicalSession?: CodexLogicalSession;
+  logicalSession?: ModelLogicalSession;
   expectedResolvedModel?: ExpectedResolvedModel;
-}): Promise<ResolvedModel> {
-  // Resolution order: env stage route > user stage route > x-model > DEFAULT_MODEL.
-  // A configured stage route is the operator's deliberate per-stage choice and
-  // wins even over a client-sent x-model (otherwise the browser UI, which always
-  // sends its saved model, would shadow every route). User routes (the
-  // user-facing 「课程模型配置」 per-stage selection) sit just below operator
-  // routes and above the client's main-model x-model. Unrouted stages fall back
-  // to the client x-model, then DEFAULT_MODEL. There is intentionally no hardcoded
-  // model fallback — if nothing resolves we fail loud rather than silently pick a
-  // vendor default.
-  const envRoute = getStageRoute(params.stage);
-  const userRoute = envRoute ? undefined : getUserStageRoute(params.userRoutes ?? {}, params.stage);
-  const stageRoute: UserStageRoute | undefined = envRoute ?? userRoute;
-  const stageModel = stageRoute?.model;
-  const modelString = stageModel || params.modelString || process.env.DEFAULT_MODEL;
-  if (!modelString) {
-    throw new Error(
-      'No model could be resolved. Configure DEFAULT_MODEL (and/or a MODEL_ROUTES entry for this stage), or send a model via x-model.',
+}
+
+let deprecationLogged = false;
+
+/** Why a request's own model is refused under `allowUserKeys: false`. */
+export const REQUEST_PROVIDERS_REFUSED =
+  'This server uses only the providers its configuration declares; a request cannot name its own model, key or endpoint.';
+
+/**
+ * Resolve a language model: through the stage's slot when there is a stage,
+ * else (verify-model) the model the request names. Fails loudly when nothing
+ * resolves; there is no vendor default.
+ */
+export async function resolveModel(params: ModelRequest): Promise<ResolvedModel> {
+  const { requestProvidersAllowed } = await import('@/lib/server/model-config/runtime');
+  // Under `allowUserKeys: false` users choose only among the
+  // providers openmaic.yml declares: the model, key and endpoint a request
+  // names are ignored, and only the configuration decides.
+  const allowed = requestProvidersAllowed();
+  if (params.stage) {
+    const { resolveStageModel } = await import('@/lib/server/model-config/llm');
+    const resolved = await resolveStageModel({
+      stage: params.stage,
+      workspaceId: params.workspaceId ?? null,
+      serviceTier: params.serviceTier,
+      logicalSession: params.logicalSession,
+      ...(allowed ? { legacyRequest: () => resolveRequestedModel(params) } : {}),
+    });
+    assertExpectedModel(resolved, params.expectedResolvedModel);
+    return resolved;
+  }
+  if (!allowed) throw new Error(REQUEST_PROVIDERS_REFUSED);
+  const requested = await resolveRequestedModel(params);
+  if (!requested) throw new Error('No model could be resolved: the request names none.');
+  return requested;
+}
+
+/**
+ * The model a request names with its own fields (x-model, x-api-key,
+ * x-base-url, x-provider-type, x-model-routes, or the equivalent body
+ * fields), or undefined when it names none. Deprecated: the configuration
+ * decides, and this answers only for a slot it leaves unassigned, and never
+ * under `allowUserKeys: false` (see resolveModel).
+ */
+export async function resolveRequestedModel(
+  params: ModelRequest,
+): Promise<ResolvedModel | undefined> {
+  const userRoute = getUserStageRoute(params.userRoutes ?? {}, params.stage);
+  const stageModel = userRoute?.model;
+  const modelString = stageModel || params.modelString;
+  if (!modelString) return undefined;
+  if (!deprecationLogged) {
+    deprecationLogged = true;
+    console.warn(
+      '[resolve-model] A request named its own model or key. This is deprecated: configure models in the model settings or openmaic.yml.',
     );
   }
   const { providerId, modelId } = parseModelString(modelString);
-
-  // This is an assertion only: stage routing has already selected the model
-  // above, and the expected values never participate in that selection. Keep
-  // the check before provider discovery/model construction so a mismatch
-  // cannot send a generation request upstream.
-  if (
-    params.expectedResolvedModel &&
-    (params.expectedResolvedModel.providerId !== providerId ||
-      params.expectedResolvedModel.modelId !== modelId)
-  ) {
-    throw new ResolvedModelAssertionError();
-  }
-
-  if (providerId === 'openai-codex') {
-    const availability = await getCodexOAuthAvailability();
-    if (!availability.available) {
-      throw new Error(`Codex OAuth provider is unavailable (${availability.reason})`);
-    }
-
-    const { tokenProvider, modelDiscovery } = getCodexAuthRuntime();
-    const modelCapability = await modelDiscovery.getModelCapability(modelId);
-    const discoveredModel = rebuildCodexModelInfo(modelCapability?.modelInfo);
-    if (!discoveredModel) {
-      throw new Error('Codex model is unavailable for the connected account');
-    }
-    let serviceTier: ModelServiceTier | undefined;
-    // User routes carry their own tier. Operator routes suppress client tiers,
-    // and a main-model tier must never bleed into a different routed model.
-    const requestedTier = stageModel ? userRoute?.serviceTier : params.serviceTier;
-    if (requestedTier === 'priority') {
-      if (discoveredModel.capabilities?.serviceTiers?.includes('priority')) {
-        serviceTier = 'priority';
-      }
-    }
-    const transport = createCodexResponsesTransport({
-      tokenProvider,
-      capabilityLease: modelCapability!.capabilityLease,
-      sessionId: deriveCodexUpstreamSessionId(
-        params.logicalSession ?? createEphemeralCodexLogicalSession(),
-      ),
-    });
-    const { model: unboundModel } = getModel({
-      providerId,
-      modelId,
-      apiKey: '',
-      customFetch: transport,
-      ...(serviceTier ? { serviceTier } : {}),
-    });
-    const model = bindCodexLanguageModelMetadata(unboundModel, discoveredModel);
-
-    return {
-      model,
-      modelInfo: discoveredModel,
-      modelString,
-      providerId,
-      modelId,
-      apiKey: '',
-      baseUrl: undefined,
-      thinkingConfig: stageModel ? stageRoute?.thinking : params.thinkingConfig,
-      serverManaged: Boolean(envRoute),
-      ...(serviceTier ? { serviceTier } : {}),
-    };
-  }
+  assertExpectedModel({ providerId, modelId }, params.expectedResolvedModel);
+  const nativeModel = await resolveNativeLanguageModel({
+    providerId,
+    modelId,
+    thinkingConfig: stageModel ? userRoute?.thinking : params.thinkingConfig,
+    serviceTier: stageModel ? userRoute?.serviceTier : params.serviceTier,
+    logicalSession: params.logicalSession,
+    serverManaged: false,
+  });
+  if (nativeModel) return nativeModel;
 
   // When a stage route overrides the client's model, the client-sent connection
   // params (apiKey/baseUrl/providerType) belong to the client's *other* model
@@ -231,13 +184,10 @@ export async function resolveModel(params: {
     throw new Error('Amazon Bedrock must be enabled by the server operator before it can be used.');
   }
   const clientBaseUrl = managed ? undefined : clientBaseUrlParam || undefined;
-  // An unmanaged provider's endpoint is the caller's choice whenever the caller
-  // picked the model (x-model or a user route) or sent a base URL: either the
-  // client-supplied URL or the provider's catalog default (e.g. a localhost
-  // Ollama). Only a model the operator selected (MODEL_ROUTES or
-  // DEFAULT_MODEL) with no client base URL resolves purely from server config.
-  const operatorSelected = Boolean(envRoute) || (!userRoute && !params.modelString);
-  const clientEndpoint = !managed && (Boolean(clientBaseUrl) || !operatorSelected);
+  // The caller picked this model, so an unmanaged provider's endpoint is the
+  // caller's choice: the client-supplied URL or the provider's catalog default
+  // (e.g. a localhost Ollama).
+  const clientEndpoint = !managed;
   const endpointUrl = clientBaseUrl ?? getProvider(providerId)?.defaultBaseUrl;
   if (clientEndpoint && endpointUrl) {
     const ssrfError = clientBaseUrl
@@ -264,15 +214,10 @@ export async function resolveModel(params: {
     fetchImpl: clientEndpoint ? clientBaseUrlLlmFetch : fetchWithRedirectValidation,
   });
 
-  // Thinking arbitration mirrors model routing — the route carries a full
-  // ThinkingConfig (mode/effort/level/enabled/budgetTokens/…) which callLLM
-  // normalizes against the model's capability:
-  //  - routed + thinking set → the route's thinking wins (over client thinking).
-  //  - routed + no thinking  → routed model uses its own default; client thinking
-  //    is dropped (it belonged to the client's other model).
-  //  - unrouted              → honor the client's thinking config.
+  // A user route carries its own ThinkingConfig; the client's thinking belongs
+  // to its main model, so a routed stage drops it.
   const thinkingConfig: ThinkingConfig | undefined = routed
-    ? stageRoute?.thinking
+    ? userRoute?.thinking
     : params.thinkingConfig;
 
   return {
@@ -284,12 +229,10 @@ export async function resolveModel(params: {
     apiKey,
     baseUrl,
     thinkingConfig,
-    // An operator route (MODEL_ROUTES) or DEFAULT_MODEL pick is the operator's
-    // choice, and a server-configured provider key is operator-owned — either
-    // way the primary is server-managed and may arm the fallback. A user-level
-    // route or a plain client x-model on an unmanaged provider is NOT
-    // server-managed.
-    serverManaged: Boolean(envRoute) || managed,
+    // A server-configured provider key is operator-owned, so the primary may
+    // arm the operator's fallback. A client model on an unmanaged provider,
+    // with a key the client sent, must not.
+    serverManaged: managed,
   };
 }
 
@@ -300,19 +243,10 @@ function getThinkingConfigFromBody(body: unknown): ThinkingConfig | undefined {
   return config && typeof config === 'object' ? (config as ThinkingConfig) : undefined;
 }
 
-function normalizeServiceTier(value: unknown): ModelServiceTier | undefined {
-  return value === 'priority' ? value : undefined;
-}
-
-function getServiceTierFromBody(body: unknown): ModelServiceTier | undefined {
-  if (!body || typeof body !== 'object') return undefined;
-  return normalizeServiceTier((body as { serviceTier?: unknown }).serviceTier);
-}
-
 /**
  * Resolve a language model from standard request headers.
  *
- * Reads: x-model, x-api-key, x-base-url, x-provider-type, x-model-routes, x-service-tier
+ * Reads: x-model, x-api-key, x-base-url, x-provider-type, x-model-routes
  * Note: requiresApiKey is derived server-side from the provider registry,
  * never from client headers, to prevent auth bypass.
  */
@@ -321,9 +255,11 @@ export async function resolveModelFromHeaders(
   stage?: LlmStage,
   thinkingConfig?: ThinkingConfig,
   serviceTier?: ModelServiceTier,
-  logicalSession?: CodexLogicalSession,
+  logicalSession?: ModelLogicalSession,
 ): Promise<ResolvedModel> {
+  const { requestWorkspaceId } = await import('@/lib/server/model-config/runtime');
   return resolveModel({
+    workspaceId: stage ? await requestWorkspaceId(req) : null,
     modelString: req.headers.get('x-model') || undefined,
     stage,
     userRoutes: parseUserStageRoutes(req.headers.get('x-model-routes')),
@@ -332,8 +268,8 @@ export async function resolveModelFromHeaders(
     providerType: req.headers.get('x-provider-type') || undefined,
     thinkingConfig,
     serviceTier: serviceTier ?? normalizeServiceTier(req.headers.get('x-service-tier')),
+    logicalSession,
     expectedResolvedModel: getExpectedResolvedModelFromHeaders(req),
-    ...(logicalSession ? { logicalSession } : {}),
   });
 }
 
@@ -347,7 +283,7 @@ export async function resolveModelFromRequest(
   req: NextRequest,
   body: unknown,
   stage?: LlmStage,
-  logicalSession?: CodexLogicalSession,
+  logicalSession?: ModelLogicalSession,
 ): Promise<ResolvedModel> {
   // Pass the client's body thinking into resolveModel so the single arbiter
   // there decides (a routed stage may override or drop it). See resolveModel.
@@ -355,7 +291,50 @@ export async function resolveModelFromRequest(
     req,
     stage,
     getThinkingConfigFromBody(body),
-    getServiceTierFromBody(body),
+    normalizeServiceTier(
+      body && typeof body === 'object'
+        ? (body as { serviceTier?: unknown }).serviceTier
+        : undefined,
+    ),
     logicalSession,
   );
+}
+
+export interface ExpectedResolvedModel {
+  providerId: string;
+  modelId: string;
+}
+
+class ResolvedModelAssertionError extends Error {
+  readonly code = 'RESOLVED_MODEL_MISMATCH';
+  constructor() {
+    super('Resolved model does not match the request assertion');
+    this.name = 'ResolvedModelAssertionError';
+  }
+}
+
+function assertExpectedModel(
+  resolved: ExpectedResolvedModel,
+  expected?: ExpectedResolvedModel,
+): void {
+  if (
+    expected &&
+    (expected.providerId !== resolved.providerId || expected.modelId !== resolved.modelId)
+  ) {
+    throw new ResolvedModelAssertionError();
+  }
+}
+
+export function getExpectedResolvedModelFromHeaders(
+  req: Pick<NextRequest, 'headers'>,
+): ExpectedResolvedModel | undefined {
+  const providerId = req.headers.get('x-openmaic-expected-provider');
+  const modelId = req.headers.get('x-openmaic-expected-model');
+  if (providerId === null && modelId === null) return undefined;
+  if (!providerId || !modelId) throw new ResolvedModelAssertionError();
+  return { providerId, modelId };
+}
+
+function normalizeServiceTier(value: unknown): ModelServiceTier | undefined {
+  return value === 'priority' ? value : undefined;
 }

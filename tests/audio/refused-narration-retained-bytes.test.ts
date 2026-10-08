@@ -1,8 +1,8 @@
 /**
  * Narration a full store refused is kept, so nobody pays for it twice.
  *
- * This is the defect #1467 names. The media pass has kept the bytes a full
- * store refused since it learned to: they are already paid for, the document
+ * This is the defect #1467 names. The media path keeps the bytes a full
+ * store refused: they are already paid for, the document
  * still carries the placeholder, and a later Retry re-attempts the upload
  * rather than the generation. Fresh TTS synthesis did the opposite — it dropped
  * the freshly synthesized clip before the local cache write — so every later
@@ -20,8 +20,9 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 
+import { setModelSettingsViewForTests } from '../helpers/model-settings-view';
+
 const mocks = vi.hoisted(() => ({
-  getCurrentModelConfig: vi.fn(),
   settingsState: vi.fn(),
   audioGet: vi.fn(),
   audioPut: vi.fn(),
@@ -40,10 +41,6 @@ const mocks = vi.hoisted(() => ({
   toastWarning: vi.fn(),
 }));
 
-vi.mock('@/lib/utils/model-config', () => ({
-  getCurrentModelConfig: mocks.getCurrentModelConfig,
-  getStageRoutesHeaderValue: () => undefined,
-}));
 vi.mock('@/lib/store/settings', () => ({
   useSettingsStore: { getState: mocks.settingsState },
 }));
@@ -88,7 +85,7 @@ const mockFetch = vi.fn() as Mock;
 vi.stubGlobal('fetch', mockFetch);
 
 import { adoptCachedNarration } from '@/lib/audio/adopt-cached-narration';
-import { generateAndStoreTTS, generateTTSForScene } from '@/lib/hooks/use-scene-generator';
+import { generateAndStoreTTS } from '@/lib/audio/narration-tts';
 import {
   noteStageGenerationOwnership,
   resetGenerationPermissionsForTests,
@@ -97,7 +94,7 @@ import { useStageStore } from '@/lib/store/stage';
 import type { Scene } from '@/lib/types/stage';
 
 const stageId = 'refused-narration-stage';
-/** What `generateTTSForScene` builds for scene order 1, action `speech-1`. */
+/** The derived key of scene order 1, action `speech-1`. */
 const derivedRef = 'tts_s1_speech-1';
 
 /** What the store answers when it has no room for these bytes. */
@@ -126,22 +123,6 @@ function sceneWithOneLine(): Scene {
     type: 'slide',
     content: { type: 'slide', canvas: { id: 'slide-1', elements: [] } },
     actions: [{ id: 'speech-1', type: 'speech', text: 'Welcome' }],
-  } as unknown as Scene;
-}
-
-/** Two lines, so "this clip" and "the one next to it" are distinguishable. */
-function sceneWithTwoLines(): Scene {
-  return {
-    id: 'scene-1',
-    stageId,
-    title: 'Scene',
-    order: 1,
-    type: 'slide',
-    content: { type: 'slide', canvas: { id: 'slide-1', elements: [] } },
-    actions: [
-      { id: 'speech-1', type: 'speech', text: 'Welcome' },
-      { id: 'speech-2', type: 'speech', text: 'And then' },
-    ],
   } as unknown as Scene;
 }
 
@@ -187,7 +168,6 @@ describe('narration refused for want of room', () => {
     mocks.mediaPut.mockReset().mockResolvedValue(undefined);
     mocks.mediaGet.mockReset().mockResolvedValue(undefined);
     mocks.mediaDelete.mockReset().mockResolvedValue(undefined);
-    mocks.getCurrentModelConfig.mockReturnValue({});
     mocks.settingsState.mockReturnValue({
       imageProviderId: '',
       imageProvidersConfig: {},
@@ -195,11 +175,13 @@ describe('narration refused for want of room', () => {
       videoProviderId: '',
       videoProvidersConfig: {},
       videoGenerationEnabled: false,
-      ttsProviderId: 'server-tts',
+      ttsVoiceProviderId: 'server-tts',
       ttsProvidersConfig: { 'server-tts': { apiKey: 'tts-key', modelId: 'tts-model' } },
       ttsVoice: 'narrator',
       ttsSpeed: 1,
     });
+    // The workspace's tts slot resolves to this provider.
+    setModelSettingsViewForTests({ tts: { registryId: 'server-tts', modelId: 'tts-model' } });
     mocks.isTTSProviderEnabled.mockReturnValue(true);
     mocks.pickNarratorAgent.mockReturnValue(undefined);
     mocks.resolveAgentVoiceOptions.mockResolvedValue({});
@@ -221,10 +203,16 @@ describe('narration refused for want of room', () => {
     mockFetch.mockResolvedValueOnce(ttsResponse());
 
     const scene = sceneWithOneLine();
-    await expect(generateTTSForScene(scene)).resolves.toMatchObject({
-      success: true,
-      failedCount: 0,
-    });
+    const audioId = await generateAndStoreTTS(
+      derivedRef,
+      'Welcome',
+      undefined,
+      undefined,
+      undefined,
+      stageId,
+    );
+    // The caller stamps the action with the id it is given.
+    (scene.actions![0] as { audioId?: string }).audioId = audioId ?? undefined;
 
     // Refused, and kept: the bytes sit under the derived key, and the action
     // carries that key, exactly as a refused image leaves its placeholder in
@@ -253,69 +241,6 @@ describe('narration refused for want of room', () => {
     expect(audioIdOf(useStageStore.getState().scenes[0] as Scene)).toBe('ast_narration_allocated');
   });
 
-  // A refusal is not a synthesis failure. Counting it as one would pause the
-  // whole deck at its first slide over one clip's storage.
-  it('does not fail the scene, and does not re-synthesize within the same run', async () => {
-    modelAudioTable();
-    mocks.poolPut.mockRejectedValue(quotaRefusal());
-    mockFetch.mockResolvedValue(ttsResponse());
-
-    const scene = sceneWithOneLine();
-    await expect(generateTTSForScene(scene)).resolves.toEqual({ success: true, failedCount: 0 });
-    expect(mockFetch).toHaveBeenCalledTimes(1);
-  });
-
-  // A sibling line failing is not a reason to throw away bytes that are
-  // already paid for. The scene-level rollback reclaims what it minted for this
-  // scene; a retained refusal was never minted, and unstamping it would strand
-  // the only copy of that clip where nothing will ever look for it again.
-  it('keeps a retained refusal when the line next to it fails', async () => {
-    const rows = modelAudioTable();
-    mocks.poolPut.mockRejectedValue(quotaRefusal());
-    mockFetch.mockResolvedValueOnce(ttsResponse()).mockResolvedValueOnce({
-      ok: false,
-      status: 503,
-      statusText: 'unavailable',
-      json: async () => ({ error: 'provider down' }),
-    });
-
-    const scene = sceneWithTwoLines();
-    await expect(generateTTSForScene(scene)).resolves.toMatchObject({
-      success: false,
-      failedCount: 1,
-    });
-
-    // The refused line keeps both halves of the contract: its bytes and the
-    // key adoption reads them back by.
-    expect(audioIdOf(scene, 0)).toBe(derivedRef);
-    expect(rows.has(derivedRef)).toBe(true);
-    expect(mocks.audioDelete).not.toHaveBeenCalledWith(derivedRef);
-    // The line that failed has nothing to keep.
-    expect(audioIdOf(scene, 1)).toBeUndefined();
-  });
-
-  // A clip the pool did take is an allocation this scene minted and nothing
-  // else holds, so the rollback still reclaims its local copy.
-  it('still rolls back a clip the pool accepted when a sibling fails', async () => {
-    modelAudioTable();
-    mocks.poolPut.mockResolvedValue('ast_narration_allocated');
-    mockFetch.mockResolvedValueOnce(ttsResponse()).mockResolvedValueOnce({
-      ok: false,
-      status: 503,
-      statusText: 'unavailable',
-      json: async () => ({ error: 'provider down' }),
-    });
-
-    const scene = sceneWithTwoLines();
-    await expect(generateTTSForScene(scene)).resolves.toMatchObject({
-      success: false,
-      failedCount: 1,
-    });
-
-    expect(mocks.audioDelete).toHaveBeenCalledWith('ast_narration_allocated');
-    expect(audioIdOf(scene, 0)).toBeUndefined();
-  });
-
   // `refused-retained` is a statement about what is on disk. If the local table
   // refused the row too, a stamp would name bytes nothing can read back, for
   // the rest of the course's life.
@@ -324,13 +249,7 @@ describe('narration refused for want of room', () => {
     mocks.poolPut.mockRejectedValue(quotaRefusal());
     mockFetch.mockResolvedValueOnce(ttsResponse());
 
-    const scene = sceneWithOneLine();
-    await expect(generateTTSForScene(scene)).resolves.toMatchObject({
-      success: true,
-      failedCount: 0,
-    });
-
-    expect(audioIdOf(scene)).toBeUndefined();
+    await expect(generateAndStoreTTS(derivedRef, 'Welcome')).resolves.toBeNull();
     expect(mocks.audioPut).toHaveBeenCalledTimes(1);
   });
 

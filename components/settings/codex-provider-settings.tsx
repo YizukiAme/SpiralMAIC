@@ -26,6 +26,8 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import {
   CodexOAuthClient,
+  codexConnectionTestResult,
+  selectCodexCapability,
   syncCodexProviderAndSelect,
   syncServerProvidersAfterAccessUnlock,
   type CodexOAuthClientMessageKey,
@@ -33,6 +35,7 @@ import {
 } from '@/lib/client/codex-oauth';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { useSettingsStore } from '@/lib/store/settings';
+import { useModelSettingsView } from '@/lib/model-settings/use-model-settings';
 import { cn } from '@/lib/utils';
 import { formatContextWindow } from './utils';
 
@@ -49,9 +52,20 @@ type TestState = {
   messageKey: CodexOAuthClientMessageKey | null;
 };
 
-export function CodexProviderSettings() {
+export function CodexProviderSettings({ capability = 'chat' }: { capability?: 'chat' | 'image' }) {
   const { t } = useI18n();
-  const models = useSettingsStore((state) => state.providersConfig['openai-codex']?.models ?? []);
+  const view = useModelSettingsView();
+  const provider = view?.providers.find(
+    (entry) =>
+      entry.capabilities[capability]?.registryId ===
+      (capability === 'image' ? 'codex-image' : 'openai-codex'),
+  );
+  const models =
+    provider?.capabilities[capability]?.models ??
+    view?.presets.find(
+      (preset) => preset.id === (capability === 'image' ? 'codex-image' : 'openai-codex'),
+    )?.capabilities[capability]?.models ??
+    [];
   const codexFastMode = useSettingsStore((state) => state.codexFastMode);
   const setCodexFastMode = useSettingsStore((state) => state.setCodexFastMode);
   const [snapshot, setSnapshot] = useState<CodexOAuthClientSnapshot>(INITIAL_SNAPSHOT);
@@ -80,17 +94,8 @@ export function CodexProviderSettings() {
       schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
       clearSchedule: (handle) => window.clearTimeout(handle as number),
       onChange: setSnapshot,
-      onLoginComplete: () =>
-        syncCodexProviderAndSelect(() => {
-          const state = useSettingsStore.getState();
-          return {
-            fetchServerProviders: state.fetchServerProviders,
-            providersConfig: state.providersConfig,
-            setModel: state.setModel,
-          };
-        }),
-      onLogoutComplete: () =>
-        syncServerProvidersAfterAccessUnlock(() => useSettingsStore.getState()),
+      onLoginComplete: () => syncCodexProviderAndSelect(),
+      onLogoutComplete: () => syncServerProvidersAfterAccessUnlock(),
     });
     clientRef.current = client;
     void client.mount();
@@ -138,7 +143,15 @@ export function CodexProviderSettings() {
     const modelId = models[0]?.id;
     if (!modelId || !clientRef.current) return;
     setTestState({ status: 'testing', messageKey: null });
-    const result = await clientRef.current.testConnection(modelId);
+    const result = provider
+      ? await fetch(capability === 'image' ? '/api/verify-image-provider' : '/api/verify-model', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider: provider.id, model: modelId }),
+        })
+          .then(codexConnectionTestResult)
+          .catch(() => ({ ok: false, messageKey: 'testFailed' as const }))
+      : await clientRef.current.testConnection(modelId);
     setTestState({
       status: result.ok ? 'success' : 'error',
       messageKey: result.messageKey,
@@ -191,6 +204,12 @@ export function CodexProviderSettings() {
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
+            {capability === 'image' && (
+              <p className="text-xs text-muted-foreground">
+                {t('settings.codexImageFixedModel')} {t('settings.codexImagePlanLimits')}{' '}
+                {t('settings.codexImageTestHint')}
+              </p>
+            )}
             {hasFastModel && (
               <div className="flex items-center justify-between gap-4 rounded-lg border border-border/50 bg-muted/20 p-3">
                 <div className="space-y-1">
@@ -273,6 +292,29 @@ export function CodexProviderSettings() {
               </div>
             </div>
             <div className="flex flex-wrap gap-2">
+              {!provider && view?.allowUserKeys && (
+                <Button
+                  type="button"
+                  disabled={
+                    isBusy ||
+                    models.length === 0 ||
+                    view.slots.find(
+                      (slot) => slot.slot === (capability === 'image' ? 'image' : 'llm'),
+                    )?.locked
+                  }
+                  onClick={async () => {
+                    setTestState({ status: 'testing', messageKey: null });
+                    try {
+                      await selectCodexCapability(capability);
+                      setTestState({ status: 'success', messageKey: 'testSuccess' });
+                    } catch {
+                      setTestState({ status: 'error', messageKey: 'testFailed' });
+                    }
+                  }}
+                >
+                  {t('settings.modelSettings.picker.use')}
+                </Button>
+              )}
               <Button
                 type="button"
                 variant="outline"

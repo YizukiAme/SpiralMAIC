@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 
 import { callLLM } from '@/lib/ai/llm';
 import { createLogger } from '@/lib/logger';
+import { ownsGenerationCourse } from '@/lib/overtime/generation-server';
 import {
   buildOvertimePlanPrompt,
   parseOvertimePlannerResponse,
@@ -10,6 +11,8 @@ import {
 } from '@/lib/overtime/planner';
 import { parseRequestLearningExtensionParams } from '@/lib/overtime/types';
 import { apiError, apiSuccess } from '@/lib/server/api-response';
+import { ownerNotFound, withOwnerResponseHeaders } from '@/lib/server/agent-runtime/route-response';
+import { withRequestOwner } from '@/lib/server/identity/with-owner';
 import { resolveModelFromRequest } from '@/lib/server/resolve-model';
 import type { Scene, Stage } from '@/lib/types/stage';
 
@@ -40,7 +43,7 @@ function isKnownConcept(value: unknown): value is OvertimeKnownConcept {
   );
 }
 
-async function POSTHandler(req: NextRequest) {
+async function POSTHandler(req: NextRequest, ownerId: string) {
   try {
     const body = (await req.json()) as OvertimePlanRequest;
     const request = parseRequestLearningExtensionParams(body.request);
@@ -61,9 +64,10 @@ async function POSTHandler(req: NextRequest) {
         'stage, scenes, append-page request, and known concepts are required',
       );
     }
+    if (!(await ownsGenerationCourse(ownerId, body.stage.id))) return ownerNotFound(new Headers());
 
     const normalizedBody = { ...body, request, knownConcepts };
-    const { model, thinkingConfig } = await resolveModelFromRequest(
+    const { model, thinkingConfig, serverManaged } = await resolveModelFromRequest(
       req,
       normalizedBody,
       'overtime-outline',
@@ -81,6 +85,7 @@ async function POSTHandler(req: NextRequest) {
         'overtime-outline',
         undefined,
         thinkingConfig,
+        { serverManaged },
       );
     } catch (error) {
       log.error('Overtime planner model request failed:', error);
@@ -121,4 +126,8 @@ async function POSTHandler(req: NextRequest) {
   }
 }
 
-export const POST = withAccessCode(POSTHandler);
+export const POST = withAccessCode((req: NextRequest) =>
+  withRequestOwner(req, async ({ ownerId }, headers) =>
+    withOwnerResponseHeaders(await POSTHandler(req, ownerId), headers),
+  ),
+);

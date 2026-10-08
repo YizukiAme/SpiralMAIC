@@ -87,7 +87,15 @@ export function LegacyBrowserImportNotice() {
     setOutcome(undefined);
     try {
       const { runApprovedLegacyBrowserImport } = await import('@/lib/legacy-browser-import');
-      const result = await runApprovedLegacyBrowserImport();
+      const [{ importLegacyModelSettings }, { importLegacyAgents }] = await Promise.all([
+        import('@/components/model-settings-init'),
+        import('@/lib/orchestration/registry/store'),
+      ]);
+      const [result] = await Promise.all([
+        runApprovedLegacyBrowserImport(),
+        importLegacyModelSettings(),
+        importLegacyAgents(),
+      ]);
       setOutcome(result);
       await refresh();
     } finally {
@@ -96,6 +104,7 @@ export function LegacyBrowserImportNotice() {
   };
 
   const counts = progress(state?.ledger);
+  counts.pending += Number(state?.pendingSettings ?? false) + Number(state?.pendingAgents ?? false);
   return (
     <Dialog
       open={open}

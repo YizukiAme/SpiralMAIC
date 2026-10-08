@@ -65,8 +65,9 @@ vi.mock('@/lib/server/provider-config', () => ({
   resolveServerImageProviderId: mocks.resolveServerProvider,
 }));
 
-vi.mock('@/lib/server/ssrf-guard', () => ({
-  validateUrlForSSRF: mocks.validateUrl,
+vi.mock('@/lib/server/ssrf-guard', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/server/ssrf-guard')>()),
+  validateClientBaseUrl: mocks.validateUrl,
 }));
 
 vi.mock('@/lib/server/usage-storage', () => ({
@@ -86,6 +87,13 @@ import {
   type CreateCodexImageTransportOptions,
 } from '@/lib/server/codex/image-transport';
 import { CODEX_OAUTH_ERROR_CODES, CodexOAuthError } from '@/lib/server/codex/token-provider';
+import { setDeploymentConfigForTests } from '@/lib/server/model-config/runtime';
+
+beforeEach(() => {
+  vi.stubEnv('DATABASE_URL', '');
+  vi.stubEnv('ACCESS_CODE', '');
+  setDeploymentConfigForTests({ layer: null, legacy: false, notices: [] });
+});
 
 function request(
   path: string,

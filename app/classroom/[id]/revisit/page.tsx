@@ -13,6 +13,7 @@ import { MediaStageProvider } from '@/lib/contexts/media-stage-context';
 import { useI18n } from '@/lib/hooks/use-i18n';
 import { ThemeProvider } from '@/lib/hooks/use-theme';
 import { useDiscussionTTS } from '@/lib/hooks/use-discussion-tts';
+import { useTTSSelection } from '@/lib/audio/use-tts-selection';
 import { isAbortError } from '@openmaic/generation/generation-retry';
 import { createLogger } from '@/lib/logger';
 import { submitRevisitAttempt } from '@/lib/revisit/client';
@@ -108,7 +109,7 @@ export default function RevisitChallengePage() {
   const reverseChallengeEnabled = useSettingsStore((s) => s.reverseChallengeEnabled);
   const stableSuccessesRequired = useSettingsStore((s) => s.stableSuccessesRequired);
   const demoGateSkipEnabled = useSettingsStore((s) => s.demoGateSkipEnabled);
-  const ttsEnabled = useSettingsStore((s) => s.ttsEnabled);
+  const ttsEnabled = Boolean(useTTSSelection());
   const ttsMuted = useSettingsStore((s) => s.ttsMuted);
   const agentsRecord = useAgentRegistry((s) => s.agents);
 
@@ -437,7 +438,6 @@ export default function RevisitChallengePage() {
       generatingOutlines: generating || failed ? pendingOutlines : [],
       generationComplete: !generating && !failed,
       generationStatus: generating ? 'generating' : failed ? 'error' : 'completed',
-      currentGeneratingOrder: generating ? denseScenes.length : -1,
       failedOutlines: failed && pendingOutlines[0] ? [pendingOutlines[0]] : [],
     });
   }, [classroom, pageIndex, skeletonLoadState, skeletonOutlines, skeletonScenes, tailView]);

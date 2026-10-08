@@ -9,7 +9,10 @@ vi.mock('@/lib/server/resolve-model', () => ({ resolveModel: mocks.resolveModel 
 vi.mock('@/lib/orchestration/stateless-generate', () => ({
   statelessGenerate: mocks.statelessGenerate,
 }));
-vi.mock('@/lib/ai/providers', () => ({ isProviderKeyRequired: () => false }));
+vi.mock('@/lib/ai/providers', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/ai/providers')>()),
+  isProviderKeyRequired: () => false,
+}));
 
 import { NextRequest } from 'next/server';
 import { POST } from '@/app/api/chat/route';

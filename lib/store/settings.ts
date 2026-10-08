@@ -1,114 +1,35 @@
 /**
  * Settings Store
  *
- * Global settings, persisted through the `@openmaic/storage` KVStore in the
- * `account` scope. The bulk of this store is the user's provider/model
- * configuration — the canonical `account`-scoped value in the storage contract,
- * and the thing a second device should not have to be told again.
+ * The user's own preferences, persisted through the `@openmaic/storage`
+ * KVStore in the `account` scope: playback, voice, speech input language,
+ * agents and layout.
+ *
+ * Model and provider configuration is not here. It lives on the server, in
+ * the workspace's model settings (`/api/model-config`, RFC #1701); the client
+ * reads what it needs from there (`lib/model-settings`). Earlier builds kept
+ * providers, keys and model choices in this store; the migration to version 5
+ * sets them aside for a one-time import into the workspace
+ * (`lib/legacy-browser-import/model-settings.ts`) and drops them.
  */
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { ProviderId } from '@/lib/ai/providers';
-import type { ProvidersConfig } from '@/lib/types/settings';
-import { PROVIDERS } from '@/lib/ai/providers';
-import { findModelById, getCanonicalModelId } from '@/lib/ai/model-aliases';
-import { getBundledCodexModelCatalog, rebuildCodexModelCatalog } from '@/lib/ai/codex-catalog';
-import type { ModelInfo, ModelServiceTier, ThinkingConfig } from '@/lib/types/provider';
-import { getThinkingConfigKey, supportsConfigurableThinking } from '@/lib/ai/thinking-config';
-import { getCatalogThinkingCapability } from '@/lib/ai/model-metadata';
-import type { TTSProviderId, ASRProviderId, BuiltInTTSProviderId } from '@/lib/audio/types';
+import type { ASRProviderId } from '@/lib/audio/types';
 import type { AgentVoiceOverride } from '@/lib/audio/voice-resolver';
-import { isCustomTTSProvider, isCustomASRProvider } from '@/lib/audio/types';
-import {
-  ASR_PROVIDERS,
-  CUSTOM_ASR_DEFAULT_LANGUAGES,
-  DEFAULT_TTS_VOICES,
-  isQwenCatalogVoice,
-  isQwenVoiceCloneModel,
-  TTS_PROVIDERS,
-} from '@/lib/audio/constants';
-import { DEFAULT_VOXCPM_BACKEND, VOXCPM_MODEL_ID, VOXCPM_VLLM_MODEL_ID } from '@/lib/audio/voxcpm';
-import { PDF_PROVIDERS } from '@/lib/pdf/constants';
-import type { PDFProviderId } from '@/lib/pdf/types';
-import {
-  MODALITY_ORDER,
-  TOKEN_PLAN_PRESETS,
-  tokenPlanSeedFingerprint,
-} from '@/lib/config/token-plan-presets';
-import type { TokenPlanModality } from '@/lib/config/token-plan-presets';
-import { isTokenPlanUsable, seedPlanModels } from '@/lib/config/apply-token-plan';
-import type { ImageProviderId, VideoProviderId } from '@/lib/media/types';
-import { IMAGE_PROVIDERS, getImageProviderCredentialMode } from '@/lib/media/image-providers';
-import { VIDEO_PROVIDERS } from '@/lib/media/video-providers';
-import { WEB_SEARCH_PROVIDERS, buildWebSearchFallbackOrder } from '@/lib/web-search/constants';
-import type { BaiduSubSources, WebSearchProviderId } from '@/lib/web-search/types';
-import { createLogger } from '@/lib/logger';
-import {
-  validateProvider,
-  resolveSelectedModel,
-  isLLMProviderConfigured,
-  buildUsableFallbackOrder,
-} from '@/lib/store/settings-validation';
+import { isCustomASRProvider } from '@/lib/audio/types';
+import { ASR_PROVIDERS, CUSTOM_ASR_DEFAULT_LANGUAGES } from '@/lib/audio/constants';
 import { createKVPersistStorage, purgeLegacyPersistKey } from '@/lib/store/kv-persist';
-import { isTTSProviderEnabled } from '@/lib/audio/provider-enablement';
-
-const log = createLogger('Settings');
-let latestServerProvidersRequest = 0;
-let userLLMSelectionRevision = 0;
-interface PendingCodexSelectionRestore {
-  requestGeneration: number;
-  selectionRevision: number;
-  intent: { modelId: string };
-  fallback: { providerId: ProviderId; modelId: string };
-}
-let pendingCodexSelectionRestore: PendingCodexSelectionRestore | null = null;
-interface PendingOAuthImageUsability {
-  requestGeneration: number;
-  providerIds: Set<ImageProviderId>;
-}
-let pendingOAuthImageUsability: PendingOAuthImageUsability | null = null;
-
-function matchesLLMSelection(
-  state: { providerId: ProviderId; modelId: string },
-  selection: { providerId: ProviderId; modelId: string },
-): boolean {
-  return state.providerId === selection.providerId && state.modelId === selection.modelId;
-}
-
-function getOAuthProviderBaselineModels(providerId: ProviderId): ModelInfo[] {
-  const registryProvider = PROVIDERS[providerId];
-  if (!registryProvider) return [];
-  return providerId === 'openai-codex'
-    ? getBundledCodexModelCatalog()
-    : registryProvider.models.map((model) => ({ ...model }));
-}
-
-function resetOAuthProviderState(providersConfig: ProvidersConfig): ProvidersConfig {
-  const next = { ...providersConfig };
-  for (const providerId of Object.keys(next) as ProviderId[]) {
-    const registryProvider = PROVIDERS[providerId];
-    if (!next[providerId] || registryProvider?.credentialMode !== 'oauth') continue;
-
-    next[providerId] = {
-      ...next[providerId],
-      apiKey: '',
-      baseUrl: '',
-      models: getOAuthProviderBaselineModels(providerId),
-      name: registryProvider.name,
-      type: registryProvider.type,
-      icon: registryProvider.icon,
-      requiresApiKey: registryProvider.requiresApiKey,
-      credentialMode: registryProvider.credentialMode,
-      isServerConfigured: false,
-      serverModels: undefined,
-    };
-  }
-  return next;
-}
+import {
+  normalizeLegacyModelSettings,
+  planModelSettingsImport,
+  saveModelSettingsProposal,
+  type LegacyModelSettingsState,
+} from '@/lib/legacy-browser-import/model-settings';
+import { keepUnimported } from '@/lib/legacy-browser-import/model-settings-unimported';
 
 /** Persisted-blob version for zustand's `persist` `migrate` ladder. */
-const SETTINGS_PERSIST_VERSION = 7;
+const SETTINGS_PERSIST_VERSION = 8;
 
 /**
  * Bound after the store exists; see `onWriteRefused` for why it is not inlined.
@@ -116,97 +37,6 @@ const SETTINGS_PERSIST_VERSION = 7;
  * the store would put the store back in its own definition.
  */
 const recovery: { rehydrate?: () => void | Promise<void> } = {};
-
-/**
- * Whether a (non-LLM) plan modality's provider currently holds credentials —
- * reconciliation only re-seeds modalities that can actually use the seeds.
- */
-type ModalityCredMap = Record<string, { apiKey?: string; isServerConfigured?: boolean }>;
-
-function modalityHasCredentials(
-  modality: TokenPlanModality,
-  providerId: string,
-  state: Pick<
-    SettingsState,
-    | 'imageProvidersConfig'
-    | 'videoProvidersConfig'
-    | 'ttsProvidersConfig'
-    | 'webSearchProvidersConfig'
-  >,
-): boolean {
-  // The per-modality config maps are keyed by concrete id unions; view them
-  // through a string-keyed credential shape for this predicate.
-  const map: Record<Exclude<TokenPlanModality, 'llm'>, ModalityCredMap> = {
-    image: state.imageProvidersConfig as ModalityCredMap,
-    video: state.videoProvidersConfig as ModalityCredMap,
-    tts: state.ttsProvidersConfig as ModalityCredMap,
-    webSearch: state.webSearchProvidersConfig as ModalityCredMap,
-  };
-  if (modality === 'llm') return false;
-  const cfg = map[modality][providerId];
-  return !!cfg && (!!cfg.apiKey || !!cfg.isServerConfigured);
-}
-
-/**
- * Drop user-level stage routes whose provider just became unusable (key
- * cleared, authorization toggle off, provider deleted) — the stage-route
- * counterpart of the mainline switch resolveLLMSelection performs. Returns
- * null when nothing changed so callers can skip the write.
- */
-function pruneUnusableStageRoutes(
-  routes: SettingsState['llmStageRoutes'],
-  providersConfig: ProvidersConfig,
-): SettingsState['llmStageRoutes'] | null {
-  let changed = false;
-  const next: SettingsState['llmStageRoutes'] = {};
-  for (const [stage, selection] of Object.entries(routes)) {
-    const cfg = providersConfig[selection.providerId];
-    if (cfg && cfg.enabled !== false && isLLMProviderConfigured(cfg)) {
-      next[stage] = selection;
-    } else {
-      changed = true;
-    }
-  }
-  return changed ? next : null;
-}
-
-/**
- * Stage routes that are operator-only and can never take effect from the
- * client-side Course Model Config UI. `maic-agent-driver` is resolved
- * exclusively from the operator's MODEL_ROUTES (with an explicit api dialect
- * and contextWindow) in agent-runtime/agent-driver-model.ts, so a persisted
- * user route for it is dead weight. Drop any leftover entry; returns null when
- * nothing changed so callers can skip the write.
- */
-function pruneOperatorOnlyStageRoutes(
-  routes: SettingsState['llmStageRoutes'] | undefined,
-): SettingsState['llmStageRoutes'] | null {
-  if (!routes || !('maic-agent-driver' in routes)) return null;
-  const { 'maic-agent-driver': _retired, ...rest } = routes;
-  return rest;
-}
-
-function pruneThinkingConfigs(
-  thinkingConfigs: Record<string, ThinkingConfig> | undefined,
-  providersConfig: ProvidersConfig | undefined,
-): Record<string, ThinkingConfig> {
-  if (!thinkingConfigs || !providersConfig) return {};
-
-  const validKeys = new Set<string>();
-  for (const [providerId, providerConfig] of Object.entries(providersConfig)) {
-    // Partial writes (e.g. token-plan apply writes credentials before models)
-    // can leave a provider entry without a models array yet.
-    for (const model of providerConfig.models ?? []) {
-      if (supportsConfigurableThinking(model.capabilities?.thinking)) {
-        validKeys.add(getThinkingConfigKey(providerId, model.id));
-      }
-    }
-  }
-
-  return Object.fromEntries(
-    Object.entries(thinkingConfigs).filter(([key]) => validKeys.has(key)),
-  ) as Record<string, ThinkingConfig>;
-}
 
 /** Available playback speed tiers */
 export const PLAYBACK_SPEEDS = [1, 1.25, 1.5, 2] as const;
@@ -235,214 +65,32 @@ export function getValidASRLanguage(providerId: ASRProviderId, currentLanguage?:
 }
 
 export interface SettingsState {
-  // Model selection
-  providerId: ProviderId;
-  modelId: string;
-  thinkingConfigs: Record<string, ThinkingConfig>;
   codexFastMode: boolean;
-
-  /**
-   * User-level per-stage LLM routing (the user-facing counterpart of the
-   * operator env MODEL_ROUTES): stage key (e.g. 'scene-content',
-   * 'scene-content:slide') → explicit provider/model selection. Absent entry =
-   * follow the main model. Sent to the server via the `x-model-routes` header;
-   * the operator's MODEL_ROUTES still wins server-side.
-   */
-  llmStageRoutes: Record<
-    string,
-    { providerId: ProviderId; modelId: string; thinking?: ThinkingConfig }
-  >;
-
-  /** Course-level web search toggle: whether generation may search the web. */
-  webSearchEnabled: boolean;
-
-  /**
-   * preset id → tokenPlanSeedFingerprint recorded when the plan's model seeds
-   * were last applied. Startup reconciliation compares these against the
-   * shipped preset data and re-seeds enabled plans whose data changed.
-   * `null` in the setter clears the entry (plan disconnected).
-   */
-  tokenPlanSeedVersions: Record<string, string>;
-  setTokenPlanSeedVersion: (presetId: string, fingerprint: string | null) => void;
-  /**
-   * preset id → the LLM provider the plan is enrolled on. Enrollment is
-   * recorded ONLY by applyTokenPlan (explicit user action) — a provider merely
-   * having a key is never evidence a plan is enabled, because minimax /
-   * tokendance / doubao double as ordinary direct providers and personal keys
-   * must not be hijacked by startup reconciliation.
-   */
-  tokenPlanEnrollments: Record<string, string>;
-  setTokenPlanEnrolled: (presetId: string, llmProviderId: string | null) => void;
-  /**
-   * 授权层开关：被显式关闭的套餐 id 集合（值恒为 true）。与「模型服务」里
-   * provider 的 `enabled` 同层语义——凭证仍在、连接仍在，只是不再参与课程
-   * 模型配置的候选与覆盖。用「关闭集合」而非「启用集合」存储，这样新连接
-   * 的套餐与历史数据都默认启用，无需迁移回填。
-   */
-  tokenPlanDisabled: Record<string, boolean>;
-  setTokenPlanEnabled: (presetId: string, enabled: boolean) => void;
-  /**
-   * Re-seed model defaults for every ENROLLED plan whose preset data changed
-   * since its seeds were last applied. Credentials are never touched — only
-   * catalogues, main model, stage routes and active selections, and only for
-   * modalities that actually hold credentials.
-   */
-  reconcileTokenPlanSeeds: () => void;
-  /**
-   * 将静态目录中的思考能力元数据补写进已保存的模型目录（幂等）。目录条目
-   * 后来新增时（例如为 token plan 模型补 thinking 控制），已启用套餐的旧
-   * 目录不重种也能获得思考强度调节；key 与模型选择不受影响。
-   */
-  applyCatalogThinkingMetadata: () => void;
-
-  // Provider configurations (unified JSON storage)
-  providersConfig: ProvidersConfig;
-
-  // TTS settings (legacy, kept for backward compatibility)
-  ttsModel: string;
-
-  // Audio settings (new unified audio configuration)
-  ttsProviderId: TTSProviderId;
-  ttsVoice: string;
-  ttsSpeed: number;
-  asrProviderId: ASRProviderId;
-  asrLanguage: string;
-
-  // Audio provider configurations
-  ttsProvidersConfig: Record<
-    TTSProviderId,
-    {
-      apiKey: string;
-      baseUrl: string;
-      enabled: boolean;
-      modelId?: string;
-      customModels?: Array<{ id: string; name: string }>;
-      providerOptions?: Record<string, unknown>;
-      isServerConfigured?: boolean;
-      /** Admin/server-level force-off (server-providers.yml / env). Overrides `enabled`. */
-      serverDisabled?: boolean;
-      // Custom provider fields
-      customName?: string;
-      customDefaultBaseUrl?: string;
-      customVoices?: Array<{ id: string; name: string }>;
-      isBuiltIn?: boolean;
-      requiresApiKey?: boolean;
-    }
-  >;
-
-  asrProvidersConfig: Record<
-    ASRProviderId,
-    {
-      apiKey: string;
-      baseUrl: string;
-      enabled: boolean;
-      modelId?: string;
-      customModels?: Array<{ id: string; name: string }>;
-      providerOptions?: Record<string, unknown>;
-      isServerConfigured?: boolean;
-      /** Admin/server-level force-off (server-providers.yml / env). Overrides `enabled`. */
-      serverDisabled?: boolean;
-      // Custom provider fields
-      customName?: string;
-      customDefaultBaseUrl?: string;
-      isBuiltIn?: boolean;
-      requiresApiKey?: boolean;
-    }
-  >;
-
-  // PDF settings
-  pdfProviderId: PDFProviderId;
-  pdfProvidersConfig: Record<
-    PDFProviderId,
-    {
-      apiKey: string;
-      baseUrl: string;
-      enabled: boolean;
-      requiresApiKey?: boolean;
-      isServerConfigured?: boolean;
-      /** Aliyun AccessKey ID (AliDocMind). */
-      accessKeyId?: string;
-      /** Aliyun AccessKey Secret (AliDocMind). */
-      accessKeySecret?: string;
-    }
-  >;
-  baiduSubSources: BaiduSubSources;
-
-  // Image Generation settings
-  imageProviderId: ImageProviderId;
-  imageModelId: string;
-  imageProvidersConfig: Record<
-    ImageProviderId,
-    {
-      apiKey: string;
-      baseUrl: string;
-      enabled: boolean;
-      isServerConfigured?: boolean;
-      /** Admin/server-level force-off (server-providers.yml / env). Overrides `enabled`. */
-      serverDisabled?: boolean;
-      customModels?: Array<{ id: string; name: string }>;
-      replaceBuiltInModels?: boolean;
-    }
-  >;
-
-  // Video Generation settings
-  videoProviderId: VideoProviderId;
-  videoModelId: string;
-  videoProvidersConfig: Record<
-    VideoProviderId,
-    {
-      apiKey: string;
-      baseUrl: string;
-      enabled: boolean;
-      isServerConfigured?: boolean;
-      /** Admin/server-level force-off (server-providers.yml / env). Overrides `enabled`. */
-      serverDisabled?: boolean;
-      customModels?: Array<{ id: string; name: string }>;
-      replaceBuiltInModels?: boolean;
-    }
-  >;
-
-  // Media generation toggles
-  imageGenerationEnabled: boolean;
-  /** null until the user explicitly chooses on/off; survives provider outages. */
-  imageGenerationPreference: boolean | null;
-  videoGenerationEnabled: boolean;
-  reviewOutlineEnabled: boolean;
-
-  // SpiralMAIC revisit settings
   reverseChallengeEnabled: boolean;
   stableSuccessesRequired: number;
   activeRevisitDemoSessionByStage: Record<string, string>;
   revisitVirtualClockOffsetHoursByStage: Record<string, number>;
   demoGateSkipEnabled: boolean;
+  setCodexFastMode: (enabled: boolean) => void;
+  setReverseChallengeEnabled: (enabled: boolean) => void;
+  setStableSuccessesRequired: (count: number) => void;
+  setActiveRevisitDemoSession: (stageId: string, sessionId: string | null) => void;
+  setRevisitVirtualClockOffsetHours: (stageId: string, hours: number) => void;
+  setDemoGateSkipEnabled: (enabled: boolean) => void;
+  /**
+   * The narration voice the user picked, and the speech provider (registry
+   * id) it was picked for. The workspace's `tts` slot decides the provider;
+   * the voice applies while the slot names the provider it belongs to, and
+   * that provider's default voice applies otherwise.
+   */
+  ttsVoice: string;
+  ttsVoiceProviderId: string;
+  ttsSpeed: number;
+  /** The language speech input listens for (checked against the asr slot's provider). */
+  asrLanguage: string;
 
-  // Web Search settings
-  webSearchProviderId: WebSearchProviderId;
-  webSearchProvidersConfig: Record<
-    WebSearchProviderId,
-    {
-      apiKey: string;
-      baseUrl: string;
-      enabled: boolean;
-      requiresApiKey?: boolean;
-      isServerConfigured?: boolean;
-      /** Admin/server-level force-off (server-providers.yml / env). Overrides `enabled`. */
-      serverDisabled?: boolean;
-      /** Model-based providers only (Claude): the model that runs the search. */
-      modelId?: string;
-    }
-  >;
-
-  // Global TTS/ASR toggles
-  ttsEnabled: boolean;
-  asrEnabled: boolean;
-
-  // Server-configured opt-in parallel scene-content concurrency (#572).
-  // 0 = off (serial generation); populated by fetchServerProviders.
-  parallelSceneConcurrency: number;
-
-  // Auto-config lifecycle flag (persisted)
-  autoConfigApplied: boolean;
+  /** Always open the outline review before generating scenes. */
+  reviewOutlineEnabled: boolean;
 
   // Playback controls
   ttsMuted: boolean;
@@ -475,27 +123,28 @@ export interface SettingsState {
   editRailCollapsed: boolean;
   editRailWidth: number;
 
-  // Actions
-  setModel: (providerId: ProviderId, modelId: string) => void;
-  setCodexFastMode: (enabled: boolean) => void;
-  /** Set (or clear, with null) the user-level route for one LLM stage. */
-  setStageRoute: (
-    stage: string,
-    route: { providerId: ProviderId; modelId: string; thinking?: ThinkingConfig } | null,
-  ) => void;
-  setWebSearchEnabled: (enabled: boolean) => void;
-  setThinkingConfig: (
-    providerId: ProviderId,
-    modelId: string,
-    config: ThinkingConfig | undefined,
-  ) => void;
-  setProviderConfig: (providerId: ProviderId, config: Partial<ProvidersConfig[ProviderId]>) => void;
-  setProvidersConfig: (config: ProvidersConfig) => void;
-  setTtsModel: (model: string) => void;
+  /**
+   * The model settings of an earlier build, kept only while they could not be
+   * set aside for the one-time import (storage full): they hold keys, which
+   * are never dropped before they are durably staged. Staging is retried on
+   * every load, and the field is removed once it succeeds.
+   */
+  legacyModelSettings?: Record<string, unknown>;
+
+  // Voice actions
+  /** Pick the narration voice of a speech provider (its registry id). */
+  setTTSVoice: (voice: string, providerId: string) => void;
+  setTTSSpeed: (speed: number) => void;
+  setASRLanguage: (language: string) => void;
+  setReviewOutlineEnabled: (enabled: boolean) => void;
+
+  // Playback actions
   setTTSMuted: (muted: boolean) => void;
   setTTSVolume: (volume: number) => void;
   setAutoPlayLecture: (autoPlay: boolean) => void;
   setPlaybackSpeed: (speed: PlaybackSpeed) => void;
+
+  // Agent actions
   setSelectedAgentIds: (ids: string[]) => void;
   setAgentMode: (mode: 'preset' | 'auto') => void;
   setAutoAgentCount: (count: number) => void;
@@ -509,2630 +158,222 @@ export interface SettingsState {
   setChatAreaWidth: (width: number) => void;
   setEditRailCollapsed: (collapsed: boolean) => void;
   setEditRailWidth: (width: number) => void;
-
-  // Audio actions
-  setTTSProvider: (providerId: TTSProviderId) => void;
-  setTTSVoice: (voice: string) => void;
-  setTTSSpeed: (speed: number) => void;
-  setASRProvider: (providerId: ASRProviderId) => void;
-  setASRLanguage: (language: string) => void;
-  setTTSProviderConfig: (
-    providerId: TTSProviderId,
-    config: Partial<{
-      apiKey: string;
-      baseUrl: string;
-      enabled: boolean;
-      modelId: string;
-      customModels: Array<{ id: string; name: string }>;
-      customVoices: Array<{ id: string; name: string }>;
-      providerOptions: Record<string, unknown>;
-    }>,
-  ) => void;
-  setASRProviderConfig: (
-    providerId: ASRProviderId,
-    config: Partial<{
-      apiKey: string;
-      baseUrl: string;
-      enabled: boolean;
-      modelId: string;
-      customModels: Array<{ id: string; name: string }>;
-      providerOptions: Record<string, unknown>;
-    }>,
-  ) => void;
-  setTTSEnabled: (enabled: boolean) => void;
-  setASREnabled: (enabled: boolean) => void;
-
-  // Custom audio provider actions
-  addCustomTTSProvider: (
-    id: TTSProviderId,
-    name: string,
-    baseUrl: string,
-    requiresApiKey: boolean,
-    defaultModel?: string,
-  ) => void;
-  removeCustomTTSProvider: (id: TTSProviderId) => void;
-  addCustomASRProvider: (
-    id: ASRProviderId,
-    name: string,
-    baseUrl: string,
-    requiresApiKey: boolean,
-  ) => void;
-  removeCustomASRProvider: (id: ASRProviderId) => void;
-
-  // PDF actions
-  setPDFProvider: (providerId: PDFProviderId) => void;
-  setPDFProviderConfig: (
-    providerId: PDFProviderId,
-    config: Partial<{
-      apiKey: string;
-      baseUrl: string;
-      enabled: boolean;
-      accessKeyId: string;
-      accessKeySecret: string;
-    }>,
-  ) => void;
-
-  // Image Generation actions
-  setImageProvider: (providerId: ImageProviderId) => void;
-  setImageModelId: (modelId: string) => void;
-  setImageProviderConfig: (
-    providerId: ImageProviderId,
-    config: Partial<{
-      apiKey: string;
-      baseUrl: string;
-      enabled: boolean;
-      customModels: Array<{ id: string; name: string }>;
-      replaceBuiltInModels: boolean;
-    }>,
-  ) => void;
-
-  // Video Generation actions
-  setVideoProvider: (providerId: VideoProviderId) => void;
-  setVideoModelId: (modelId: string) => void;
-  setVideoProviderConfig: (
-    providerId: VideoProviderId,
-    config: Partial<{
-      apiKey: string;
-      baseUrl: string;
-      enabled: boolean;
-      customModels: Array<{ id: string; name: string }>;
-      replaceBuiltInModels: boolean;
-    }>,
-  ) => void;
-
-  // Media generation toggle actions
-  setImageGenerationEnabled: (enabled: boolean) => void;
-  setVideoGenerationEnabled: (enabled: boolean) => void;
-  setReviewOutlineEnabled: (enabled: boolean) => void;
-
-  // SpiralMAIC revisit actions
-  setReverseChallengeEnabled: (enabled: boolean) => void;
-  setStableSuccessesRequired: (count: number) => void;
-  setActiveRevisitDemoSession: (stageId: string, sessionId: string | null) => void;
-  setRevisitVirtualClockOffsetHours: (stageId: string, hours: number) => void;
-  setDemoGateSkipEnabled: (enabled: boolean) => void;
-
-  // Web Search actions
-  setWebSearchProvider: (providerId: WebSearchProviderId) => void;
-  setWebSearchProviderConfig: (
-    providerId: WebSearchProviderId,
-    config: Partial<{ apiKey: string; baseUrl: string; enabled: boolean; modelId: string }>,
-  ) => void;
-  setBaiduSubSources: (sources: Partial<BaiduSubSources>) => void;
-
-  // Server provider actions
-  fetchServerProviders: (options?: {
-    reconcileOAuthImageSelectionImmediately?: boolean;
-  }) => Promise<void>;
 }
 
-// Initialize default providers config
-const getDefaultProvidersConfig = (): ProvidersConfig => {
-  const config: ProvidersConfig = {} as ProvidersConfig;
-  Object.keys(PROVIDERS).forEach((pid) => {
-    const provider = PROVIDERS[pid as ProviderId];
-    config[pid as ProviderId] = {
-      apiKey: '',
-      baseUrl: '',
-      models:
-        provider.credentialMode === 'oauth'
-          ? getOAuthProviderBaselineModels(pid as ProviderId)
-          : provider.models,
-      name: provider.name,
-      type: provider.type,
-      defaultBaseUrl: provider.defaultBaseUrl,
-      icon: provider.icon,
-      requiresApiKey: provider.requiresApiKey,
-      credentialMode: provider.credentialMode,
-      isBuiltIn: true,
-    };
-  });
-  return config;
-};
+/** The persisted fields: everything but the actions. */
+const PERSISTED_FIELDS = [
+  'codexFastMode',
+  'reverseChallengeEnabled',
+  'stableSuccessesRequired',
+  'activeRevisitDemoSessionByStage',
+  'revisitVirtualClockOffsetHoursByStage',
+  'demoGateSkipEnabled',
+  'ttsVoice',
+  'ttsVoiceProviderId',
+  'ttsSpeed',
+  'asrLanguage',
+  'reviewOutlineEnabled',
+  'ttsMuted',
+  'ttsVolume',
+  'autoPlayLecture',
+  'playbackSpeed',
+  'selectedAgentIds',
+  'agentMode',
+  'autoAgentCount',
+  'agentVoiceOverrides',
+  'agentSelectionIsUserSet',
+  'sidebarCollapsed',
+  'chatAreaCollapsed',
+  'chatAreaWidth',
+  'editRailCollapsed',
+  'editRailWidth',
+  'legacyModelSettings',
+] as const satisfies readonly (keyof SettingsState)[];
+
+export type PersistedSettings = Pick<SettingsState, (typeof PERSISTED_FIELDS)[number]>;
+
+/** Only the known preference fields of a persisted blob. */
+function pickPersisted(state: unknown): Partial<PersistedSettings> {
+  const picked: Record<string, unknown> = {};
+  if (!state || typeof state !== 'object') return picked;
+  const record = state as Record<string, unknown>;
+  for (const field of PERSISTED_FIELDS) {
+    if (Object.hasOwn(record, field)) picked[field] = record[field];
+  }
+  return picked as Partial<PersistedSettings>;
+}
 
 /**
- * Single shared LLM selection resolver (#580). Given a providers config and
- * the current (providerId, modelId), return the resolved selection that
- * upholds the invariant for ANY config mutation — clearing/adding a key,
- * editing models, deleting a provider, import, reset:
- *
- * - keep the current provider if it is still usable;
- * - else fall back to the first usable provider;
- * - else State A (empty selection).
- *
- * Then resolve a concrete model for the chosen provider. Used by both
- * setProviderConfig (single edit) and setProvidersConfig (bulk) so the two
- * paths can never diverge — the per-call-site asymmetry #580 set out to kill.
+ * Stage the model settings of an earlier build for import, and keep the ones
+ * no workspace provider can express (with their keys) in the browser; whether
+ * both are durably kept.
  */
-function resolveLLMSelection(
-  config: ProvidersConfig,
-  currentProviderId: ProviderId,
-  currentModelId: string,
-): { providerId: ProviderId; modelId: string } {
-  // Usable = configured AND not switched off via the authorization-layer
-  // per-provider toggle (ProviderSettings.enabled) — disabling the active
-  // mainline provider re-resolves the selection to another usable one.
-  const isUsable = (id: ProviderId) =>
-    !!config[id] && config[id].enabled !== false && isLLMProviderConfigured(config[id]);
-  const providerId = isUsable(currentProviderId)
-    ? currentProviderId
-    : ((Object.keys(config) as ProviderId[]).find(isUsable) ?? ('' as ProviderId));
-  const modelId = providerId
-    ? resolveSelectedLLMModel(providerId, currentModelId, config[providerId]?.models ?? [])
-    : '';
-  return { providerId, modelId };
+function stageLegacyModelSettings(legacy: LegacyModelSettingsState): boolean {
+  const { proposal, unimportable } = planModelSettingsImport(legacy);
+  return saveModelSettingsProposal(proposal) && keepUnimported(unimportable);
 }
 
-/** Keep the caller's wire model ID when it resolves to a known catalog alias. */
-function resolveSelectedLLMModel(
-  providerId: ProviderId,
-  currentModelId: string,
-  availableModels: Array<{ id: string }>,
-): string {
-  if (availableModels.some((model) => model.id === currentModelId)) return currentModelId;
-  const canonicalModelId = getCanonicalModelId(providerId, currentModelId);
-  if (
-    canonicalModelId !== currentModelId &&
-    availableModels.some((model) => model.id === canonicalModelId)
-  ) {
-    return currentModelId;
+/**
+ * The version 5 migration of a persisted blob of an earlier `version`: the
+ * old shapes normalised, model settings set aside for import, the voice tied
+ * to the provider it was picked for, and every provider field dropped, unless
+ * setting them aside failed: then they are kept (in `legacyModelSettings`)
+ * until a later load stages them.
+ */
+export function migrateSettingsToV5(
+  persisted: Record<string, unknown>,
+  version = 4,
+): Partial<PersistedSettings> {
+  const legacy = normalizeLegacyModelSettings(persisted, version);
+  const next = pickPersisted(persisted);
+  if (typeof legacy.ttsProviderId === 'string' && next.ttsVoiceProviderId === undefined) {
+    next.ttsVoiceProviderId = legacy.ttsProviderId;
   }
-  return availableModels[0]?.id ?? '';
-}
-
-function resolveMediaModels<T extends { id: string; name: string }>(
-  builtInModels: T[],
-  config?: { customModels?: T[]; replaceBuiltInModels?: boolean },
-): T[] {
-  const customModels = config?.customModels ?? [];
-  return config?.replaceBuiltInModels && customModels.length > 0
-    ? customModels
-    : [...builtInModels, ...customModels];
-}
-
-type ImageProviderSettings = SettingsState['imageProvidersConfig'][ImageProviderId];
-
-function sanitizeOAuthImageProviderConfig(
-  providerId: ImageProviderId,
-  config: ImageProviderSettings,
-): ImageProviderSettings {
-  if (getImageProviderCredentialMode(IMAGE_PROVIDERS[providerId]) !== 'oauth') {
-    return config;
-  }
-  return {
-    ...config,
-    apiKey: '',
-    baseUrl: '',
-    customModels: [],
-    replaceBuiltInModels: false,
-  };
-}
-
-function resetOAuthImageProviderState(
-  config: SettingsState['imageProvidersConfig'],
-): SettingsState['imageProvidersConfig'] {
-  const next = { ...config };
-  for (const providerId of Object.keys(IMAGE_PROVIDERS) as ImageProviderId[]) {
-    if (getImageProviderCredentialMode(IMAGE_PROVIDERS[providerId]) !== 'oauth') continue;
-    next[providerId] = {
-      ...sanitizeOAuthImageProviderConfig(providerId, next[providerId]),
-      isServerConfigured: false,
-    };
+  // Blobs from before the auto agent mode kept the preset roster.
+  if (next.agentMode === undefined) next.agentMode = 'preset';
+  if (!stageLegacyModelSettings(legacy)) {
+    next.legacyModelSettings = legacy as Record<string, unknown>;
   }
   return next;
 }
 
-function resolveImageProviderModels(
-  providerId: ImageProviderId,
-  config?: ImageProviderSettings,
-): Array<{ id: string; name: string }> {
-  const provider = IMAGE_PROVIDERS[providerId];
-  const builtInModels = provider?.models ?? [];
-  if (provider && getImageProviderCredentialMode(provider) === 'oauth') {
-    return builtInModels;
-  }
-  return resolveMediaModels(builtInModels, config);
-}
+/** Set when a load staged kept model settings: the store writes itself back without them. */
+let stagedOnLoad = false;
 
-function isUsableMediaProvider(
-  provider: { requiresApiKey: boolean; credentialMode?: 'api-key' | 'oauth' | 'none' } | undefined,
-  config:
-    | {
-        apiKey?: string;
-        baseUrl?: string;
-        enabled?: boolean;
-        isServerConfigured?: boolean;
-      }
-    | undefined,
-): boolean {
-  if (!provider || config?.enabled === false) return false;
-  const credentialMode = getImageProviderCredentialMode(provider);
-  if (credentialMode === 'oauth') return config?.isServerConfigured === true;
-  if (config?.isServerConfigured) return true;
-  if (provider.requiresApiKey) return hasMediaCredential(config?.apiKey);
-  return hasMediaCredential(config?.baseUrl);
-}
-
-/** Server-sync compatibility: existing image providers retain their legacy key/server semantics. */
-function isUsableSyncedImageProvider(
-  provider: { requiresApiKey: boolean; credentialMode?: 'api-key' | 'oauth' | 'none' } | undefined,
-  config:
-    | { apiKey?: string; enabled?: boolean; isServerConfigured?: boolean; serverDisabled?: boolean }
-    | undefined,
-): boolean {
-  if (!provider || !config || config.serverDisabled) return false;
-  const credentialMode = getImageProviderCredentialMode(provider);
-  if (credentialMode === 'oauth' || credentialMode === 'none') {
-    return isUsableMediaProvider(provider, config);
-  }
-  return !!config.isServerConfigured || (config.enabled !== false && !!config.apiKey);
-}
-
-function buildImageProviderFallbackOrder(
-  config: SettingsState['imageProvidersConfig'],
-  excludedProviderId?: ImageProviderId,
-): ImageProviderId[] {
-  const usable = (Object.keys(IMAGE_PROVIDERS) as ImageProviderId[]).filter(
-    (providerId) =>
-      providerId !== excludedProviderId &&
-      isUsableSyncedImageProvider(IMAGE_PROVIDERS[providerId], config[providerId]),
-  );
-  return [
-    ...usable.filter((providerId) => config[providerId].isServerConfigured),
-    ...usable.filter((providerId) => !config[providerId].isServerConfigured),
-  ];
-}
-
-function hasMediaCredential(value: string | undefined): boolean {
-  return !!value && value.trim().length > 0;
-}
-
-function shouldTurnOn(currentlyEnabled: boolean, usable: boolean): boolean {
-  return !currentlyEnabled && usable;
-}
-
-// Initialize default audio config
-const getDefaultAudioConfig = () => ({
-  ttsProviderId: 'browser-native-tts' as TTSProviderId,
-  ttsVoice: 'default',
-  ttsSpeed: 1.0,
-  asrProviderId: 'browser-native' as ASRProviderId,
-  asrLanguage: 'zh-CN',
-  ttsProvidersConfig: {
-    // Built-in providers default enabled:true — they only ever surface once
-    // configured (API key or server-managed), so "enabled" is a user opt-OUT,
-    // not the visibility gate. A server-configured provider must not be hidden
-    // by a stale default (#665).
-    'openai-tts': { apiKey: '', baseUrl: '', enabled: true },
-    'azure-tts': { apiKey: '', baseUrl: '', enabled: true },
-    'glm-tts': { apiKey: '', baseUrl: '', enabled: true },
-    'qwen-tts': { apiKey: '', baseUrl: '', enabled: true },
-    'voxcpm-tts': {
-      apiKey: '',
-      baseUrl: '',
-      modelId: VOXCPM_VLLM_MODEL_ID,
-      enabled: true,
-      providerOptions: { backend: DEFAULT_VOXCPM_BACKEND },
-    },
-    'doubao-tts': { apiKey: '', baseUrl: '', enabled: true },
-    'elevenlabs-tts': { apiKey: '', baseUrl: '', enabled: true },
-    'minimax-tts': { apiKey: '', baseUrl: '', modelId: 'speech-2.8-hd', enabled: true },
-    'google-tts': {
-      apiKey: '',
-      baseUrl: '',
-      modelId: 'gemini-3.1-flash-tts-preview',
-      enabled: true,
-    },
-    'lemonade-tts': {
-      apiKey: '',
-      baseUrl: '',
-      modelId: 'kokoro-v1',
-      enabled: true,
-    },
-    // Browser-native is OFF by default — fully opt-in. Native voice quality is
-    // poor; it must never be a silent default (#665).
-    'browser-native-tts': { apiKey: '', baseUrl: '', enabled: false },
-  } as Record<
-    TTSProviderId,
-    { apiKey: string; baseUrl: string; modelId?: string; enabled: boolean }
-  >,
-  asrProvidersConfig: {
-    'openai-whisper': { apiKey: '', baseUrl: '', enabled: true },
-    'browser-native': { apiKey: '', baseUrl: '', enabled: true },
-    'qwen-asr': { apiKey: '', baseUrl: '', enabled: false },
-    'azure-asr': { apiKey: '', baseUrl: '', enabled: false },
-    'funasr-asr': { apiKey: '', baseUrl: '', enabled: false },
-    'lemonade-asr': { apiKey: '', baseUrl: '', enabled: false },
-  } as Record<ASRProviderId, { apiKey: string; baseUrl: string; enabled: boolean }>,
-});
-
-// Initialize default PDF config
-const getDefaultPDFConfig = () => ({
-  pdfProviderId: 'unpdf' as PDFProviderId,
-  pdfProvidersConfig: {
-    unpdf: { apiKey: '', baseUrl: '', enabled: true },
-    mineru: { apiKey: '', baseUrl: '', enabled: false },
-    'mineru-cloud': { apiKey: '', baseUrl: '', enabled: false },
-    alidocmind: { apiKey: '', baseUrl: '', enabled: false, accessKeyId: '', accessKeySecret: '' },
-  } as Record<
-    PDFProviderId,
-    {
-      apiKey: string;
-      baseUrl: string;
-      enabled: boolean;
-      accessKeyId?: string;
-      accessKeySecret?: string;
-    }
-  >,
-});
-
-// Initialize default Image config
-const getDefaultImageConfig = () => ({
-  imageProviderId: 'seedream' as ImageProviderId,
-  imageModelId: 'doubao-seedream-5-0-260128',
-  imageProvidersConfig: {
-    seedream: { apiKey: '', baseUrl: '', enabled: false },
-    'codex-image': { apiKey: '', baseUrl: '', enabled: true },
-    'openai-image': { apiKey: '', baseUrl: '', enabled: false },
-    'qwen-image': { apiKey: '', baseUrl: '', enabled: false },
-    'nano-banana': { apiKey: '', baseUrl: '', enabled: false },
-    'minimax-image': { apiKey: '', baseUrl: '', enabled: false },
-    'grok-image': { apiKey: '', baseUrl: '', enabled: false },
-    'openrouter-image': { apiKey: '', baseUrl: '', enabled: false },
-    'comfyui-image': { apiKey: '', baseUrl: '', enabled: false },
-    lemonade: { apiKey: '', baseUrl: '', enabled: false },
-  } as Record<ImageProviderId, { apiKey: string; baseUrl: string; enabled: boolean }>,
-});
-
-// Initialize default Video config
-const getDefaultVideoConfig = () => ({
-  videoProviderId: 'seedance' as VideoProviderId,
-  videoModelId: 'doubao-seedance-2-0-260128',
-  videoProvidersConfig: {
-    seedance: { apiKey: '', baseUrl: '', enabled: false },
-    kling: { apiKey: '', baseUrl: '', enabled: false },
-    veo: { apiKey: '', baseUrl: '', enabled: false },
-    'minimax-video': { apiKey: '', baseUrl: '', enabled: false },
-    'grok-video': { apiKey: '', baseUrl: '', enabled: false },
-    'openrouter-video': { apiKey: '', baseUrl: '', enabled: false },
-    happyhorse: { apiKey: '', baseUrl: '', enabled: false },
-  } as Record<VideoProviderId, { apiKey: string; baseUrl: string; enabled: boolean }>,
-});
-
-// Initialize default Web Search config
-const getDefaultWebSearchConfig = () => ({
-  webSearchProviderId: 'tavily' as WebSearchProviderId,
-  webSearchProvidersConfig: {
-    tavily: { apiKey: '', baseUrl: '', enabled: true, requiresApiKey: true },
-    exa: {
-      apiKey: '',
-      baseUrl: WEB_SEARCH_PROVIDERS.exa.defaultBaseUrl || '',
-      enabled: true,
-      requiresApiKey: true,
-    },
-    bocha: { apiKey: '', baseUrl: '', enabled: true, requiresApiKey: true },
-    brave: {
-      apiKey: '',
-      baseUrl: WEB_SEARCH_PROVIDERS.brave.defaultBaseUrl || '',
-      enabled: true,
-      requiresApiKey: false,
-    },
-    baidu: { apiKey: '', baseUrl: '', enabled: true, requiresApiKey: true },
-    claude: {
-      apiKey: '',
-      baseUrl: '',
-      enabled: true,
-      requiresApiKey: true,
-      modelId: '',
-    },
-    minimax: {
-      apiKey: '',
-      baseUrl: WEB_SEARCH_PROVIDERS.minimax.defaultBaseUrl || '',
-      enabled: true,
-      requiresApiKey: true,
-    },
-    doubao: {
-      apiKey: '',
-      baseUrl: WEB_SEARCH_PROVIDERS.doubao.defaultBaseUrl || '',
-      enabled: true,
-      requiresApiKey: true,
-    },
-    searxng: {
-      apiKey: '',
-      baseUrl: '',
-      enabled: true,
-      requiresApiKey: false,
-    },
-  } as Record<
-    WebSearchProviderId,
-    {
-      apiKey: string;
-      baseUrl: string;
-      enabled: boolean;
-      requiresApiKey?: boolean;
-      modelId?: string;
-    }
-  >,
-  baiduSubSources: {
-    webSearch: true,
-    baike: true,
-    scholar: true,
-  } as BaiduSubSources,
-});
-
-/**
- * Check whether a provider ID exists in the given provider registry.
- */
-function hasProviderId(providerMap: Record<string, unknown>, providerId?: string): boolean {
-  return (
-    typeof providerId === 'string' && Object.prototype.hasOwnProperty.call(providerMap, providerId)
-  );
-}
-
-/**
- * Validate all persisted provider IDs against their registries.
- * Reset any stale / removed ID back to its default value.
- * Called during both migrate and merge to cover all rehydration paths.
- */
-function ensureValidProviderSelections(state: Partial<SettingsState>): void {
-  const defaultAudioConfig = getDefaultAudioConfig();
-  const defaultPdfConfig = getDefaultPDFConfig();
-  const defaultImageConfig = getDefaultImageConfig();
-  const defaultVideoConfig = getDefaultVideoConfig();
-  const defaultWebSearchConfig = getDefaultWebSearchConfig();
-
-  if (!hasProviderId(PDF_PROVIDERS, state.pdfProviderId)) {
-    state.pdfProviderId = defaultPdfConfig.pdfProviderId;
-  }
-
-  if (!hasProviderId(WEB_SEARCH_PROVIDERS, state.webSearchProviderId)) {
-    state.webSearchProviderId = defaultWebSearchConfig.webSearchProviderId;
-  }
-  ensureBaiduSubSources(state);
-
-  if (
-    state.imageProviderId === undefined ||
-    (state.imageProviderId !== ('' as ImageProviderId) &&
-      !hasProviderId(IMAGE_PROVIDERS, state.imageProviderId))
-  ) {
-    state.imageProviderId = defaultImageConfig.imageProviderId;
-  }
-
-  if (!hasProviderId(VIDEO_PROVIDERS, state.videoProviderId)) {
-    state.videoProviderId = defaultVideoConfig.videoProviderId;
-  }
-
-  if (
-    !hasProviderId(TTS_PROVIDERS, state.ttsProviderId) &&
-    !(
-      state.ttsProviderId &&
-      isCustomTTSProvider(state.ttsProviderId) &&
-      state.ttsProvidersConfig &&
-      Object.prototype.hasOwnProperty.call(state.ttsProvidersConfig, state.ttsProviderId)
-    )
-  ) {
-    state.ttsProviderId = defaultAudioConfig.ttsProviderId;
-  }
-
-  if (
-    !hasProviderId(ASR_PROVIDERS, state.asrProviderId) &&
-    !(
-      state.asrProviderId &&
-      isCustomASRProvider(state.asrProviderId) &&
-      state.asrProvidersConfig &&
-      Object.prototype.hasOwnProperty.call(state.asrProvidersConfig, state.asrProviderId)
-    )
-  ) {
-    state.asrProviderId = defaultAudioConfig.asrProviderId;
-  }
-  if (state.asrProviderId) {
-    state.asrLanguage = getValidASRLanguage(state.asrProviderId, state.asrLanguage);
-  }
-}
-
-function ensureBuiltInAudioProviders(state: Partial<SettingsState>): void {
-  const defaultAudioConfig = getDefaultAudioConfig();
-
-  if (state.ttsProvidersConfig) {
-    for (const providerId of Object.keys(TTS_PROVIDERS) as BuiltInTTSProviderId[]) {
-      if (!state.ttsProvidersConfig[providerId]) {
-        state.ttsProvidersConfig[providerId] = defaultAudioConfig.ttsProvidersConfig[providerId];
-      }
-    }
-    const voxcpmConfig = state.ttsProvidersConfig['voxcpm-tts'];
-    if (voxcpmConfig) {
-      if (!voxcpmConfig.modelId || voxcpmConfig.modelId === VOXCPM_MODEL_ID) {
-        voxcpmConfig.modelId = VOXCPM_VLLM_MODEL_ID;
-      }
-      voxcpmConfig.providerOptions = {
-        backend: DEFAULT_VOXCPM_BACKEND,
-        ...(voxcpmConfig.providerOptions || {}),
-      };
-    }
-  }
-
-  if (state.asrProvidersConfig) {
-    for (const providerId of Object.keys(ASR_PROVIDERS) as ASRProviderId[]) {
-      if (!state.asrProvidersConfig[providerId]) {
-        state.asrProvidersConfig[providerId] = defaultAudioConfig.asrProvidersConfig[providerId];
-      }
-    }
-  }
-}
-
-/**
- * Ensure providersConfig includes all built-in providers and their latest models.
- * Called on every rehydrate (not just version migrations) so new providers
- * added in code are always picked up without clearing cache.
- */
-function ensureBuiltInProviders(state: Partial<SettingsState>): void {
-  if (!state.providersConfig) return;
-  const defaultConfig = getDefaultProvidersConfig();
-  Object.keys(PROVIDERS).forEach((pid) => {
-    const providerId = pid as ProviderId;
-    if (!state.providersConfig![providerId]) {
-      // New provider: add with defaults
-      state.providersConfig![providerId] = defaultConfig[providerId];
-    } else {
-      // Existing provider: refresh built-in models from the registry and
-      // keep user-added models after the built-in list.
-      const provider = PROVIDERS[providerId];
-      const existing = state.providersConfig![providerId];
-
-      if (provider.credentialMode === 'oauth') {
-        // OAuth connection state and dynamic models are server truth. Never
-        // revive a persisted managed flag, fake browser credentials, or a
-        // previous account's discovered model IDs during rehydrate.
-        state.providersConfig![providerId] = {
-          ...defaultConfig[providerId],
-          apiKey: '',
-          baseUrl: '',
-          models: getOAuthProviderBaselineModels(providerId),
-          isServerConfigured: false,
-          serverModels: undefined,
-        };
-        return;
-      }
-
-      const builtInModelIds = new Set(provider.models.map((m) => m.id));
-      const customModels = (existing.models || []).filter((m) => !builtInModelIds.has(m.id));
-      const mergedModels = [...provider.models, ...customModels];
-
-      state.providersConfig![providerId] = {
-        ...existing,
-        models: mergedModels,
-        name: existing.name || provider.name,
-        type: existing.type || provider.type,
-        defaultBaseUrl: existing.defaultBaseUrl || provider.defaultBaseUrl,
-        icon: provider.icon || existing.icon,
-        requiresApiKey: existing.requiresApiKey ?? provider.requiresApiKey,
-        credentialMode: provider.credentialMode ?? existing.credentialMode,
-        isBuiltIn: existing.isBuiltIn ?? true,
-      };
-    }
-  });
-}
-
-function distrustPersistedOAuthSelection(state: Partial<SettingsState>): void {
-  if (state.providersConfig && state.providerId) {
-    const selected = state.providersConfig[state.providerId];
-    if (selected?.credentialMode === 'oauth' && !selected.isServerConfigured) {
-      const resolved = resolveLLMSelection(
-        state.providersConfig,
-        state.providerId,
-        state.modelId ?? '',
-      );
-      state.providerId = resolved.providerId;
-      state.modelId = resolved.modelId;
-    }
-  }
-
-  if (!state.imageProvidersConfig) return;
-  for (const providerId of Object.keys(IMAGE_PROVIDERS) as ImageProviderId[]) {
-    if (IMAGE_PROVIDERS[providerId].credentialMode !== 'oauth') continue;
-    const config = state.imageProvidersConfig[providerId];
-    if (!config) continue;
-    state.imageProvidersConfig[providerId] = {
-      ...sanitizeOAuthImageProviderConfig(providerId, config),
-      isServerConfigured: false,
-    };
-  }
-
-  const selectedImageProvider = state.imageProviderId
-    ? IMAGE_PROVIDERS[state.imageProviderId]
-    : undefined;
-  if (selectedImageProvider?.credentialMode !== 'oauth') return;
-
-  const fallback = buildImageProviderFallbackOrder(
-    state.imageProvidersConfig,
-    state.imageProviderId,
-  )[0];
-  state.imageProviderId = fallback ?? ('' as ImageProviderId);
-  state.imageModelId = fallback
-    ? resolveSelectedModel(
-        state.imageModelId ?? '',
-        resolveImageProviderModels(fallback, state.imageProvidersConfig[fallback]),
-      )
-    : '';
-  if (!fallback) state.imageGenerationEnabled = false;
-}
-
-/**
- * Custom providers created before #414 stored their actual endpoint in
- * defaultBaseUrl while leaving baseUrl empty. Promote that persisted value
- * during rehydrate so downstream request builders keep using baseUrl only.
- */
-export function promoteLegacyCustomProviderBaseUrls(state: Partial<SettingsState>): void {
-  if (!state.providersConfig) return;
-
-  Object.values(state.providersConfig).forEach((config) => {
-    if (!config.isBuiltIn && !config.baseUrl && config.defaultBaseUrl) {
-      config.baseUrl = config.defaultBaseUrl;
-    }
-  });
-}
-
-/**
- * Ensure imageProvidersConfig includes all built-in image providers.
- * Called on every rehydrate so newly added image providers appear automatically.
- */
-function ensureBuiltInImageProviders(state: Partial<SettingsState>): void {
-  if (!state.imageProvidersConfig) return;
-  const defaultConfig = getDefaultImageConfig().imageProvidersConfig;
-  Object.keys(IMAGE_PROVIDERS).forEach((pid) => {
-    const providerId = pid as ImageProviderId;
-    if (!state.imageProvidersConfig![providerId]) {
-      state.imageProvidersConfig![providerId] = defaultConfig[providerId];
-    }
-  });
-}
-
-/**
- * Backfill built-in PDF/document providers into persisted state. Without this,
- * a provider added after a user's persisted state was written (e.g. AliDocMind)
- * never appears in `pdfProvidersConfig`, so it can't be selected and never
- * picks up its server-configured flag on rehydrate.
- */
-function ensureBuiltInPDFProviders(state: Partial<SettingsState>): void {
-  if (!state.pdfProvidersConfig) return;
-  const defaultConfig = getDefaultPDFConfig().pdfProvidersConfig;
-  Object.keys(PDF_PROVIDERS).forEach((pid) => {
-    const providerId = pid as PDFProviderId;
-    if (!state.pdfProvidersConfig![providerId]) {
-      state.pdfProvidersConfig![providerId] = defaultConfig[providerId];
-    }
-  });
-}
-
-/**
- * Ensure videoProvidersConfig includes all built-in video providers.
- * Called on every rehydrate so newly added video providers appear automatically.
- */
-function ensureBuiltInVideoProviders(state: Partial<SettingsState>): void {
-  if (!state.videoProvidersConfig) return;
-  const defaultConfig = getDefaultVideoConfig().videoProvidersConfig;
-  Object.keys(VIDEO_PROVIDERS).forEach((pid) => {
-    const providerId = pid as VideoProviderId;
-    if (!state.videoProvidersConfig![providerId]) {
-      state.videoProvidersConfig![providerId] = defaultConfig[providerId];
-    }
-  });
-}
-
-/**
- * Ensure webSearchProvidersConfig includes all built-in web search providers.
- * Called on every rehydrate so newly added providers appear automatically.
- */
-function ensureBuiltInWebSearchProviders(state: Partial<SettingsState>): void {
-  if (!state.webSearchProvidersConfig) return;
-  const defaultConfig = getDefaultWebSearchConfig().webSearchProvidersConfig;
-  Object.keys(WEB_SEARCH_PROVIDERS).forEach((pid) => {
-    const providerId = pid as WebSearchProviderId;
-    if (!state.webSearchProvidersConfig![providerId]) {
-      state.webSearchProvidersConfig![providerId] = defaultConfig[providerId];
-    } else {
-      state.webSearchProvidersConfig![providerId] = {
-        ...state.webSearchProvidersConfig![providerId],
-        requiresApiKey: WEB_SEARCH_PROVIDERS[providerId].requiresApiKey,
-      };
-    }
-  });
-}
-
-function ensureBaiduSubSources(state: Partial<SettingsState>): void {
-  const defaults = getDefaultWebSearchConfig().baiduSubSources;
-  const current = state.baiduSubSources;
-  state.baiduSubSources = {
-    webSearch: current?.webSearch ?? defaults.webSearch,
-    baike: current?.baike ?? defaults.baike,
-    scholar: current?.scholar ?? defaults.scholar,
-  };
-}
-
-/**
- * Strip the removed `serverBaseUrl` field from any persisted provider config.
- *
- * Managed providers no longer expose their base URL to the client (#620). Old
- * localStorage may still carry a `serverBaseUrl` on provider entries; this
- * clears it on every rehydrate so a stale server URL can't linger in client
- * state. Called from both migrate and merge to cover all rehydration paths.
- */
-function stripLegacyServerBaseUrl(state: Partial<SettingsState>): void {
-  const maps = [
-    state.providersConfig,
-    state.ttsProvidersConfig,
-    state.asrProvidersConfig,
-    state.pdfProvidersConfig,
-    state.imageProvidersConfig,
-    state.videoProvidersConfig,
-    state.webSearchProvidersConfig,
-  ];
-  for (const map of maps) {
-    if (!map) continue;
-    for (const cfg of Object.values(map as Record<string, Record<string, unknown>>)) {
-      if (cfg && 'serverBaseUrl' in cfg) delete cfg.serverBaseUrl;
-    }
-  }
-}
+/** Bound after the store exists, like `recovery` (a self-reference would widen its type). */
+const rewrite: { run?: () => void } = {};
 
 export const useSettingsStore = create<SettingsState>()(
   persist(
-    (set, get) => {
-      const defaultAudioConfig = getDefaultAudioConfig();
-      const defaultPDFConfig = getDefaultPDFConfig();
-      const defaultImageConfig = getDefaultImageConfig();
-      const defaultVideoConfig = getDefaultVideoConfig();
-      const defaultWebSearchConfig = getDefaultWebSearchConfig();
-
-      return {
-        // Initial state is plain defaults. This store does not migrate any
-        // pre-cutover localStorage data — everything persisted arrives through
-        // the KVStore on rehydration; an upgrading user reconfigures once.
-        providerId: 'openai' as ProviderId,
-        modelId: '',
-        thinkingConfigs: {},
-        codexFastMode: false,
-        llmStageRoutes: {},
-        webSearchEnabled: false,
-        /** preset id → seed fingerprint applied last (drives startup reconcile). */
-        tokenPlanSeedVersions: {},
-        tokenPlanEnrollments: {},
-        tokenPlanDisabled: {},
-        providersConfig: getDefaultProvidersConfig(),
-        ttsModel: 'openai-tts',
-        selectedAgentIds: ['default-1', 'default-2', 'default-3'],
-        agentMode: 'auto' as const,
-        autoAgentCount: 3,
-        agentVoiceOverrides: {},
-        agentSelectionIsUserSet: false,
-
-        // Playback controls
-        ttsMuted: false,
-        ttsVolume: 1,
-        autoPlayLecture: false,
-        playbackSpeed: 1,
-
-        // Layout preferences
-        sidebarCollapsed: true,
-        chatAreaCollapsed: true,
-        chatAreaWidth: 320,
-        editRailCollapsed: false,
-        editRailWidth: 220,
-
-        // Audio settings (use defaults)
-        ...defaultAudioConfig,
-
-        // PDF settings (use defaults)
-        ...defaultPDFConfig,
-
-        // Image settings (use defaults)
-        ...defaultImageConfig,
-
-        // Video settings (use defaults)
-        ...defaultVideoConfig,
-
-        // Media generation toggles (off by default)
-        imageGenerationEnabled: false,
-        imageGenerationPreference: null,
-        videoGenerationEnabled: false,
-        reviewOutlineEnabled: false,
-
-        // SpiralMAIC revisit defaults
-        reverseChallengeEnabled: false,
-        stableSuccessesRequired: 2,
-        activeRevisitDemoSessionByStage: {},
-        revisitVirtualClockOffsetHoursByStage: {},
-        demoGateSkipEnabled: false,
-
-        // TTS is OFF by default; auto-enabled on first server-sync when a TTS
-        // provider is configured (mirrors image/video). Fresh installs with no
-        // provider stay off and show an "enable browser-native" CTA (#665).
-        ttsEnabled: false,
-        asrEnabled: true,
-
-        // Off until the server reports a concurrency via fetchServerProviders.
-        parallelSceneConcurrency: 0,
-
-        autoConfigApplied: false,
-
-        // Web Search settings (use defaults)
-        ...defaultWebSearchConfig,
-
-        // Actions
-        setModel: (providerId, modelId) => {
-          userLLMSelectionRevision += 1;
-          set({ providerId, modelId });
-        },
-
-        setCodexFastMode: (enabled) => set({ codexFastMode: enabled }),
-        setStageRoute: (stage, route) =>
-          set((state) => {
-            const next = { ...state.llmStageRoutes };
-            if (route) next[stage] = route;
-            else delete next[stage];
-            return { llmStageRoutes: next };
-          }),
-        setWebSearchEnabled: (enabled) => set({ webSearchEnabled: enabled }),
-
-        setTokenPlanSeedVersion: (presetId, fingerprint) =>
-          set((state) => {
-            const next = { ...state.tokenPlanSeedVersions };
-            if (fingerprint) next[presetId] = fingerprint;
-            else delete next[presetId];
-            return { tokenPlanSeedVersions: next };
-          }),
-
-        setTokenPlanEnrolled: (presetId, llmProviderId) =>
-          set((state) => {
-            const next = { ...state.tokenPlanEnrollments };
-            if (llmProviderId) next[presetId] = llmProviderId;
-            else delete next[presetId];
-            return { tokenPlanEnrollments: next };
-          }),
-
-        setTokenPlanEnabled: (presetId, enabled) =>
-          set((state) => {
-            const next = { ...state.tokenPlanDisabled };
-            // 只记录「被关掉的」：启用是默认态，删除条目即可恢复默认。
-            if (enabled) delete next[presetId];
-            else next[presetId] = true;
-            return { tokenPlanDisabled: next };
-          }),
-
-        reconcileTokenPlanSeeds: () => {
-          const state = get();
-          // 按 TOKEN_PLAN_PRESETS 顺序遍历，配合 priorityState 的让位判定，
-          // 使得独占槽位（主线模型 / stage route / 各模态选中项）稳定归属
-          // 列表中最靠前的生效套餐，与 reconcile 的先后无关。
-          // 用 isTokenPlanUsable 而非 isTokenPlanActive：被授权开关关掉的
-          // 套餐不参与播种——否则 preset 数据一变，stage route 会被写回一个
-          // enabled:false 的 provider，且 setStageRoute 不经过 prune，死路由
-          // 会一直留在 llmStageRoutes 里。重新开启时由开关清指纹触发补种。
-          for (const preset of TOKEN_PLAN_PRESETS) {
-            if (!isTokenPlanUsable(preset, state)) continue;
-            if (state.tokenPlanSeedVersions[preset.id] === tokenPlanSeedFingerprint(preset)) {
-              continue;
-            }
-            // Seed only modalities that actually hold credentials: seeding a
-            // keyless modality would flip its active selection onto nothing.
-            const modalities = MODALITY_ORDER.filter((m) => {
-              const target = preset.modalities[m];
-              if (!target) return false;
-              if (m === 'llm') return true; // enrollment implies the key is there
-              return modalityHasCredentials(m, target.providerId, state);
-            });
-            try {
-              const live = get();
-              seedPlanModels(preset, live, {
-                modalities,
-                priorityState: {
-                  tokenPlanEnrollments: live.tokenPlanEnrollments,
-                  providersConfig: live.providersConfig,
-                  tokenPlanDisabled: live.tokenPlanDisabled,
-                },
-              });
-              get().setTokenPlanSeedVersion(preset.id, tokenPlanSeedFingerprint(preset));
-            } catch (err) {
-              // One plan failing must not abort reconciliation of the rest.
-              log.warn(`Token plan seed reconcile failed for ${preset.id}:`, err);
-            }
-          }
-        },
-
-        applyCatalogThinkingMetadata: () => {
-          const { providersConfig } = get();
-          let changed = false;
-          const next: ProvidersConfig = { ...providersConfig };
-          for (const [pid, cfg] of Object.entries(providersConfig)) {
-            if (!cfg?.models?.length) continue;
-            let touched = false;
-            const models = cfg.models.map((model) => {
-              const thinking = getCatalogThinkingCapability(pid, model.id);
-              if (!thinking) return model;
-              // 目录条目是模块常量，新旧引用/深比较一致即已补写
-              if (model.capabilities?.thinking === thinking) return model;
-              touched = true;
-              return {
-                ...model,
-                capabilities: { ...model.capabilities, thinking },
-              };
-            });
-            if (touched) {
-              changed = true;
-              next[pid as ProviderId] = { ...cfg, models };
-            }
-          }
-          // 模型 id 集合未变，直接写入即可，无需重跑 LLM 选择解析
-          if (changed) set({ providersConfig: next });
-        },
-
-        setThinkingConfig: (providerId, modelId, config) =>
-          set((state) => {
-            const key = getThinkingConfigKey(providerId, modelId);
-            const next = { ...state.thinkingConfigs };
-            if (config) {
-              next[key] = config;
-            } else {
-              delete next[key];
-            }
-            return { thinkingConfigs: next };
-          }),
-
-        setProviderConfig: (providerId, config) =>
-          set((state) => {
-            const providersConfig = {
-              ...state.providersConfig,
-              [providerId]: {
-                ...state.providersConfig[providerId],
-                ...config,
-              },
-            };
-            // Re-resolve through the shared resolver (#580): a single config
-            // edit can make the active provider usable (adopt + pick a model),
-            // make it INVALID — e.g. the user clears its API key — (fall back
-            // to another usable provider or State A), or change its model list
-            // (re-pick the model). All handled atomically here, never leaving
-            // an invalid/stale (provider, model) selected.
-            const { providerId: nextProvider, modelId: nextModel } = resolveLLMSelection(
-              providersConfig,
-              state.providerId,
-              state.modelId,
-            );
-            const prunedRoutes = pruneUnusableStageRoutes(state.llmStageRoutes, providersConfig);
-            return {
-              providersConfig,
-              thinkingConfigs: pruneThinkingConfigs(state.thinkingConfigs, providersConfig),
-              ...(prunedRoutes && { llmStageRoutes: prunedRoutes }),
-              ...(nextProvider !== state.providerId && { providerId: nextProvider }),
-              ...(nextModel !== state.modelId && { modelId: nextModel }),
-            };
-          }),
-
-        setProvidersConfig: (config) =>
-          set((state) => {
-            // Bulk config replace (delete provider/model, import, reset): same
-            // shared resolver as setProviderConfig so the two paths can never
-            // diverge — never leave the deleted/invalid provider selected.
-            const { providerId: nextProvider, modelId: nextModel } = resolveLLMSelection(
-              config,
-              state.providerId,
-              state.modelId,
-            );
-            const prunedRoutes = pruneUnusableStageRoutes(state.llmStageRoutes, config);
-            return {
-              providersConfig: config,
-              thinkingConfigs: pruneThinkingConfigs(state.thinkingConfigs, config),
-              ...(prunedRoutes && { llmStageRoutes: prunedRoutes }),
-              ...(nextProvider !== state.providerId && { providerId: nextProvider }),
-              ...(nextModel !== state.modelId && { modelId: nextModel }),
-            };
-          }),
-
-        setTtsModel: (model) => set({ ttsModel: model }),
-
-        setTTSMuted: (muted) => set({ ttsMuted: muted }),
-
-        setTTSVolume: (volume) => set({ ttsVolume: Math.max(0, Math.min(1, volume)) }),
-
-        setAutoPlayLecture: (autoPlay) => set({ autoPlayLecture: autoPlay }),
-
-        setPlaybackSpeed: (speed) => set({ playbackSpeed: speed }),
-
-        setSelectedAgentIds: (ids) => set({ selectedAgentIds: ids }),
-
-        setAgentMode: (mode) => set({ agentMode: mode }),
-        setAutoAgentCount: (count) => set({ autoAgentCount: count }),
-        setAgentVoiceOverride: (agentId, voice) =>
-          set((state) => {
-            const next = { ...state.agentVoiceOverrides };
-            if (voice) {
-              next[agentId] = voice;
-            } else {
-              delete next[agentId];
-            }
-            return { agentVoiceOverrides: next };
-          }),
-        setAgentSelectionIsUserSet: (isUserSet) => set({ agentSelectionIsUserSet: isUserSet }),
-
-        // Layout actions
-        setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
-        setChatAreaCollapsed: (collapsed) => set({ chatAreaCollapsed: collapsed }),
-        setEditRailCollapsed: (collapsed) => set({ editRailCollapsed: collapsed }),
-        setEditRailWidth: (width) => set({ editRailWidth: width }),
-        setChatAreaWidth: (width) => set({ chatAreaWidth: width }),
-
-        // Audio actions
-        setTTSProvider: (providerId) =>
-          set((state) => {
-            // If switching provider, set default voice for that provider
-            const shouldUpdateVoice = state.ttsProviderId !== providerId;
-            const defaultVoice = isCustomTTSProvider(providerId)
-              ? state.ttsProvidersConfig[providerId]?.customVoices?.[0]?.id || 'default'
-              : DEFAULT_TTS_VOICES[providerId as BuiltInTTSProviderId] || 'default';
-            return {
-              ttsProviderId: providerId,
-              ...(shouldUpdateVoice && { ttsVoice: defaultVoice }),
-              ...(providerId === 'qwen-tts' &&
-              isQwenCatalogVoice(defaultVoice) &&
-              isQwenVoiceCloneModel(state.ttsProvidersConfig['qwen-tts']?.modelId)
-                ? {
-                    ttsProvidersConfig: {
-                      ...state.ttsProvidersConfig,
-                      'qwen-tts': {
-                        ...state.ttsProvidersConfig['qwen-tts'],
-                        modelId: TTS_PROVIDERS['qwen-tts'].defaultModelId,
-                      },
-                    },
-                  }
-                : {}),
-            };
-          }),
-
-        setTTSVoice: (voice) =>
-          set((state) => ({
-            ttsVoice: voice,
-            ...(state.ttsProviderId === 'qwen-tts' &&
-            isQwenCatalogVoice(voice) &&
-            isQwenVoiceCloneModel(state.ttsProvidersConfig['qwen-tts']?.modelId)
-              ? {
-                  ttsProvidersConfig: {
-                    ...state.ttsProvidersConfig,
-                    'qwen-tts': {
-                      ...state.ttsProvidersConfig['qwen-tts'],
-                      modelId: TTS_PROVIDERS['qwen-tts'].defaultModelId,
-                    },
-                  },
-                }
-              : {}),
-          })),
-
-        setTTSSpeed: (speed) => set({ ttsSpeed: speed }),
-
-        // Reset language when switching providers, since language code formats differ
-        // (e.g. browser-native uses BCP-47 "en-US", OpenAI Whisper uses ISO 639-1 "en")
-        setASRProvider: (providerId) =>
-          set((state) => ({
-            asrProviderId: providerId,
-            asrLanguage: getValidASRLanguage(providerId, state.asrLanguage),
-          })),
-
-        setASRLanguage: (language) => set({ asrLanguage: language }),
-
-        setTTSProviderConfig: (providerId, config) =>
-          set((state) => {
-            const mergedProvider = {
-              ...state.ttsProvidersConfig[providerId],
-              ...config,
-            };
-            const ttsProvidersConfig = {
-              ...state.ttsProvidersConfig,
-              [providerId]: mergedProvider,
-            };
-            // Disabling the active provider (e.g. removing a token plan) switches
-            // the selection back to the always-available browser TTS so playback
-            // doesn't keep pointing at a disabled provider with an empty key.
-            if (state.ttsProviderId === providerId && config.enabled === false) {
-              return {
-                ttsProvidersConfig,
-                ttsProviderId: getDefaultAudioConfig().ttsProviderId,
-                ttsVoice: 'default',
-              };
-            }
-            // Settings can configure a hosted provider after first-run auto-config
-            // has already run. The global flag has no control on that page, so
-            // becoming usable (empty -> key) must also turn narration on (#1288).
-            // Do not re-enable on later edits if the user turned the flag off.
-            const wasUsable = isTTSProviderEnabled(
-              providerId,
-              state.ttsProvidersConfig[providerId],
-            );
-            const nowUsable = isTTSProviderEnabled(providerId, mergedProvider);
-            const turnOnNarration =
-              providerId !== 'browser-native-tts' &&
-              shouldTurnOn(state.ttsEnabled, !wasUsable && nowUsable);
-            return {
-              ttsProvidersConfig,
-              ...(turnOnNarration ? { ttsEnabled: true } : {}),
-            };
-          }),
-
-        setASRProviderConfig: (providerId, config) =>
-          set((state) => ({
-            asrProvidersConfig: {
-              ...state.asrProvidersConfig,
-              [providerId]: {
-                ...state.asrProvidersConfig[providerId],
-                ...config,
-              },
-            },
-          })),
-
-        // PDF actions
-        setPDFProvider: (providerId) => set({ pdfProviderId: providerId }),
-
-        setPDFProviderConfig: (providerId, config) =>
-          set((state) => ({
-            pdfProvidersConfig: {
-              ...state.pdfProvidersConfig,
-              [providerId]: {
-                ...state.pdfProvidersConfig[providerId],
-                ...config,
-              },
-            },
-          })),
-
-        // Image Generation actions
-        setImageProvider: (providerId) =>
-          set((state) => ({
-            imageProviderId: providerId,
-            imageModelId: resolveSelectedModel(
-              state.imageModelId,
-              resolveImageProviderModels(providerId, state.imageProvidersConfig[providerId]),
-            ),
-          })),
-        setImageModelId: (modelId) =>
-          set((state) => {
-            const selectedProvider = IMAGE_PROVIDERS[state.imageProviderId];
-            return {
-              imageModelId:
-                selectedProvider && getImageProviderCredentialMode(selectedProvider) === 'oauth'
-                  ? resolveSelectedModel(
-                      modelId,
-                      resolveImageProviderModels(
-                        state.imageProviderId,
-                        state.imageProvidersConfig[state.imageProviderId],
-                      ),
-                    )
-                  : modelId,
-            };
-          }),
-
-        setImageProviderConfig: (providerId, config) =>
-          set((state) => {
-            const currentProvider = state.imageProvidersConfig[providerId];
-            let mergedProvider: ImageProviderSettings = {
-              ...currentProvider,
-              ...config,
-            };
-            if (getImageProviderCredentialMode(IMAGE_PROVIDERS[providerId]) === 'oauth') {
-              mergedProvider = sanitizeOAuthImageProviderConfig(providerId, {
-                ...mergedProvider,
-                // Only a successful server sync may publish managed state.
-                isServerConfigured: currentProvider.isServerConfigured,
-              });
-            }
-            const imageProvidersConfig = {
-              ...state.imageProvidersConfig,
-              [providerId]: mergedProvider,
-            };
-            // Same usable-transition as TTS: empty -> usable turns the global
-            // flag on. A force-disabled provider (enabled: false) stays unused,
-            // and keyless providers (comfyui-image, lemonade) become usable
-            // from a baseUrl, not an API key.
-            const wasUsable = isUsableMediaProvider(
-              IMAGE_PROVIDERS[providerId],
-              state.imageProvidersConfig[providerId],
-            );
-            const nowUsable = isUsableMediaProvider(IMAGE_PROVIDERS[providerId], mergedProvider);
-            const turnOnImage = shouldTurnOn(state.imageGenerationEnabled, !wasUsable && nowUsable);
-            const base = {
-              imageProvidersConfig,
-              ...(turnOnImage ? { imageGenerationEnabled: true } : {}),
-            };
-            if (state.imageProviderId === providerId) {
-              // Disabling the active provider (e.g. removing a token plan) must
-              // switch the selection away to the default, or generation paths
-              // keep pointing at a disabled provider with an empty key.
-              if (config.enabled === false) {
-                const providerIds = Object.keys(IMAGE_PROVIDERS) as ImageProviderId[];
-                const usableFallback = providerIds.find(
-                  (id) =>
-                    id !== providerId &&
-                    isUsableMediaProvider(IMAGE_PROVIDERS[id], imageProvidersConfig[id]),
-                );
-                const fallback =
-                  usableFallback ?? providerIds.find((id) => id !== providerId) ?? providerId;
-                const fallbackModels = resolveImageProviderModels(
-                  fallback,
-                  imageProvidersConfig[fallback],
-                );
-                return {
-                  ...base,
-                  imageProviderId: fallback,
-                  imageModelId: resolveSelectedModel(state.imageModelId, fallbackModels),
-                  ...(!usableFallback ? { imageGenerationEnabled: false } : {}),
-                };
-              }
-              // Atomic invariant (#580): a config edit on the active image
-              // provider (e.g. deleting the selected custom model) must not
-              // leave imageModelId pointing at a model that no longer exists.
-              const models = resolveImageProviderModels(providerId, mergedProvider);
-              const imageModelId = resolveSelectedModel(state.imageModelId, models);
-              if (imageModelId) {
-                return { ...base, imageModelId };
-              }
-            }
-            return base;
-          }),
-
-        // Video Generation actions
-        setVideoProvider: (providerId) =>
-          set((state) => ({
-            videoProviderId: providerId,
-            videoModelId: resolveSelectedModel(
-              state.videoModelId,
-              resolveMediaModels(
-                VIDEO_PROVIDERS[providerId]?.models ?? [],
-                state.videoProvidersConfig[providerId],
-              ),
-            ),
-          })),
-        setVideoModelId: (modelId) => set({ videoModelId: modelId }),
-
-        setVideoProviderConfig: (providerId, config) =>
-          set((state) => {
-            const mergedProvider = {
-              ...state.videoProvidersConfig[providerId],
-              ...config,
-            };
-            const videoProvidersConfig = {
-              ...state.videoProvidersConfig,
-              [providerId]: mergedProvider,
-            };
-            const wasUsable = isUsableMediaProvider(
-              VIDEO_PROVIDERS[providerId],
-              state.videoProvidersConfig[providerId],
-            );
-            const nowUsable = isUsableMediaProvider(VIDEO_PROVIDERS[providerId], mergedProvider);
-            const turnOnVideo = shouldTurnOn(state.videoGenerationEnabled, !wasUsable && nowUsable);
-            const base = {
-              videoProvidersConfig,
-              ...(turnOnVideo ? { videoGenerationEnabled: true } : {}),
-            };
-            if (state.videoProviderId === providerId) {
-              // Symmetric with image: disabling the active provider switches the
-              // selection back to the default so nothing keeps pointing at a
-              // disabled provider with an empty key.
-              if (config.enabled === false) {
-                const providerIds = Object.keys(VIDEO_PROVIDERS) as VideoProviderId[];
-                const usableFallback = providerIds.find(
-                  (id) =>
-                    id !== providerId &&
-                    isUsableMediaProvider(VIDEO_PROVIDERS[id], videoProvidersConfig[id]),
-                );
-                const fallback =
-                  usableFallback ?? providerIds.find((id) => id !== providerId) ?? providerId;
-                const fallbackModels = resolveMediaModels(
-                  VIDEO_PROVIDERS[fallback]?.models ?? [],
-                  videoProvidersConfig[fallback],
-                );
-                return {
-                  ...base,
-                  videoProviderId: fallback,
-                  videoModelId: resolveSelectedModel(state.videoModelId, fallbackModels),
-                  ...(!usableFallback ? { videoGenerationEnabled: false } : {}),
-                };
-              }
-              // Atomic invariant (#580): symmetric with image — a config edit on
-              // the active video provider must not leave videoModelId stale.
-              const models = resolveMediaModels(
-                VIDEO_PROVIDERS[providerId]?.models ?? [],
-                mergedProvider,
-              );
-              const videoModelId = resolveSelectedModel(state.videoModelId, models);
-              if (videoModelId) {
-                return { ...base, videoModelId };
-              }
-            }
-            return base;
-          }),
-
-        // Media generation toggle actions
-        setImageGenerationEnabled: (enabled) => {
-          if (enabled) {
-            const cfg = get().imageProvidersConfig;
-            const hasUsable = (Object.keys(IMAGE_PROVIDERS) as ImageProviderId[]).some(
-              (id) =>
-                isUsableMediaProvider(IMAGE_PROVIDERS[id], cfg[id]) && !cfg[id]?.serverDisabled,
-            );
-            if (!hasUsable) return;
-          }
-          set({
-            imageGenerationEnabled: enabled,
-            imageGenerationPreference: enabled,
-          });
-        },
-        setVideoGenerationEnabled: (enabled) => {
-          if (enabled) {
-            const cfg = get().videoProvidersConfig;
-            const hasUsable = Object.values(cfg).some(
-              (c) => (c.isServerConfigured || c.apiKey) && c.enabled !== false,
-            );
-            if (!hasUsable) return;
-          }
-          set({ videoGenerationEnabled: enabled });
-        },
-        setReviewOutlineEnabled: (enabled) => set({ reviewOutlineEnabled: enabled }),
-        setReverseChallengeEnabled: (enabled) => set({ reverseChallengeEnabled: enabled }),
-        setStableSuccessesRequired: (count) =>
-          set({ stableSuccessesRequired: Math.max(1, Math.min(12, Math.round(count))) }),
-        setActiveRevisitDemoSession: (stageId, sessionId) =>
-          set((state) => {
-            const activeRevisitDemoSessionByStage = {
-              ...state.activeRevisitDemoSessionByStage,
-            };
-            const revisitVirtualClockOffsetHoursByStage = {
-              ...state.revisitVirtualClockOffsetHoursByStage,
-            };
-            if (sessionId) {
-              activeRevisitDemoSessionByStage[stageId] = sessionId;
-            } else {
-              delete activeRevisitDemoSessionByStage[stageId];
-              delete revisitVirtualClockOffsetHoursByStage[stageId];
-            }
-            return {
-              activeRevisitDemoSessionByStage,
-              revisitVirtualClockOffsetHoursByStage,
-            };
-          }),
-        setRevisitVirtualClockOffsetHours: (stageId, hours) =>
-          set((state) => ({
-            revisitVirtualClockOffsetHoursByStage: {
-              ...state.revisitVirtualClockOffsetHoursByStage,
-              [stageId]: Math.max(0, Math.min(168, Number.isFinite(hours) ? Math.round(hours) : 0)),
-            },
-          })),
-        setDemoGateSkipEnabled: (enabled) => set({ demoGateSkipEnabled: enabled }),
-        setTTSEnabled: (enabled) => set({ ttsEnabled: enabled }),
-        setASREnabled: (enabled) => set({ asrEnabled: enabled }),
-
-        // Custom audio provider actions
-        addCustomTTSProvider: (id, name, baseUrl, requiresApiKey, defaultModel) =>
-          set((state) => ({
-            ttsProvidersConfig: {
-              ...state.ttsProvidersConfig,
-              [id]: {
-                apiKey: '',
-                baseUrl: '',
-                enabled: true,
-                modelId: defaultModel || '',
-                customName: name,
-                customDefaultBaseUrl: baseUrl,
-                customVoices: [],
-                isBuiltIn: false,
-                requiresApiKey,
-              },
-            },
-            ttsProviderId: id,
-          })),
-
-        removeCustomTTSProvider: (id) =>
-          set((state) => {
-            if (!isCustomTTSProvider(id)) return state;
-            const { [id]: _, ...rest } = state.ttsProvidersConfig;
-            return {
-              ttsProvidersConfig: rest as typeof state.ttsProvidersConfig,
-              ...(state.ttsProviderId === id && {
-                ttsProviderId: 'browser-native-tts' as TTSProviderId,
-                ttsVoice: 'default',
-              }),
-            };
-          }),
-
-        addCustomASRProvider: (id, name, baseUrl, requiresApiKey) =>
-          set((state) => ({
-            asrProvidersConfig: {
-              ...state.asrProvidersConfig,
-              [id]: {
-                apiKey: '',
-                baseUrl: '',
-                enabled: true,
-                modelId: '',
-                customModels: [],
-                customName: name,
-                customDefaultBaseUrl: baseUrl,
-                isBuiltIn: false,
-                requiresApiKey,
-              },
-            },
-            asrProviderId: id,
-            asrLanguage: getValidASRLanguage(id, state.asrLanguage),
-          })),
-
-        removeCustomASRProvider: (id) =>
-          set((state) => {
-            if (!isCustomASRProvider(id)) return state;
-            const { [id]: _, ...rest } = state.asrProvidersConfig;
-            const fallbackProvider: ASRProviderId = 'browser-native';
-            return {
-              asrProvidersConfig: rest as typeof state.asrProvidersConfig,
-              ...(state.asrProviderId === id && {
-                asrProviderId: fallbackProvider,
-                asrLanguage: getValidASRLanguage(fallbackProvider, state.asrLanguage),
-              }),
-            };
-          }),
-
-        // Web Search actions
-        setWebSearchProvider: (providerId) => set({ webSearchProviderId: providerId }),
-        setWebSearchProviderConfig: (providerId, config) =>
-          set((state) => {
-            const webSearchProvidersConfig = {
-              ...state.webSearchProvidersConfig,
-              [providerId]: {
-                ...state.webSearchProvidersConfig[providerId],
-                ...config,
-              },
-            };
-            // Disabling the active provider switches the selection back to the
-            // default so web search doesn't keep pointing at a disabled provider.
-            if (state.webSearchProviderId === providerId && config.enabled === false) {
-              return {
-                webSearchProvidersConfig,
-                webSearchProviderId: getDefaultWebSearchConfig().webSearchProviderId,
-              };
-            }
-            return { webSearchProvidersConfig };
-          }),
-        setBaiduSubSources: (sources) =>
-          set((state) => {
-            const next = {
-              ...state.baiduSubSources,
-              ...sources,
-            };
-            if (!next.webSearch && !next.baike && !next.scholar) {
-              return state;
-            }
-            return { baiduSubSources: next };
-          }),
-
-        // Fetch server-configured providers and merge into local state
-        fetchServerProviders: async (options) => {
-          const requestGeneration = ++latestServerProvidersRequest;
-          const selectionRevisionAtRequest = userLLMSelectionRevision;
-          const selectedAtRequest = get();
-          const currentlyUsableOAuthImageProviders = new Set(
-            (Object.keys(IMAGE_PROVIDERS) as ImageProviderId[]).filter(
-              (providerId) =>
-                getImageProviderCredentialMode(IMAGE_PROVIDERS[providerId]) === 'oauth' &&
-                isUsableSyncedImageProvider(
-                  IMAGE_PROVIDERS[providerId],
-                  selectedAtRequest.imageProvidersConfig[providerId],
-                ),
-            ),
-          );
-          const usableOAuthImageProvidersAtRequest = new Set([
-            ...(pendingOAuthImageUsability?.providerIds ?? []),
-            ...currentlyUsableOAuthImageProviders,
-          ]);
-          pendingOAuthImageUsability = {
-            requestGeneration,
-            providerIds: new Set(usableOAuthImageProvidersAtRequest),
+    (set) => ({
+      codexFastMode: false,
+      reverseChallengeEnabled: false,
+      stableSuccessesRequired: 2,
+      activeRevisitDemoSessionByStage: {},
+      revisitVirtualClockOffsetHoursByStage: {},
+      demoGateSkipEnabled: false,
+      setCodexFastMode: (enabled) => set({ codexFastMode: enabled }),
+      setReverseChallengeEnabled: (enabled) => set({ reverseChallengeEnabled: enabled }),
+      setStableSuccessesRequired: (count) =>
+        set({ stableSuccessesRequired: Math.max(1, Math.min(12, Math.round(count))) }),
+      setActiveRevisitDemoSession: (stageId, sessionId) =>
+        set((state) => {
+          const activeRevisitDemoSessionByStage = { ...state.activeRevisitDemoSessionByStage };
+          const revisitVirtualClockOffsetHoursByStage = {
+            ...state.revisitVirtualClockOffsetHoursByStage,
           };
-          const pendingAtRequest = pendingCodexSelectionRestore;
-          const inheritsPendingCodexIntent = Boolean(
-            selectedAtRequest.providerId !== 'openai-codex' &&
-            pendingAtRequest &&
-            pendingAtRequest.selectionRevision === selectionRevisionAtRequest &&
-            matchesLLMSelection(selectedAtRequest, pendingAtRequest.fallback),
-          );
-          const codexSelectionIntent =
-            selectedAtRequest.providerId === 'openai-codex'
-              ? { modelId: selectedAtRequest.modelId }
-              : inheritsPendingCodexIntent
-                ? (pendingAtRequest?.intent ?? null)
-                : null;
-          if (!codexSelectionIntent) pendingCodexSelectionRestore = null;
-          let scrubbedSelection: { providerId: ProviderId; modelId: string } | null = null;
-          let scrubbedSelectionRevision: number | null = null;
-          const clearPendingCodexRestore = () => {
-            if (pendingCodexSelectionRestore?.requestGeneration === requestGeneration) {
-              pendingCodexSelectionRestore = null;
-            }
-          };
-          const clearPendingOAuthImageUsability = () => {
-            if (pendingOAuthImageUsability?.requestGeneration === requestGeneration) {
-              pendingOAuthImageUsability = null;
-            }
-          };
-          const scrubOAuthState = (
-            preserveCodexRestore = true,
-            reconcileImageSelection = false,
-          ) => {
-            if (requestGeneration !== latestServerProvidersRequest) return;
-            set((state) => {
-              const providersConfig = resetOAuthProviderState(state.providersConfig);
-              const imageProvidersConfig = resetOAuthImageProviderState(state.imageProvidersConfig);
-              const selection = resolveLLMSelection(
-                providersConfig,
-                state.providerId,
-                state.modelId,
-              );
-              const canPreserveCodexIntent = Boolean(
-                preserveCodexRestore &&
-                codexSelectionIntent &&
-                userLLMSelectionRevision === selectionRevisionAtRequest &&
-                (state.providerId === 'openai-codex' ||
-                  (inheritsPendingCodexIntent &&
-                    pendingAtRequest &&
-                    matchesLLMSelection(state, pendingAtRequest.fallback))),
-              );
-              if (canPreserveCodexIntent && codexSelectionIntent) {
-                scrubbedSelection = selection;
-                scrubbedSelectionRevision = userLLMSelectionRevision;
-                pendingCodexSelectionRestore = {
-                  requestGeneration,
-                  selectionRevision: userLLMSelectionRevision,
-                  intent: codexSelectionIntent,
-                  fallback: selection,
-                };
-              } else {
-                clearPendingCodexRestore();
-              }
-              const selectedImageProvider = IMAGE_PROVIDERS[state.imageProviderId];
-              const shouldReconcileImage = Boolean(
-                reconcileImageSelection &&
-                selectedImageProvider &&
-                getImageProviderCredentialMode(selectedImageProvider) === 'oauth',
-              );
-              const imageFallback = shouldReconcileImage
-                ? buildImageProviderFallbackOrder(imageProvidersConfig, state.imageProviderId)[0]
-                : undefined;
-              return {
-                providersConfig,
-                imageProvidersConfig,
-                codexFastMode: false,
-                ...(selection.providerId !== state.providerId && {
-                  providerId: selection.providerId,
-                }),
-                ...(selection.modelId !== state.modelId && { modelId: selection.modelId }),
-                ...(shouldReconcileImage && {
-                  imageProviderId: imageFallback ?? ('' as ImageProviderId),
-                  imageModelId: imageFallback
-                    ? resolveSelectedModel(
-                        state.imageModelId,
-                        resolveImageProviderModels(
-                          imageFallback,
-                          imageProvidersConfig[imageFallback],
-                        ),
-                      )
-                    : '',
-                  ...(!imageFallback ? { imageGenerationEnabled: false } : {}),
-                }),
-              };
-            });
-          };
-          const finalizeFailedSync = () => {
-            if (requestGeneration !== latestServerProvidersRequest) return;
-            scrubOAuthState(false, true);
-            clearPendingCodexRestore();
-            clearPendingOAuthImageUsability();
-          };
-
-          // Account identity is intentionally absent from this browser DTO.
-          // Drop account-scoped OAuth state before every refresh, then publish
-          // only the latest successful response.
-          scrubOAuthState(true, options?.reconcileOAuthImageSelectionImmediately === true);
-          try {
-            const res = await fetch('/api/server-providers');
-            if (requestGeneration !== latestServerProvidersRequest) return;
-            if (!res.ok) {
-              finalizeFailedSync();
-              return;
-            }
-            // Managed providers expose only their allowed model list (LLM/image)
-            // and presence (the "managed" flag) — never a base URL. Every
-            // capability section carries an optional `disabled` flag for
-            // admin/server-level force-off (#665).
-            const data = (await res.json()) as {
-              providers: Record<
-                string,
-                { models?: string[]; fastModels?: string[]; modelCatalog?: unknown }
-              >;
-              tts: Record<string, { disabled?: boolean }>;
-              asr: Record<string, { disabled?: boolean }>;
-              pdf: Record<string, Record<string, never>>;
-              image: Record<string, { models?: string[]; disabled?: boolean }>;
-              video: Record<string, { models?: string[]; disabled?: boolean }>;
-              webSearch: Record<string, { disabled?: boolean }>;
-              generation?: { parallelSceneConcurrency?: number };
-            };
-            if (requestGeneration !== latestServerProvidersRequest) return;
-
-            set((state) => {
-              // Merge LLM providers
-              const newProvidersConfig = resetOAuthProviderState(state.providersConfig);
-              // First reset all server flags
-              for (const pid of Object.keys(newProvidersConfig)) {
-                const key = pid as ProviderId;
-                if (newProvidersConfig[key]) {
-                  const registryProvider = PROVIDERS[key];
-                  const isOAuth = registryProvider?.credentialMode === 'oauth';
-                  newProvidersConfig[key] = {
-                    ...newProvidersConfig[key],
-                    ...(isOAuth
-                      ? {
-                          apiKey: '',
-                          baseUrl: '',
-                          models: getOAuthProviderBaselineModels(key),
-                          name: registryProvider.name,
-                          type: registryProvider.type,
-                          icon: registryProvider.icon,
-                          requiresApiKey: registryProvider.requiresApiKey,
-                          credentialMode: registryProvider.credentialMode,
-                        }
-                      : {}),
-                    isServerConfigured: false,
-                    serverModels: undefined,
-                  };
-                }
-              }
-              // Set flags for server-configured providers
-              for (const [pid, info] of Object.entries(data.providers)) {
-                const key = pid as ProviderId;
-                if (newProvidersConfig[key]) {
-                  const currentModels = newProvidersConfig[key].models;
-                  const hasRichCodexCatalog =
-                    key === 'openai-codex' &&
-                    Object.prototype.hasOwnProperty.call(info, 'modelCatalog');
-                  const richCodexCatalog = hasRichCodexCatalog
-                    ? rebuildCodexModelCatalog(info.modelCatalog)
-                    : null;
-                  const catalogModels = PROVIDERS[key]?.models;
-                  // When server specifies allowed models, filter the models list
-                  // while preserving custom IDs from env/YAML in server order.
-                  const filteredModels = hasRichCodexCatalog
-                    ? (richCodexCatalog ?? [])
-                    : info.models?.length
-                      ? info.models.map((id) => {
-                          const currentModel = findModelById(key, currentModels, id);
-                          const builtInModel = findModelById(key, catalogModels, id);
-                          const model =
-                            currentModel && builtInModel
-                              ? {
-                                  ...builtInModel,
-                                  ...currentModel,
-                                  name:
-                                    currentModel.name === currentModel.id
-                                      ? builtInModel.name
-                                      : currentModel.name,
-                                  capabilities: {
-                                    ...builtInModel.capabilities,
-                                    ...currentModel.capabilities,
-                                  },
-                                }
-                              : (currentModel ?? builtInModel);
-                          return model
-                            ? { ...model, id, name: model.name || id }
-                            : { id, name: id };
-                        })
-                      : currentModels;
-                  const fastModelIds = new Set(hasRichCodexCatalog ? [] : (info.fastModels ?? []));
-                  const models =
-                    key === 'openai-codex' && !hasRichCodexCatalog
-                      ? filteredModels.map((model) => {
-                          if (fastModelIds.has(model.id)) {
-                            return {
-                              ...model,
-                              capabilities: {
-                                ...model.capabilities,
-                                serviceTiers: ['priority'] as ModelServiceTier[],
-                              },
-                            };
-                          }
-                          if (!model.capabilities?.serviceTiers) return model;
-                          const { serviceTiers: _serviceTiers, ...capabilities } =
-                            model.capabilities;
-                          return {
-                            ...model,
-                            capabilities:
-                              Object.keys(capabilities).length > 0 ? capabilities : undefined,
-                          };
-                        })
-                      : filteredModels;
-                  newProvidersConfig[key] = {
-                    ...newProvidersConfig[key],
-                    isServerConfigured: true,
-                    serverModels: hasRichCodexCatalog
-                      ? (richCodexCatalog?.map((model) => model.id) ?? [])
-                      : info.models,
-                    models,
-                  };
-                }
-              }
-
-              // Merge TTS providers. Reset both server flags first, then apply:
-              // an entry with `disabled` is force-off (server precedence) and is
-              // NOT treated as managed/configured; any other entry is managed.
-              const newTTSConfig = { ...state.ttsProvidersConfig };
-              for (const pid of Object.keys(newTTSConfig)) {
-                const key = pid as TTSProviderId;
-                if (newTTSConfig[key]) {
-                  newTTSConfig[key] = {
-                    ...newTTSConfig[key],
-                    isServerConfigured: false,
-                    serverDisabled: false,
-                  };
-                }
-              }
-              for (const [pid, info] of Object.entries(data.tts || {})) {
-                const key = pid as TTSProviderId;
-                if (newTTSConfig[key]) {
-                  newTTSConfig[key] = {
-                    ...newTTSConfig[key],
-                    isServerConfigured: !info.disabled,
-                    serverDisabled: info.disabled === true,
-                  };
-                }
-              }
-
-              // Merge ASR providers. Reset both server flags first, then apply:
-              // an entry with `disabled` is force-off (server precedence) and is
-              // NOT treated as managed/configured, mirroring the TTS merge.
-              const newASRConfig = { ...state.asrProvidersConfig };
-              for (const pid of Object.keys(newASRConfig)) {
-                const key = pid as ASRProviderId;
-                if (newASRConfig[key]) {
-                  newASRConfig[key] = {
-                    ...newASRConfig[key],
-                    isServerConfigured: false,
-                    serverDisabled: false,
-                  };
-                }
-              }
-              for (const [pid, info] of Object.entries(data.asr || {})) {
-                const key = pid as ASRProviderId;
-                if (newASRConfig[key]) {
-                  newASRConfig[key] = {
-                    ...newASRConfig[key],
-                    isServerConfigured: !info.disabled,
-                    serverDisabled: info.disabled === true,
-                  };
-                }
-              }
-
-              // Merge PDF providers
-              const newPDFConfig = { ...state.pdfProvidersConfig };
-              for (const pid of Object.keys(newPDFConfig)) {
-                const key = pid as PDFProviderId;
-                if (newPDFConfig[key]) {
-                  newPDFConfig[key] = {
-                    ...newPDFConfig[key],
-                    isServerConfigured: false,
-                  };
-                }
-              }
-              for (const pid of Object.keys(data.pdf)) {
-                const key = pid as PDFProviderId;
-                if (newPDFConfig[key]) {
-                  newPDFConfig[key] = {
-                    ...newPDFConfig[key],
-                    isServerConfigured: true,
-                  };
-                }
-              }
-
-              // Merge Image providers. Reset both server flags first, then
-              // apply: `disabled` is force-off (server precedence), mirroring
-              // the TTS merge.
-              const newImageConfig = { ...state.imageProvidersConfig };
-              for (const pid of Object.keys(newImageConfig)) {
-                const key = pid as ImageProviderId;
-                if (newImageConfig[key]) {
-                  const isOAuth = IMAGE_PROVIDERS[key]?.credentialMode === 'oauth';
-                  newImageConfig[key] = {
-                    ...(isOAuth
-                      ? sanitizeOAuthImageProviderConfig(key, newImageConfig[key])
-                      : newImageConfig[key]),
-                    isServerConfigured: false,
-                    serverDisabled: false,
-                  };
-                }
-              }
-              for (const [pid, info] of Object.entries(data.image)) {
-                const key = pid as ImageProviderId;
-                if (newImageConfig[key]) {
-                  newImageConfig[key] = {
-                    ...newImageConfig[key],
-                    isServerConfigured: !info.disabled,
-                    serverDisabled: info.disabled === true,
-                    ...(info.models?.length
-                      ? {
-                          customModels: info.models.map((id) => ({ id, name: id })),
-                          replaceBuiltInModels: true,
-                        }
-                      : {}),
-                  };
-                }
-              }
-
-              // Merge Video providers. Reset both server flags first, then
-              // apply: `disabled` is force-off (server precedence), mirroring
-              // the TTS merge.
-              const newVideoConfig = { ...state.videoProvidersConfig };
-              for (const pid of Object.keys(newVideoConfig)) {
-                const key = pid as VideoProviderId;
-                if (newVideoConfig[key]) {
-                  newVideoConfig[key] = {
-                    ...newVideoConfig[key],
-                    isServerConfigured: false,
-                    serverDisabled: false,
-                  };
-                }
-              }
-              if (data.video) {
-                for (const [pid, info] of Object.entries(data.video)) {
-                  const key = pid as VideoProviderId;
-                  if (newVideoConfig[key]) {
-                    newVideoConfig[key] = {
-                      ...newVideoConfig[key],
-                      isServerConfigured: !info.disabled,
-                      serverDisabled: info.disabled === true,
-                      ...(info.models?.length
-                        ? {
-                            customModels: info.models.map((id) => ({ id, name: id })),
-                            replaceBuiltInModels: true,
-                          }
-                        : {}),
-                    };
-                  }
-                }
-              }
-
-              // Merge Web Search config — reset all first, then mark
-              // server-configured; `disabled` is force-off (server precedence),
-              // mirroring the TTS merge.
-              const newWebSearchConfig = { ...state.webSearchProvidersConfig };
-              for (const key of Object.keys(newWebSearchConfig) as WebSearchProviderId[]) {
-                newWebSearchConfig[key] = {
-                  ...newWebSearchConfig[key],
-                  isServerConfigured: false,
-                  serverDisabled: false,
-                };
-              }
-              if (data.webSearch) {
-                for (const [pid, info] of Object.entries(data.webSearch)) {
-                  const key = pid as WebSearchProviderId;
-                  if (newWebSearchConfig[key]) {
-                    newWebSearchConfig[key] = {
-                      ...newWebSearchConfig[key],
-                      isServerConfigured: !info.disabled,
-                      serverDisabled: info.disabled === true,
-                    };
-                  }
-                }
-              }
-
-              // === Validate current selections against updated configs ===
-              // Keep the catalog-aware LLM gate and exclude authorization-disabled fallbacks.
-              const llmFallback = [
-                ...Object.entries(newProvidersConfig)
-                  .filter(([, config]) => config.isServerConfigured)
-                  .filter(([, config]) => isLLMProviderConfigured(config))
-                  .map(([id]) => id as ProviderId),
-                ...Object.entries(newProvidersConfig)
-                  .filter(([, config]) => !config.isServerConfigured)
-                  .filter(([, config]) => isLLMProviderConfigured(config))
-                  .map(([id]) => id as ProviderId),
-              ];
-              const ttsFallback = buildUsableFallbackOrder<TTSProviderId>(newTTSConfig);
-              const asrFallback = buildUsableFallbackOrder<ASRProviderId>(newASRConfig);
-              const pdfFallback = buildUsableFallbackOrder<PDFProviderId>(newPDFConfig);
-              const imageProviderIds = Object.keys(IMAGE_PROVIDERS) as ImageProviderId[];
-              const priorUsableImageProviders = imageProviderIds.filter((providerId) =>
-                Boolean(
-                  isUsableSyncedImageProvider(
-                    IMAGE_PROVIDERS[providerId],
-                    state.imageProvidersConfig[providerId],
-                  ) ||
-                  (usableOAuthImageProvidersAtRequest.has(providerId) &&
-                    state.imageProvidersConfig[providerId]?.enabled !== false),
-                ),
-              );
-              const currentlyUsableImageProviders = imageProviderIds.filter((providerId) =>
-                isUsableSyncedImageProvider(
-                  IMAGE_PROVIDERS[providerId],
-                  newImageConfig[providerId],
-                ),
-              );
-              const imageFallback = buildImageProviderFallbackOrder(newImageConfig);
-              const videoFallback = buildUsableFallbackOrder<VideoProviderId>(newVideoConfig, {
-                ignoreEnabledForServerConfigured: true,
-              });
-              const webSearchFallback = buildWebSearchFallbackOrder(newWebSearchConfig);
-
-              let validLLMProvider = validateProvider(
-                state.providerId,
-                newProvidersConfig,
-                llmFallback,
-              );
-              const shouldRestoreCodexSelection = Boolean(
-                codexSelectionIntent &&
-                scrubbedSelection &&
-                scrubbedSelectionRevision === userLLMSelectionRevision &&
-                state.providerId === scrubbedSelection.providerId &&
-                state.modelId === scrubbedSelection.modelId &&
-                newProvidersConfig['openai-codex']?.isServerConfigured &&
-                isLLMProviderConfigured(newProvidersConfig['openai-codex']),
-              );
-              if (shouldRestoreCodexSelection) validLLMProvider = 'openai-codex';
-              const validTTSProvider = validateProvider(
-                state.ttsProviderId,
-                newTTSConfig,
-                ttsFallback,
-                'browser-native-tts' as TTSProviderId,
-              );
-              const validASRProvider = validateProvider(
-                state.asrProviderId,
-                newASRConfig,
-                asrFallback,
-                'browser-native' as ASRProviderId,
-              );
-              const validPDFProvider = validateProvider(
-                state.pdfProviderId,
-                newPDFConfig,
-                pdfFallback,
-                'unpdf' as PDFProviderId,
-              );
-              const selectedImageProviderIsUsable = isUsableSyncedImageProvider(
-                IMAGE_PROVIDERS[state.imageProviderId],
-                newImageConfig[state.imageProviderId],
-              );
-              // Codex is the automatic image fallback only when no other usable
-              // provider exists. This also covers multiple providers becoming
-              // available in the same server sync.
-              const nonCodexImageFallback = imageFallback.find(
-                (providerId) => providerId !== 'codex-image',
-              );
-              let validImageProvider = selectedImageProviderIsUsable
-                ? state.imageProviderId
-                : (nonCodexImageFallback ?? imageFallback[0] ?? ('' as ImageProviderId));
-              let validVideoProvider = validateProvider(
-                state.videoProviderId,
-                newVideoConfig,
-                videoFallback,
-              );
-              const validWebSearchProvider = validateProvider(
-                state.webSearchProviderId,
-                newWebSearchConfig,
-                webSearchFallback,
-                'tavily' as WebSearchProviderId,
-              );
-
-              // Auto-recover: when the selected provider is empty/unusable but
-              // a usable one exists, adopt the first usable fallback. Applied
-              // symmetrically to LLM/image/video so that "usable provider ⇒ a
-              // concrete model is selected" holds for every modality (#580).
-              if (!validLLMProvider && llmFallback.length > 0) {
-                validLLMProvider = llmFallback[0];
-              }
-              if (!validImageProvider && imageFallback.length > 0) {
-                validImageProvider = imageFallback[0];
-              }
-              if (!validVideoProvider && videoFallback.length > 0) {
-                validVideoProvider = videoFallback[0];
-              }
-
-              // Resolve the model in the same place the provider is resolved.
-              // resolveSelectedModel never yields '' when the provider has ≥1
-              // model, so a usable provider can never settle with an empty model.
-              const llmModels = validLLMProvider
-                ? (newProvidersConfig[validLLMProvider as ProviderId]?.models ?? [])
-                : [];
-              const validLLMModel = validLLMProvider
-                ? resolveSelectedLLMModel(
-                    validLLMProvider as ProviderId,
-                    shouldRestoreCodexSelection
-                      ? (codexSelectionIntent?.modelId ?? state.modelId)
-                      : state.modelId,
-                    llmModels,
-                  )
-                : '';
-              const imageModels = validImageProvider
-                ? resolveImageProviderModels(
-                    validImageProvider as ImageProviderId,
-                    newImageConfig[validImageProvider as ImageProviderId],
-                  )
-                : [];
-              const validImageModel = validImageProvider
-                ? resolveSelectedModel(state.imageModelId, imageModels)
-                : '';
-              const videoModels = validVideoProvider
-                ? resolveMediaModels(
-                    VIDEO_PROVIDERS[validVideoProvider as VideoProviderId]?.models ?? [],
-                    newVideoConfig[validVideoProvider as VideoProviderId],
-                  )
-                : [];
-              const validVideoModel = validVideoProvider
-                ? resolveSelectedModel(state.videoModelId, videoModels)
-                : '';
-
-              const validTTSVoice =
-                validTTSProvider !== state.ttsProviderId
-                  ? DEFAULT_TTS_VOICES[validTTSProvider as BuiltInTTSProviderId] || 'default'
-                  : state.ttsVoice;
-              const validASRLanguage = getValidASRLanguage(
-                validASRProvider as ASRProviderId,
-                state.asrLanguage,
-              );
-
-              // Auto-disable image/video generation when no provider is usable
-              const shouldDisableImage = !validImageProvider && state.imageGenerationEnabled;
-              const shouldDisableVideo = !validVideoProvider && state.videoGenerationEnabled;
-
-              // === Auto-select / auto-enable (only on first run) ===
-              let autoTtsProvider: TTSProviderId | undefined;
-              let autoTtsVoice: string | undefined;
-              let autoAsrProvider: ASRProviderId | undefined;
-              let autoAsrLanguage: string | undefined;
-              let autoPdfProvider: PDFProviderId | undefined;
-              let autoVideoProvider: VideoProviderId | undefined;
-              let autoVideoModel: string | undefined;
-              let autoImageEnabled =
-                !state.imageGenerationEnabled &&
-                (state.imageGenerationPreference === true ||
-                  (state.imageGenerationPreference === null &&
-                    validImageProvider === 'codex-image' &&
-                    priorUsableImageProviders.length === 0))
-                  ? true
-                  : undefined;
-              let autoVideoEnabled: boolean | undefined;
-              let autoTtsEnabled: boolean | undefined;
-
-              if (!state.autoConfigApplied) {
-                // PDF: unpdf → mineru-cloud or mineru if server has it
-                if (state.pdfProviderId === 'unpdf') {
-                  if (newPDFConfig['mineru-cloud']?.isServerConfigured) {
-                    autoPdfProvider = 'mineru-cloud' as PDFProviderId;
-                  } else if (newPDFConfig.mineru?.isServerConfigured) {
-                    autoPdfProvider = 'mineru' as PDFProviderId;
-                  }
-                }
-
-                // TTS: select first server provider if current is not server-configured.
-                // Skip server-disabled entries — they are force-off, not selectable.
-                const serverTtsIds = Object.entries(data.tts || {})
-                  .filter(([, info]) => !info.disabled)
-                  .map(([id]) => id) as TTSProviderId[];
-                if (
-                  serverTtsIds.length > 0 &&
-                  !newTTSConfig[state.ttsProviderId]?.isServerConfigured
-                ) {
-                  autoTtsProvider = serverTtsIds[0];
-                  autoTtsVoice =
-                    DEFAULT_TTS_VOICES[autoTtsProvider as BuiltInTTSProviderId] || 'default';
-                }
-                // Auto-enable TTS on first run when a server provider exists
-                // (mirrors image/video). No provider ⇒ stays off + CTA.
-                if (serverTtsIds.length > 0 && !state.ttsEnabled) {
-                  autoTtsEnabled = true;
-                }
-
-                // ASR: select first server provider if current is not
-                // server-configured. Skip server-disabled entries — they are
-                // force-off, not selectable.
-                const serverAsrIds = Object.entries(data.asr || {})
-                  .filter(([, info]) => !info.disabled)
-                  .map(([id]) => id) as ASRProviderId[];
-                if (
-                  serverAsrIds.length > 0 &&
-                  !newASRConfig[state.asrProviderId]?.isServerConfigured
-                ) {
-                  autoAsrProvider = serverAsrIds[0];
-                  autoAsrLanguage = getValidASRLanguage(autoAsrProvider, state.asrLanguage);
-                }
-
-                // Image: first usable server provider. Skip force-disabled entries,
-                // then apply the OAuth/account-level availability filter.
-                const serverImageIds = Object.entries(data.image)
-                  .filter(([, info]) => !info.disabled)
-                  .map(([id]) => id) as ImageProviderId[];
-                const usableServerImageIds = serverImageIds.filter((providerId) =>
-                  currentlyUsableImageProviders.includes(providerId),
-                );
-                if (
-                  usableServerImageIds.length > 0 &&
-                  !state.imageGenerationEnabled &&
-                  state.imageGenerationPreference !== false &&
-                  (usableServerImageIds.some((providerId) => providerId !== 'codex-image') ||
-                    priorUsableImageProviders.length === 0)
-                ) {
-                  autoImageEnabled = true;
-                }
-
-                // Video: first server provider. Skip server-disabled entries —
-                // they are force-off, not selectable.
-                const serverVideoIds = Object.entries(data.video || {})
-                  .filter(([, info]) => !info.disabled)
-                  .map(([id]) => id) as VideoProviderId[];
-                if (
-                  serverVideoIds.length > 0 &&
-                  !newVideoConfig[state.videoProviderId]?.isServerConfigured
-                ) {
-                  autoVideoProvider = serverVideoIds[0];
-                  const models = VIDEO_PROVIDERS[autoVideoProvider]?.models;
-                  if (models?.length) autoVideoModel = models[0].id;
-                }
-                if (serverVideoIds.length > 0 && !state.videoGenerationEnabled) {
-                  autoVideoEnabled = true;
-                }
-              }
-
-              // (LLM first-load auto-select removed: the symmetric provider
-              // recovery + resolveSelectedModel above now resolve LLM provider
-              // and model atomically at the source, covering server-configured
-              // AND client-API-key providers — see #580.)
-
-              return {
-                providersConfig: newProvidersConfig,
-                ttsProvidersConfig: newTTSConfig,
-                asrProvidersConfig: newASRConfig,
-                pdfProvidersConfig: newPDFConfig,
-                imageProvidersConfig: newImageConfig,
-                videoProvidersConfig: newVideoConfig,
-                webSearchProvidersConfig: newWebSearchConfig,
-                // Already clamped server-side (getParallelSceneConcurrency); this
-                // re-clamp is intentional belt-and-suspenders against a malformed
-                // response. The consumer (use-scene-generator) clamps once more.
-                parallelSceneConcurrency: Math.max(
-                  0,
-                  Math.floor(data.generation?.parallelSceneConcurrency ?? 0),
-                ),
-                autoConfigApplied: true,
-                // Validated selections
-                ...(validLLMProvider !== state.providerId && {
-                  providerId: validLLMProvider as ProviderId,
-                }),
-                ...(validLLMModel !== state.modelId && { modelId: validLLMModel }),
-                ...(validTTSProvider !== state.ttsProviderId && {
-                  ttsProviderId: validTTSProvider as TTSProviderId,
-                  ttsVoice: validTTSVoice,
-                }),
-                ...(validASRProvider !== state.asrProviderId && {
-                  asrProviderId: validASRProvider as ASRProviderId,
-                  asrLanguage: validASRLanguage,
-                }),
-                ...(validASRProvider === state.asrProviderId &&
-                  validASRLanguage !== state.asrLanguage &&
-                  !autoAsrProvider && {
-                    asrLanguage: validASRLanguage,
-                  }),
-                ...(validPDFProvider !== state.pdfProviderId && {
-                  pdfProviderId: validPDFProvider as PDFProviderId,
-                }),
-                ...(validWebSearchProvider !== state.webSearchProviderId && {
-                  webSearchProviderId: validWebSearchProvider as WebSearchProviderId,
-                }),
-                ...(validImageProvider !== state.imageProviderId && {
-                  imageProviderId: validImageProvider as ImageProviderId,
-                }),
-                ...(validImageModel !== state.imageModelId && {
-                  imageModelId: validImageModel,
-                }),
-                ...(validVideoProvider !== state.videoProviderId && {
-                  videoProviderId: validVideoProvider as VideoProviderId,
-                }),
-                ...(validVideoModel !== state.videoModelId && {
-                  videoModelId: validVideoModel,
-                }),
-                ...(shouldDisableImage ? { imageGenerationEnabled: false } : {}),
-                ...(shouldDisableVideo ? { videoGenerationEnabled: false } : {}),
-                // First-run auto-select overrides validation (autoConfigApplied guard).
-                // On first sync, auto-select picks the best provider. On subsequent syncs,
-                // auto* variables stay undefined so only validation spreads take effect.
-                ...(autoPdfProvider && { pdfProviderId: autoPdfProvider }),
-                ...(autoTtsProvider && {
-                  ttsProviderId: autoTtsProvider,
-                  ttsVoice: autoTtsVoice,
-                }),
-                ...(autoAsrProvider && {
-                  asrProviderId: autoAsrProvider,
-                  asrLanguage: autoAsrLanguage,
-                }),
-                ...(autoVideoProvider && {
-                  videoProviderId: autoVideoProvider,
-                }),
-                ...(autoVideoModel && { videoModelId: autoVideoModel }),
-                ...(autoImageEnabled !== undefined && {
-                  imageGenerationEnabled: autoImageEnabled,
-                }),
-                ...(autoVideoEnabled !== undefined && {
-                  videoGenerationEnabled: autoVideoEnabled,
-                }),
-                ...(autoTtsEnabled !== undefined && { ttsEnabled: autoTtsEnabled }),
-              };
-            });
-            clearPendingCodexRestore();
-            clearPendingOAuthImageUsability();
-          } catch {
-            finalizeFailedSync();
-            // Silently fail — server providers are optional
-            log.warn('Failed to fetch server providers');
+          if (sessionId) activeRevisitDemoSessionByStage[stageId] = sessionId;
+          else {
+            delete activeRevisitDemoSessionByStage[stageId];
+            delete revisitVirtualClockOffsetHoursByStage[stageId];
           }
-        },
-      };
-    },
+          return { activeRevisitDemoSessionByStage, revisitVirtualClockOffsetHoursByStage };
+        }),
+      setRevisitVirtualClockOffsetHours: (stageId, hours) =>
+        set((state) => ({
+          revisitVirtualClockOffsetHoursByStage: {
+            ...state.revisitVirtualClockOffsetHoursByStage,
+            [stageId]: Math.max(0, Math.min(168, Number.isFinite(hours) ? Math.round(hours) : 0)),
+          },
+        })),
+      setDemoGateSkipEnabled: (enabled) => set({ demoGateSkipEnabled: enabled }),
+      ttsVoice: 'default',
+      ttsVoiceProviderId: '',
+      ttsSpeed: 1.0,
+      asrLanguage: 'zh-CN',
+      reviewOutlineEnabled: false,
+
+      // Playback controls
+      ttsMuted: false,
+      ttsVolume: 1,
+      autoPlayLecture: false,
+      playbackSpeed: 1,
+
+      // Agents
+      selectedAgentIds: ['default-1', 'default-2', 'default-3'],
+      agentMode: 'auto' as const,
+      autoAgentCount: 3,
+      agentVoiceOverrides: {},
+      agentSelectionIsUserSet: false,
+
+      // Layout preferences
+      sidebarCollapsed: true,
+      chatAreaCollapsed: true,
+      chatAreaWidth: 320,
+      editRailCollapsed: false,
+      editRailWidth: 220,
+
+      setTTSVoice: (voice, providerId) => set({ ttsVoice: voice, ttsVoiceProviderId: providerId }),
+      setTTSSpeed: (speed) => set({ ttsSpeed: speed }),
+      setASRLanguage: (language) => set({ asrLanguage: language }),
+      setReviewOutlineEnabled: (enabled) => set({ reviewOutlineEnabled: enabled }),
+
+      setTTSMuted: (muted) => set({ ttsMuted: muted }),
+      setTTSVolume: (volume) => set({ ttsVolume: Math.max(0, Math.min(1, volume)) }),
+      setAutoPlayLecture: (autoPlay) => set({ autoPlayLecture: autoPlay }),
+      setPlaybackSpeed: (speed) => set({ playbackSpeed: speed }),
+
+      setSelectedAgentIds: (ids) => set({ selectedAgentIds: ids }),
+      setAgentMode: (mode) => set({ agentMode: mode }),
+      setAutoAgentCount: (count) => set({ autoAgentCount: count }),
+      setAgentVoiceOverride: (agentId, voice) =>
+        set((state) => {
+          const next = { ...state.agentVoiceOverrides };
+          if (voice) {
+            next[agentId] = voice;
+          } else {
+            delete next[agentId];
+          }
+          return { agentVoiceOverrides: next };
+        }),
+      setAgentSelectionIsUserSet: (isUserSet) => set({ agentSelectionIsUserSet: isUserSet }),
+
+      setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
+      setChatAreaCollapsed: (collapsed) => set({ chatAreaCollapsed: collapsed }),
+      setEditRailCollapsed: (collapsed) => set({ editRailCollapsed: collapsed }),
+      setEditRailWidth: (width) => set({ editRailWidth: width }),
+      setChatAreaWidth: (width) => set({ chatAreaWidth: width }),
+    }),
     {
       name: 'settings-storage',
-      // `Partial<SettingsState>` because `migrate` below returns a partial —
-      // that is what zustand infers as the persisted shape here.
-      storage: createKVPersistStorage<Partial<SettingsState>>('account', {
+      storage: createKVPersistStorage<Partial<PersistedSettings>>('account', {
         // One recovery attempt when a write is refused because hydration never
         // succeeded — the backend may have come back since. Routed through a
         // variable assigned below rather than naming the store directly: a
-        // self-reference here would make the store's own type circular.
+        // self-reference here would make the store's own type circular, and
+        // every `useSettingsStore(s => ...)` selector would silently widen to
+        // `any`.
         onWriteRefused: () => recovery.rehydrate?.(),
       }),
       version: SETTINGS_PERSIST_VERSION,
-      // A rich Codex catalog is account-scoped server truth. Keep it in live
-      // UI state, but persist only the audited bundled snapshot so browser
-      // storage can never become a second last-known-good cache.
-      partialize: (state) => ({
-        ...state,
-        providersConfig: {
-          ...state.providersConfig,
-          'openai-codex': {
-            ...state.providersConfig['openai-codex'],
-            models: getBundledCodexModelCatalog(),
-            isServerConfigured: false,
-            serverModels: undefined,
-          },
-        },
-        imageProvidersConfig: {
-          ...state.imageProvidersConfig,
-          'codex-image': {
-            ...state.imageProvidersConfig['codex-image'],
-            apiKey: '',
-            baseUrl: '',
-            customModels: [],
-            replaceBuiltInModels: false,
-            isServerConfigured: false,
-          },
-        },
-      }),
-      // Migrate persisted state
+      partialize: (state) => pickPersisted(state),
       migrate: (persistedState: unknown, version: number) => {
-        const state = persistedState as Partial<SettingsState>;
-
-        // v0 → v1: clear hardcoded default model so user must actively select
-        if (version === 0) {
-          if (state.providerId === 'openai' && state.modelId === 'gpt-4o-mini') {
-            state.modelId = '';
-          }
-        }
-
-        // Ensure providersConfig has all built-in providers (also in merge below)
-        ensureBuiltInProviders(state);
-        promoteLegacyCustomProviderBaseUrls(state);
-
-        // Ensure image/video configs have all built-in providers
-        ensureBuiltInImageProviders(state);
-        ensureBuiltInVideoProviders(state);
-        ensureBuiltInPDFProviders(state);
-
-        // Migrate from old ttsModel to new ttsProviderId
-        if (state.ttsModel && !state.ttsProviderId) {
-          // Map old ttsModel values to new ttsProviderId
-          if (state.ttsModel === 'openai-tts') {
-            state.ttsProviderId = 'openai-tts';
-          } else if (state.ttsModel === 'azure-tts') {
-            state.ttsProviderId = 'azure-tts';
-          } else {
-            // Default to OpenAI
-            state.ttsProviderId = 'openai-tts';
-          }
-        }
-
-        // Add default audio config if missing
-        if (!state.ttsProvidersConfig || !state.asrProvidersConfig) {
-          const defaultAudioConfig = getDefaultAudioConfig();
-          for (const [key, value] of Object.entries(defaultAudioConfig)) {
-            if ((state as Record<string, unknown>)[key] === undefined) {
-              (state as Record<string, unknown>)[key] = value;
-            }
-          }
-        }
-        ensureBuiltInAudioProviders(state);
-        ensureBuiltInWebSearchProviders(state);
-
-        // Migrate global ttsModelId to per-provider
-        if ((state as Record<string, unknown>).ttsModelId) {
-          const pid = state.ttsProviderId;
-          if (pid && state.ttsProvidersConfig?.[pid]) {
-            state.ttsProvidersConfig[pid].modelId = (state as Record<string, unknown>)
-              .ttsModelId as string;
-          }
-          delete (state as Record<string, unknown>).ttsModelId;
-        }
-        // Same for asrModelId
-        if ((state as Record<string, unknown>).asrModelId) {
-          const pid = state.asrProviderId;
-          if (pid && state.asrProvidersConfig?.[pid]) {
-            state.asrProvidersConfig[pid].modelId = (state as Record<string, unknown>)
-              .asrModelId as string;
-          }
-          delete (state as Record<string, unknown>).asrModelId;
-        }
-        // Migrate MiniMax's model field to modelId
-        for (const [, cfg] of Object.entries(
-          (state.ttsProvidersConfig as Record<string, Record<string, unknown>>) || {},
-        )) {
-          if (cfg.model && !cfg.modelId) {
-            cfg.modelId = cfg.model;
-            delete cfg.model;
-          }
-        }
-
-        // Add default PDF config if missing
-        if (!state.pdfProvidersConfig) {
-          const defaultPDFConfig = getDefaultPDFConfig();
-          Object.assign(state, defaultPDFConfig);
-        }
-
-        // Add default Image config if missing
-        if (!state.imageProvidersConfig) {
-          const defaultImageConfig = getDefaultImageConfig();
-          Object.assign(state, defaultImageConfig);
-        }
-
-        // Add default Video config if missing
-        if (!state.videoProvidersConfig) {
-          const defaultVideoConfig = getDefaultVideoConfig();
-          Object.assign(state, defaultVideoConfig);
-        }
-
-        // v1 → v2: Replace deep research with web search
-        if (version < 2) {
-          delete (state as Record<string, unknown>).deepResearchProviderId;
-          delete (state as Record<string, unknown>).deepResearchProvidersConfig;
-        }
-
-        // Add default media generation toggles if missing
-        if (state.imageGenerationEnabled === undefined) {
-          state.imageGenerationEnabled = false;
-        }
-        if (version < 6 && state.imageGenerationPreference === undefined) {
-          // Existing installs have already presented the toggle, so preserve
-          // their current on/off value as explicit intent across provider loss.
-          state.imageGenerationPreference = state.imageGenerationEnabled;
-        }
-        if (state.videoGenerationEnabled === undefined) {
-          state.videoGenerationEnabled = false;
-        }
-        if (state.reviewOutlineEnabled === undefined) {
-          state.reviewOutlineEnabled = false;
-        }
-        if ((state as Record<string, unknown>).reverseChallengeEnabled === undefined) {
-          (state as Record<string, unknown>).reverseChallengeEnabled = false;
-        }
-        if ((state as Record<string, unknown>).stableSuccessesRequired === undefined) {
-          (state as Record<string, unknown>).stableSuccessesRequired = 2;
-        }
-        delete (state as Record<string, unknown>).forgettingSpeedMultiplier;
-        delete (state as Record<string, unknown>).demoAcceleratedClockEnabled;
-        const revisitState = state as Record<string, unknown>;
-        if (
-          !revisitState.activeRevisitDemoSessionByStage ||
-          typeof revisitState.activeRevisitDemoSessionByStage !== 'object' ||
-          Array.isArray(revisitState.activeRevisitDemoSessionByStage)
-        ) {
-          revisitState.activeRevisitDemoSessionByStage = {};
-        }
-        if (
-          !revisitState.revisitVirtualClockOffsetHoursByStage ||
-          typeof revisitState.revisitVirtualClockOffsetHoursByStage !== 'object' ||
-          Array.isArray(revisitState.revisitVirtualClockOffsetHoursByStage)
-        ) {
-          revisitState.revisitVirtualClockOffsetHoursByStage = {};
-        }
-        // Legacy demo sessions were global and cannot be assigned to a course safely.
-        delete revisitState.activeRevisitDemoSessionId;
-        delete revisitState.revisitVirtualClockOffsetHours;
-        if ((state as Record<string, unknown>).demoGateSkipEnabled === undefined) {
-          (state as Record<string, unknown>).demoGateSkipEnabled = false;
-        }
-
-        // Add default audio toggles if missing. TTS defaults OFF (opt-in / CTA);
-        // first server-sync auto-enables it when a provider is configured (#665).
-        if ((state as Record<string, unknown>).ttsEnabled === undefined) {
-          (state as Record<string, unknown>).ttsEnabled = false;
-        }
-        if ((state as Record<string, unknown>).asrEnabled === undefined) {
-          (state as Record<string, unknown>).asrEnabled = true;
-        }
-
-        // Existing users already have their config set up — mark auto-config as done
-        if ((state as Record<string, unknown>).autoConfigApplied === undefined) {
-          (state as Record<string, unknown>).autoConfigApplied = true;
-        }
-
-        if ((state as Record<string, unknown>).agentMode === undefined) {
-          (state as Record<string, unknown>).agentMode = 'preset';
-        }
-        if ((state as Record<string, unknown>).autoAgentCount === undefined) {
-          (state as Record<string, unknown>).autoAgentCount = 3;
-        }
-
-        if ((state as Record<string, unknown>).thinkingConfigs === undefined) {
-          (state as Record<string, unknown>).thinkingConfigs = {};
-        }
-
-        // Migrate Web Search: old flat fields → new provider-based config
-        if (!state.webSearchProvidersConfig) {
-          const stateRecord = state as Record<string, unknown>;
-          const oldApiKey = (stateRecord.webSearchApiKey as string) || '';
-          const oldIsServerConfigured =
-            (stateRecord.webSearchIsServerConfigured as boolean) || false;
-          state.webSearchProviderId = 'tavily' as WebSearchProviderId;
-          state.webSearchProvidersConfig = {
-            tavily: {
-              apiKey: oldApiKey,
-              baseUrl: '',
-              enabled: true,
-              requiresApiKey: true,
-              isServerConfigured: oldIsServerConfigured,
-            },
-            exa: {
-              apiKey: '',
-              baseUrl: WEB_SEARCH_PROVIDERS.exa.defaultBaseUrl || '',
-              enabled: true,
-              requiresApiKey: true,
-            },
-            bocha: {
-              apiKey: '',
-              baseUrl: '',
-              enabled: true,
-              requiresApiKey: true,
-            },
-            brave: {
-              apiKey: '',
-              baseUrl: WEB_SEARCH_PROVIDERS.brave.defaultBaseUrl || '',
-              enabled: true,
-              requiresApiKey: false,
-            },
-            baidu: {
-              apiKey: '',
-              baseUrl: '',
-              enabled: true,
-              requiresApiKey: true,
-            },
-            minimax: {
-              apiKey: '',
-              baseUrl: WEB_SEARCH_PROVIDERS.minimax.defaultBaseUrl || '',
-              enabled: true,
-              requiresApiKey: true,
-            },
-            doubao: {
-              apiKey: '',
-              baseUrl: WEB_SEARCH_PROVIDERS.doubao.defaultBaseUrl || '',
-              enabled: true,
-              requiresApiKey: true,
-            },
-            searxng: {
-              apiKey: '',
-              baseUrl: '',
-              enabled: true,
-              requiresApiKey: false,
-            },
-          } as SettingsState['webSearchProvidersConfig'];
-          delete stateRecord.webSearchApiKey;
-          delete stateRecord.webSearchIsServerConfigured;
-        }
-
-        // v2 → v3: managed providers no longer expose a base URL to the client;
-        // drop any persisted serverBaseUrl left over from older versions (#620).
-        stripLegacyServerBaseUrl(state);
-
-        // v3 → v4: the per-provider `enabled` flag becomes live under the
-        // unified enablement model (#665). Before v4 it was never user-editable,
-        // so any persisted value is just a stale default — normalize it:
-        // browser-native OFF (opt-in), every other built-in ON (it only surfaces
-        // once configured, so a server-managed provider must not stay hidden).
-        if (version < 4 && state.ttsProvidersConfig) {
-          for (const pid of Object.keys(TTS_PROVIDERS) as BuiltInTTSProviderId[]) {
-            const cfg = state.ttsProvidersConfig[pid];
-            if (cfg) cfg.enabled = pid !== 'browser-native-tts';
-          }
-        }
-
-        ensureValidProviderSelections(state);
-        ensureBuiltInAudioProviders(state);
-        ensureBuiltInWebSearchProviders(state);
-        distrustPersistedOAuthSelection(state);
-        state.thinkingConfigs = pruneThinkingConfigs(state.thinkingConfigs, state.providersConfig);
-        const prunedOperatorOnly = pruneOperatorOnlyStageRoutes(state.llmStageRoutes);
-        if (prunedOperatorOnly) state.llmStageRoutes = prunedOperatorOnly;
-
-        return state;
+        const state = { ...((persistedState as Record<string, unknown> | null) ?? {}) };
+        // v4 → v5: model settings move to the server (RFC #1701).
+        // Spiral builds used versions 5–7 before adopting server model slots.
+        // Detect their old provider shape rather than mistaking them for the
+        // upstream v5 preferences and dropping their keys before staging.
+        return version < 5 || Object.hasOwn(state, 'providersConfig')
+          ? migrateSettingsToV5(state, version)
+          : pickPersisted(state);
       },
-      // Custom merge: always sync built-in providers on every rehydrate,
-      // so newly added providers/models appear without clearing cache.
+      // Only known preference fields reach the state; anything else a blob
+      // carries (fields of earlier builds) is ignored. Model settings kept
+      // because staging them failed are staged again here.
       merge: (persistedState, currentState) => {
-        // One-time import of the pre-refactor web-search toggle: the homepage
-        // used to persist it in localStorage['webSearchEnabled']; without
-        // this, users who had 联网调研 enabled would silently lose it.
-        if (typeof window !== 'undefined') {
-          try {
-            const legacyWebSearch = window.localStorage.getItem('webSearchEnabled');
-            if (legacyWebSearch !== null) {
-              window.localStorage.removeItem('webSearchEnabled');
-              if (
-                legacyWebSearch === 'true' &&
-                !(persistedState as Partial<SettingsState> | null)?.webSearchEnabled
-              ) {
-                (persistedState as Partial<SettingsState>).webSearchEnabled = true;
-              }
-            }
-          } catch {
-            // storage unavailable — skip the legacy import
-          }
+        const persisted = pickPersisted(persistedState);
+        const legacy = persisted.legacyModelSettings;
+        if (legacy && stageLegacyModelSettings(legacy as LegacyModelSettingsState)) {
+          delete persisted.legacyModelSettings;
+          stagedOnLoad = true;
         }
-        // The insert toolbar is draggable and no longer collapses. Sanitize
-        // this retired property on every rehydrate instead of bumping the
-        // storage version and replaying unrelated legacy migrations.
-        const persisted = { ...(persistedState as object) } as Record<string, unknown>;
-        delete persisted.editInsertToolbarCollapsed;
-        const merged = { ...currentState, ...persisted };
-        delete (merged as Record<string, unknown>).forgettingSpeedMultiplier;
-        delete (merged as Record<string, unknown>).demoAcceleratedClockEnabled;
-        ensureBuiltInProviders(merged as Partial<SettingsState>);
-        promoteLegacyCustomProviderBaseUrls(merged as Partial<SettingsState>);
-        ensureBuiltInAudioProviders(merged as Partial<SettingsState>);
-        ensureBuiltInImageProviders(merged as Partial<SettingsState>);
-        ensureBuiltInVideoProviders(merged as Partial<SettingsState>);
-        ensureBuiltInPDFProviders(merged as Partial<SettingsState>);
-        ensureBuiltInWebSearchProviders(merged as Partial<SettingsState>);
-        ensureValidProviderSelections(merged as Partial<SettingsState>);
-        stripLegacyServerBaseUrl(merged as Partial<SettingsState>);
-        const typedMerged = merged as Partial<SettingsState>;
-        distrustPersistedOAuthSelection(typedMerged);
-        typedMerged.thinkingConfigs = pruneThinkingConfigs(
-          typedMerged.thinkingConfigs,
-          typedMerged.providersConfig,
-        );
-        const prunedOperatorOnly = pruneOperatorOnlyStageRoutes(typedMerged.llmStageRoutes);
-        if (prunedOperatorOnly) typedMerged.llmStageRoutes = prunedOperatorOnly;
-        return merged as SettingsState;
+        return { ...currentState, ...persisted };
+      },
+      onRehydrateStorage: () => (state) => {
+        if (!stagedOnLoad || !state) return;
+        stagedOnLoad = false;
+        // Write the store back without the staged model settings (and keys).
+        rewrite.run?.();
       },
     },
   ),
@@ -3141,6 +382,7 @@ export const useSettingsStore = create<SettingsState>()(
 // Bound after the store exists so the `onWriteRefused` hook above stays free of
 // a self-reference (see the comment there).
 recovery.rehydrate = () => useSettingsStore.persist.rehydrate();
+rewrite.run = () => useSettingsStore.setState({ legacyModelSettings: undefined });
 
 // Best-effort, fire-and-forget: drop the pre-cutover raw `localStorage` blob.
 // It is never read (this store does not migrate legacy data), and the old blob

@@ -3,10 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CodexOAuthClient,
   getProviderBadgeTranslationKey,
+  selectCodexCapability,
   syncCodexProviderAndSelect,
   syncServerProvidersAfterAccessUnlock,
 } from '@/lib/client/codex-oauth';
 import type { CodexAuthPublicStatus, CodexLoginAttempt } from '@/lib/types/codex-auth';
+import { createModelSettingsClient, type ModelSettingsView } from '@/lib/model-settings/client';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -123,7 +125,6 @@ describe('CodexOAuthClient', () => {
   it('locks public actions while a completed login synchronizes providers', async () => {
     const syncGate = deferred();
     const syncStarted = deferred();
-    let providersSynced = false;
     const setModel = vi.fn();
     const requests: string[] = [];
     const popup = { closed: false, navigate: vi.fn(), close: vi.fn() };
@@ -154,21 +155,11 @@ describe('CodexOAuthClient', () => {
     });
     const client = createClient(fetcher, {
       openPopup,
-      onLoginComplete: () =>
-        syncCodexProviderAndSelect(() => ({
-          fetchServerProviders: async () => {
-            syncStarted.resolve();
-            await syncGate.promise;
-            providersSynced = true;
-          },
-          providersConfig: {
-            'openai-codex': {
-              isServerConfigured: providersSynced,
-              models: providersSynced ? [{ id: 'gpt-live' }] : [],
-            },
-          },
-          setModel,
-        })),
+      onLoginComplete: async () => {
+        syncStarted.resolve();
+        await syncGate.promise;
+        setModel('openai-codex', 'gpt-live');
+      },
     });
 
     await client.mount();
@@ -632,39 +623,171 @@ describe('CodexOAuthClient', () => {
 });
 
 describe('Codex settings integration helpers', () => {
-  it('awaits provider sync, then selects the first Codex model from fresh state', async () => {
-    const events: string[] = [];
-    let synced = false;
-    const setModel = vi.fn((providerId: string, modelId: string) =>
-      events.push(`select:${providerId}:${modelId}`),
-    );
-    const getState = () => ({
-      fetchServerProviders: async () => {
-        events.push('sync');
-        synced = true;
-      },
-      providersConfig: {
-        'openai-codex': {
-          isServerConfigured: synced,
-          models: synced ? [{ id: 'gpt-live' }, { id: 'gpt-next' }] : [],
+  const connectedView = (locked = false, allowUserKeys = true): ModelSettingsView => ({
+    revision: 1,
+    allowUserKeys,
+    presets: [],
+    providers: [
+      {
+        id: 'subscription',
+        preset: 'openai-codex',
+        presetName: 'Codex',
+        presetKind: 'single',
+        source: 'deployment',
+        connected: true,
+        capabilities: {
+          chat: { registryId: 'openai-codex', models: [{ id: 'gpt-live', name: 'Live' }] },
         },
       },
-      setModel,
-    });
-
-    await syncCodexProviderAndSelect(getState);
-
-    expect(events).toEqual(['sync', 'select:openai-codex:gpt-live']);
+    ],
+    slots: [
+      {
+        slot: 'llm',
+        parent: null,
+        capability: 'chat',
+        configOnly: false,
+        locked,
+        source: { kind: 'unconfigured' },
+        effective: { status: 'unassigned' },
+      },
+    ],
   });
 
-  it('refreshes server providers after an access-code unlock', async () => {
-    const fetchServerProviders = vi.fn(async () => undefined);
-
-    await syncServerProvidersAfterAccessUnlock(() => ({ fetchServerProviders }));
-
-    expect(fetchServerProviders).toHaveBeenCalledWith({
-      reconcileOAuthImageSelectionImmediately: true,
+  it('refreshes the catalogue before selecting a saved OAuth provider via server slots', async () => {
+    const view = connectedView();
+    const writes: unknown[] = [];
+    const fetcher = vi.fn(async (_input: string, init?: RequestInit) => {
+      if (init?.method === 'PUT') writes.push(JSON.parse(String(init.body)));
+      return jsonResponse(view);
     });
+    await syncCodexProviderAndSelect(createModelSettingsClient(fetcher));
+    expect(writes).toEqual([
+      {
+        revision: 1,
+        change: { kind: 'slots', set: { llm: 'subscription:gpt-live' } },
+      },
+    ]);
+    expect(JSON.stringify(writes)).not.toContain('apiKey');
+  });
+
+  it('does not override a locked default when a user completes OAuth sign-in', async () => {
+    const fetcher = vi.fn(async () => jsonResponse(connectedView(true, false)));
+    await syncCodexProviderAndSelect(createModelSettingsClient(fetcher));
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  const withImage = (): ModelSettingsView => {
+    const view = connectedView();
+    view.providers.push({
+      id: 'native-image',
+      preset: 'codex-image',
+      presetName: 'Codex Image',
+      presetKind: 'single',
+      source: 'deployment',
+      connected: true,
+      capabilities: {
+        image: { registryId: 'codex-image', models: [{ id: 'gpt-image-2', name: 'Image' }] },
+      },
+    });
+    view.slots.push({
+      slot: 'image',
+      parent: null,
+      capability: 'image',
+      configOnly: false,
+      locked: false,
+      source: { kind: 'unconfigured' },
+      effective: { status: 'unassigned' },
+    });
+    return view;
+  };
+
+  it.each(['unassigned', 'disabled', 'invalid', 'assigned'] as const)(
+    'sign-in selects chat and fills image only when its state is unassigned (%s)',
+    async (status) => {
+      const view = withImage();
+      view.slots[1].effective =
+        status === 'disabled'
+          ? { status, resolvedAt: 'image', source: 'workspace' }
+          : status === 'invalid'
+            ? { status, message: 'Existing image provider is unavailable' }
+            : status === 'assigned'
+              ? {
+                  status,
+                  resolvedAt: 'image',
+                  source: 'workspace',
+                  requirements: [],
+                  providerId: 'existing-image',
+                  providerSource: 'workspace',
+                  presetId: 'openai-image',
+                  registryId: 'openai-image',
+                  modelId: 'existing',
+                }
+              : { status };
+      const writes: unknown[] = [];
+      const fetcher = vi.fn(async (_input: string, init?: RequestInit) => {
+        if (init?.method === 'PUT') writes.push(JSON.parse(String(init.body)).change);
+        return jsonResponse(view);
+      });
+
+      await syncCodexProviderAndSelect(createModelSettingsClient(fetcher));
+
+      expect(writes).toEqual([
+        {
+          kind: 'slots',
+          set: {
+            llm: 'subscription:gpt-live',
+            ...(status === 'unassigned' ? { image: 'native-image:gpt-image-2' } : {}),
+          },
+        },
+      ]);
+    },
+  );
+
+  it('explicit image selection does not require or mutate chat and may replace off', async () => {
+    const view = withImage();
+    view.providers.shift();
+    view.slots[1].effective = { status: 'disabled', resolvedAt: 'image', source: 'workspace' };
+    const writes: unknown[] = [];
+    const fetcher = vi.fn(async (_input: string, init?: RequestInit) => {
+      if (init?.method === 'PUT') writes.push(JSON.parse(String(init.body)).change);
+      return jsonResponse(view);
+    });
+
+    await selectCodexCapability('image', createModelSettingsClient(fetcher));
+
+    expect(writes).toEqual([{ kind: 'slots', set: { image: 'native-image:gpt-image-2' } }]);
+  });
+
+  it.each(['locked', 'keys-disabled'] as const)(
+    'explicit Use cannot create a provider when %s',
+    async (gate) => {
+      const view = withImage();
+      const image = view.providers.pop()!;
+      view.presets = [
+        {
+          id: 'codex-image',
+          name: 'Codex Image',
+          kind: 'single',
+          capabilities: image.capabilities,
+          requiresBaseUrl: false,
+          customEndpoint: false,
+          recommended: {},
+        },
+      ];
+      view.slots[1].locked = gate === 'locked';
+      view.allowUserKeys = gate !== 'keys-disabled';
+      const fetcher = vi.fn(async () => jsonResponse(view));
+
+      await selectCodexCapability('image', createModelSettingsClient(fetcher));
+
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('refreshes server settings after unlock without rewriting saved assignments', async () => {
+    const fetcher = vi.fn(async () => jsonResponse(connectedView()));
+    await syncServerProvidersAfterAccessUnlock(createModelSettingsClient(fetcher));
+    expect(fetcher).toHaveBeenCalledWith('/api/model-config', { cache: 'no-store' });
   });
 
   it('uses Connected only for server-connected OAuth providers', () => {

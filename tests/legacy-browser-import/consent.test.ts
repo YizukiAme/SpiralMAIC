@@ -1,5 +1,15 @@
-import { describe, expect, it } from 'vitest';
-import { isLegacyImportApproved, approveLegacyImport } from '@/lib/legacy-browser-import/consent';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  isLegacyImportApproved,
+  approveLegacyImport,
+  hasLegacyImportConsent,
+} from '@/lib/legacy-browser-import/consent';
+import { ensureLedger } from '@/lib/legacy-browser-import/ledger';
+
+const identity = vi.hoisted(() => ({ ownerId: 'owner-a' }));
+vi.mock('@/lib/persistence/bootstrap', () => ({
+  getPersistenceLearnerKey: async () => identity.ownerId,
+}));
 
 function storage(): Storage {
   const values = new Map<string, string>();
@@ -36,5 +46,15 @@ describe('legacy import consent', () => {
     expect(isLegacyImportApproved(local, 'owner-a', 'browser-a')).toBe(true);
     expect(isLegacyImportApproved(local, 'owner-b', 'browser-a')).toBe(false);
     expect(isLegacyImportApproved(local, 'owner-a', 'browser-b')).toBe(false);
+  });
+
+  it('requires the same confirmation for legacy model settings and agents', async () => {
+    const local = storage();
+    expect(await hasLegacyImportConsent(local)).toBe(false);
+    approveLegacyImport(local, 'owner-a', ensureLedger(local).browserId);
+    expect(await hasLegacyImportConsent(local)).toBe(true);
+    identity.ownerId = 'owner-b';
+    expect(await hasLegacyImportConsent(local)).toBe(false);
+    identity.ownerId = 'owner-a';
   });
 });

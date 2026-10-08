@@ -6,6 +6,8 @@ import { getEffectiveActions } from '@/lib/orchestration/tool-schemas';
 import type { WhiteboardActionRecord } from '@/lib/orchestration/types';
 import type { StatelessChatRequest } from '@/lib/types/chat';
 import type { SendEvent } from '../types';
+import { validateOvertimeChatContext } from '@/lib/overtime/chat';
+import { buildLearningExtensionTools } from './learning-extension';
 
 const SpotlightParams = Type.Object({
   elementId: Type.String(),
@@ -279,6 +281,9 @@ export function buildChildActionTools(opts: {
   /** Present only for a selected-element-grounded turn. */
   authorizedSpotlightElementIds?: ReadonlySet<string>;
 }): AgentTool[] {
+  if (validateOvertimeChatContext(opts.body.config.overtimeContext, opts.body.storeState)) {
+    return buildLearningExtensionTools(opts);
+  }
   const currentScene = opts.body.storeState.currentSceneId
     ? opts.body.storeState.scenes.find((scene) => scene.id === opts.body.storeState.currentSceneId)
     : undefined;

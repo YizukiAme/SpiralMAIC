@@ -2351,6 +2351,19 @@ async function fetchCustomOpenAIChat(
   );
 }
 
+/** A request's headers without an `Authorization` that carries no credential (`Bearer `). */
+export function withoutEmptyBearer(init: RequestInit | undefined): RequestInit | undefined {
+  if (!init?.headers) return init;
+  const headers = new Headers(init.headers);
+  let empty = false;
+  headers.forEach((value, name) => {
+    if (name === 'authorization' && /^bearer\s*$/i.test(value)) empty = true;
+  });
+  if (!empty) return init;
+  headers.delete('authorization');
+  return { ...init, headers };
+}
+
 /** Returns true if the provider requires an API key (defaults to true for unknown providers). */
 export function isProviderKeyRequired(providerId: string): boolean {
   return getProviderConfig(providerId as ProviderId)?.requiresApiKey ?? true;
@@ -2364,7 +2377,7 @@ export function getModel(config: ModelConfig): ModelWithInfo {
   // providerType can come from client for custom providers; fall back to registry.
   let providerType = config.providerType;
   const provider = getProviderConfig(config.providerId);
-  const requiresApiKey = provider?.requiresApiKey ?? true;
+  const requiresApiKey = config.requiresApiKey ?? provider?.requiresApiKey ?? true;
 
   if (provider?.credentialMode === 'oauth' && !config.customFetch) {
     throw new Error(`OAuth provider ${config.providerId} requires a server transport`);
@@ -2410,6 +2423,9 @@ export function getModel(config: ModelConfig): ModelWithInfo {
     // App attribution first: gateways that support it (TokenDance) receive
     // X-App-URL on every outbound request; every other provider is untouched.
     fetchInit = withAppAttributionInit(fetchInput, fetchInit);
+    // Without a key (a local or self-hosted server) the SDK still sends an
+    // empty bearer token: send no Authorization header instead.
+    if (!effectiveApiKey) fetchInit = withoutEmptyBearer(fetchInit);
     // A caller-supplied dispatcher (config.fetchImpl may carry one) wins over
     // ours; only inject ours when the request doesn't already carry one.
     if ((fetchInit as (RequestInit & { dispatcher?: unknown }) | undefined)?.dispatcher) {
@@ -2764,7 +2780,7 @@ const warnedBareModelIds = new Set<string>();
 
 /**
  * Warn once per unique bare model id. `where` names the config site (e.g.
- * `DEFAULT_MODEL` or a MODEL_ROUTES stage). Callers must pass only
+ * `DEFAULT_MODEL`). Callers must pass only
  * config-derived ids (the config surface is finite, so the dedupe set is
  * bounded); request-derived strings must never reach this function.
  */

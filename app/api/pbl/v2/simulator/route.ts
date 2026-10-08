@@ -25,8 +25,6 @@ import { applyRequestLocaleToProject } from '@/lib/pbl/v2/api/locale';
 import { runSimulatorTurn, type SimulatorPhase } from '@/lib/pbl/v2/agents/simulator';
 import type { PBLProjectV2 } from '@/lib/pbl/v2/types';
 
-export const maxDuration = 300;
-
 const log = createLogger('PBL v2 Simulator API');
 
 interface SimulatorRequest {

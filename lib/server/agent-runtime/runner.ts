@@ -5,6 +5,8 @@
  * claims, lease generations, event ordering, cancellation, and conversation
  * recovery. A client connection is never part of the execution lifetime.
  */
+import { serverMediaConnection } from '@/lib/server/model-config/media';
+import { backgroundWorkspaceId } from '@/lib/server/model-config/runtime';
 import { randomUUID } from 'node:crypto';
 import { Session, type AgentEvent, type AgentMessage } from '@earendil-works/pi-agent-core';
 import {
@@ -75,6 +77,7 @@ import { buildScenePreviewTools } from './scene-preview';
 import {
   AgentSessionEntryStorage,
   loadSessionEntryHistory,
+  readPriorRunRecord,
   type SessionEntryHistory,
 } from './entry-tree-storage';
 import { planResume, type ResumeAction } from './resume';
@@ -89,6 +92,12 @@ import { listAgentUserMessages } from './user-messages';
 import { subscribeAgentEventWakeup } from './event-notify-bus';
 import { getBackgroundDocumentStore } from './owner-scoped-documents';
 import { canonicalizeStoredOwner } from '@/lib/persistence/owner-merges';
+import {
+  courseGenerationNotice,
+  listCourseGenerations,
+  withCourseGenerationNotice,
+  type CourseGeneration,
+} from './course-generation';
 import { assertCurrentStageMutationActive } from './mutation-fence';
 import { inventorySlide } from './course-edit/apply';
 import {
@@ -372,6 +381,12 @@ export interface FollowUpMessage {
    * name rather than the snapshot the composer captured at pick time.
    */
   courseRefs?: readonly CourseRef[];
+  /**
+   * The named classrooms a generation run is still producing, by stage id
+   * (see `resolveCourseRefContext`). Prompt input only: the durable receipt
+   * keeps the refs alone.
+   */
+  courseRefGenerations?: Readonly<Record<string, CourseGeneration>>;
 }
 
 export type ResolvedElementRef =
@@ -718,12 +733,46 @@ export async function resolveCourseRefsForContext(
   return resolved;
 }
 
+/**
+ * The message's classrooms resolved for the prompt: their current names, and
+ * which of them a generation run is still producing.
+ */
+export async function resolveCourseRefContext(
+  ownerId: string,
+  message: FollowUpMessage,
+): Promise<FollowUpMessage> {
+  if (!message.courseRefs?.length) return message;
+  const [courseRefs, generations] = await Promise.all([
+    resolveCourseRefsForContext(ownerId, message.courseRefs),
+    listCourseGenerations(ownerId),
+  ]);
+  const named = Object.fromEntries(
+    courseRefs.flatMap((ref) => {
+      const generation = generations.get(ref.stageId);
+      return generation ? [[ref.stageId, generation] as const] : [];
+    }),
+  );
+  return {
+    ...message,
+    courseRefs,
+    ...(Object.keys(named).length ? { courseRefGenerations: named } : {}),
+  };
+}
+
 /** Append the named classrooms to a message the runner is about to deliver. */
-export function composeCourseRefsText(text: string, refs: readonly CourseRef[]): string {
+export function composeCourseRefsText(
+  text: string,
+  refs: readonly CourseRef[],
+  generations: Readonly<Record<string, CourseGeneration>> = {},
+): string {
   if (refs.length === 0) return text;
   const label = refs.length === 1 ? 'classroom' : 'classrooms';
   const list = refs.map((ref) => `"${ref.title}" (${ref.stageId})`).join(', ');
-  return `${text}\n\n[The user named this ${label}: ${list}. Work on the named ${label} for this message.]`;
+  const notices = refs.flatMap((ref) => {
+    const generation = generations[ref.stageId];
+    return generation ? [` "${ref.title}": ${courseGenerationNotice(generation)}`] : [];
+  });
+  return `${text}\n\n[The user named this ${label}: ${list}. Work on the named ${label} for this message.${notices.join('')}]`;
 }
 
 export function composeFollowUpText(message: FollowUpMessage): string {
@@ -749,7 +798,7 @@ export function composeFollowUpText(message: FollowUpMessage): string {
     );
   }
   if (message.courseRefs?.length) {
-    blocks.push(composeCourseRefsText('', message.courseRefs).trim());
+    blocks.push(composeCourseRefsText('', message.courseRefs, message.courseRefGenerations).trim());
   }
   return blocks.join('\n\n');
 }
@@ -770,15 +819,33 @@ export async function composeFollowUpTextWithElementRefs(
   return composeFollowUpText({ ...message, resolvedElementRefs });
 }
 
+/**
+ * The session's opening message among the pending ones: the first, unless
+ * earlier runs left the tree empty and it was posted after the first of them
+ * (then it is a follow-up, and the session was created without one).
+ */
+export function openingMessage(
+  pending: readonly FollowUpMessage[],
+  firstRunSeq?: number,
+): FollowUpMessage | undefined {
+  const first = pending[0];
+  if (!first || firstRunSeq === undefined) return first;
+  return first.durableMessageSeq !== undefined && first.durableMessageSeq < firstRunSeq
+    ? first
+    : undefined;
+}
+
 export function planRunStart(input: {
   plan: ResumeAction;
   claimReason: AgentSessionClaimReason;
   pending: FollowUpMessage[];
   prompt: string;
   idleAttach?: boolean;
+  /** {@link SessionEntryHistory.firstRunSeq}: earlier runs left the tree empty. */
+  firstRunSeq?: number;
 }): RunStart {
-  if (input.plan.kind === 'start' && input.pending.length > 0 && input.idleAttach) {
-    const opening = input.pending[0]!;
+  const opening = openingMessage(input.pending, input.firstRunSeq);
+  if (input.plan.kind === 'start' && opening && input.idleAttach) {
     return {
       kind: 'prompt',
       text: composeFollowUpText(opening),
@@ -791,7 +858,7 @@ export function planRunStart(input: {
     // message. Its classrooms must reach the model, or the run would not know
     // which classroom the user named. Nothing else changes: the raw prompt is
     // still the base, and materials are already listed in the system block.
-    const opening = input.pending[0];
+    // Messages that are not the opening one are delivered as follow-ups.
     if (opening?.courseRefs?.length || opening?.elementRefs?.length) {
       return {
         kind: 'prompt',
@@ -947,7 +1014,7 @@ export async function runSession(ctx: RunContext, meta: ClaimedAgentSession): Pr
     );
     return loadSessionEntryHistory(entrySession, {
       sessionId: id,
-      hasPriorRun: await store.hasSessionRunHistory(id),
+      priorRuns: () => readPriorRunRecord(store, id),
     });
   };
 
@@ -1211,15 +1278,7 @@ export async function runSession(ctx: RunContext, meta: ClaimedAgentSession): Pr
     const pending = await Promise.all(
       loggedMessages
         .filter((message) => message.seq > deliveredThrough)
-        .map(async (message) => {
-          const followUp = toFollowUp(message);
-          return followUp.courseRefs?.length
-            ? {
-                ...followUp,
-                courseRefs: await resolveCourseRefsForContext(meta.ownerId, followUp.courseRefs),
-              }
-            : followUp;
-        }),
+        .map((message) => resolveCourseRefContext(meta.ownerId, toFollowUp(message))),
     );
     const idleAttach = meta.existingCourse;
 
@@ -1238,7 +1297,14 @@ export async function runSession(ctx: RunContext, meta: ClaimedAgentSession): Pr
       return;
     }
 
-    if (plan.kind === 'start' && (pending.length === 0 || !idleAttach)) {
+    // `session_start` opens the conversation once. A run that starts over on
+    // a tree earlier runs left empty (they failed before completing anything)
+    // resumes it instead, so the opening prompt is not painted again.
+    if (
+      plan.kind === 'start' &&
+      recovery.firstRunSeq === undefined &&
+      (pending.length === 0 || !idleAttach)
+    ) {
       emit(LIFECYCLE.sessionStart, {
         workerId: WORKER_ID,
         pid: process.pid,
@@ -1260,7 +1326,7 @@ export async function runSession(ctx: RunContext, meta: ClaimedAgentSession): Pr
       });
     }
 
-    const driver = await resolveAgentDriverModel();
+    const driver = await resolveAgentDriverModel(await backgroundWorkspaceId(meta.ownerId));
     const streamFn = createCallLlmStreamFn({
       languageModel: driver.connection.model,
       supportsToolImages: driver.connection.modelInfo?.capabilities?.vision,
@@ -1285,7 +1351,7 @@ export async function runSession(ctx: RunContext, meta: ClaimedAgentSession): Pr
     // unconfigured deployment gets no tool, so the model never sees a dead one.
     // Every result URL is registered with this session's durable URL trust
     // gate before the tool result is returned (reference semantics).
-    const search = resolveWebSearchCapability();
+    const search = await resolveWebSearchCapability(await backgroundWorkspaceId(meta.ownerId));
     const webSearchTools = search
       ? [
           buildWebSearchTool(search, (urls) =>
@@ -1349,6 +1415,7 @@ export async function runSession(ctx: RunContext, meta: ClaimedAgentSession): Pr
       pending,
       prompt: meta.prompt,
       idleAttach,
+      firstRunSeq: recovery.firstRunSeq,
     });
     // The owner probe is the tool layer's legality boundary: every course call
     // declares its stageId, and stageAccess resolves that stage against the
@@ -1357,14 +1424,23 @@ export async function runSession(ctx: RunContext, meta: ClaimedAgentSession): Pr
     // toolset, the curriculum toolset, and the scene-preview tool (reference
     // semantics: three call sites, one probe).
     const stageAccess = async (stageId: string) => probeStageAccess(await currentOwner(), stageId);
+    // The owner's courses generation runs are still producing: the reader
+    // tools say so before their results, and the list tools mark them.
+    const courseGenerations = async () => listCourseGenerations(await currentOwner());
     // The stage read/patch toolset and the stage-level CRUD it needs. All of
     // them write through `ownerScopedStore`; every stageId-bearing tool is
     // owner-gated by `withOwnerStageAuthorization`, and patch_stage is marked
     // sequential by the shared STAGE_WRITER_TOOL_NAMES registry
     // (course-tools.ts).
+    // The tts slot for this run's owner: narration, the voice catalog and
+    // voice registration all use its provider.
+    const ttsConnection = await serverMediaConnection('tts', meta.ownerId);
     const dslTools = buildDslCourseToolset({
       store: ownerScopedStore,
       backgroundStore: mediaJobStore,
+      // The video slot for this run's owner; generate_video exists only when
+      // it resolves to a usable provider.
+      videoConnection: await serverMediaConnection('video', meta.ownerId),
       stageAccess,
       onCheckpoint: (info) => emit(LIFECYCLE.checkpoint, info),
       sessionId: id,
@@ -1380,6 +1456,7 @@ export async function runSession(ctx: RunContext, meta: ClaimedAgentSession): Pr
       onStageLink: (course) => emit(LIFECYCLE.stageLink, course),
       onLibraryChanged: (change) => emit(LIFECYCLE.libraryChanged, change),
       onCheckpoint: (info) => emit(LIFECYCLE.checkpoint, info),
+      courseGenerations,
     });
     // Scene preview is registered beside the course toolset with its own
     // owner probe (reference semantics) — it is not wrapped by the generic
@@ -1412,6 +1489,7 @@ export async function runSession(ctx: RunContext, meta: ClaimedAgentSession): Pr
         onCheckpoint: (info) => emit(LIFECYCLE.checkpoint, info),
         sessionId: id,
         registeredVoices: sessionRegisteredVoices,
+        ttsConnection,
       }),
       { stageAccess },
     );
@@ -1423,8 +1501,9 @@ export async function runSession(ctx: RunContext, meta: ClaimedAgentSession): Pr
     const voiceCloneTools = buildVoiceCloneTools({
       sessionId: id,
       registeredVoices: sessionRegisteredVoices,
+      ttsConnection,
     });
-    const voiceRegistrationEnabled = hasConfiguredVoiceRegistrationCapability();
+    const voiceRegistrationEnabled = hasConfiguredVoiceRegistrationCapability(ttsConnection);
     const personalHistoryTools = buildPersonalHistoryTools(
       meta.ownerId,
       createPersonalHistorySource({
@@ -1432,36 +1511,40 @@ export async function runSession(ctx: RunContext, meta: ClaimedAgentSession): Pr
         getSessionStore: async () => store,
       }),
       id,
+      courseGenerations,
     );
-    const tools = assembleRunnerTools(
-      [askUserTool],
-      webSearchTools,
-      // ownerId is captured from the claimed durable session. It is deliberately
-      // absent from the model-visible parameters, so the model cannot forge a
-      // target owner.
-      [buildCreateSkillTool(meta.ownerId)],
-      // read_skill / patch_skill close the loop create_skill opens. Registered
-      // unconditionally rather than gated on "the user already has Skills": a
-      // Skill created earlier IN THIS RUN is not in `installedSkills` (loaded
-      // once at start), and a tool that appears only on the next run would be a
-      // capability the model cannot discover when it needs it.
-      buildSkillEditTools(meta.ownerId, currentOwner),
-      // The native `read` tool is restricted to installed skill resources; it is
-      // present exactly when skills exist. Discovery and invocation stay pi-native.
-      skillReadTool ? [skillReadTool] : [],
-      // fetch_url is registered unconditionally (reference semantics: the
-      // material tools are always registered alongside the capability-gated
-      // web_search). The URL trust gate — not registration — is what keeps a
-      // fetch inside the session's observed origins, and it is the tool's core
-      // security property.
-      [buildFetchUrlTool({ sessionId: id })],
-      dslTools,
-      curriculumTools,
-      scenePreviewTools,
-      materialTools,
-      rosterTools,
-      voiceCloneTools,
-      personalHistoryTools,
+    const tools = withCourseGenerationNotice(
+      assembleRunnerTools(
+        [askUserTool],
+        webSearchTools,
+        // ownerId is captured from the claimed durable session. It is deliberately
+        // absent from the model-visible parameters, so the model cannot forge a
+        // target owner.
+        [buildCreateSkillTool(meta.ownerId)],
+        // read_skill / patch_skill close the loop create_skill opens. Registered
+        // unconditionally rather than gated on "the user already has Skills": a
+        // Skill created earlier IN THIS RUN is not in `installedSkills` (loaded
+        // once at start), and a tool that appears only on the next run would be a
+        // capability the model cannot discover when it needs it.
+        buildSkillEditTools(meta.ownerId, currentOwner),
+        // The native `read` tool is restricted to installed skill resources; it is
+        // present exactly when skills exist. Discovery and invocation stay pi-native.
+        skillReadTool ? [skillReadTool] : [],
+        // fetch_url is registered unconditionally (reference semantics: the
+        // material tools are always registered alongside the capability-gated
+        // web_search). The URL trust gate — not registration — is what keeps a
+        // fetch inside the session's observed origins, and it is the tool's core
+        // security property.
+        [buildFetchUrlTool({ sessionId: id, ownerId: meta.ownerId })],
+        dslTools,
+        curriculumTools,
+        scenePreviewTools,
+        materialTools,
+        rosterTools,
+        voiceCloneTools,
+        personalHistoryTools,
+      ),
+      courseGenerations,
     );
     const askUserLatch = createAskUserTerminateLatch();
     let toolCalls = 0;
@@ -1585,12 +1668,7 @@ export async function runSession(ctx: RunContext, meta: ClaimedAgentSession): Pr
         // Same resolution as the start path: a steered message names its
         // classrooms on the durable event, and the model must be told the
         // course's current name, not the pick-time snapshot.
-        const courseResolved = followUp.courseRefs?.length
-          ? {
-              ...followUp,
-              courseRefs: await resolveCourseRefsForContext(meta.ownerId, followUp.courseRefs),
-            }
-          : followUp;
+        const courseResolved = await resolveCourseRefContext(meta.ownerId, followUp);
         const resolved = await resolveFollowUpElementContext(courseResolved);
         agent.steer(
           tagDurableUserMessage(

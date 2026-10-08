@@ -12,7 +12,7 @@
  */
 
 import type { StatelessEvent, DirectorState, StatelessChatSessionContext } from '@/lib/types/chat';
-import type { ModelServiceTier, ThinkingConfig } from '@/lib/types/provider';
+import type { ModelServiceTier } from '@/lib/types/provider';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('AgentLoop');
@@ -56,13 +56,14 @@ export interface AgentLoopRequest {
     [key: string]: unknown;
   };
   userProfile?: { nickname?: string; bio?: string };
-  apiKey: string;
-  baseUrl?: string;
+  /**
+   * A `provider:model` for harnesses that pick the model per run (deprecated
+   * on the server, honored only while the slot is unassigned). The app never
+   * sends one: the workspace's model settings decide.
+   */
   model?: string;
-  providerType?: string;
-  thinkingConfig?: ThinkingConfig;
   serviceTier?: ModelServiceTier;
-  /** Optional state accumulated by a caller across separate user turns. */
+  /** State retained by the caller across separate user turns. */
   initialDirectorState?: DirectorState;
 }
 
@@ -189,12 +190,8 @@ export async function runAgentLoop(
       config: request.config,
       directorState,
       userProfile: request.userProfile,
-      apiKey: request.apiKey,
-      baseUrl: request.baseUrl,
-      model: request.model,
-      providerType: request.providerType,
-      thinkingConfig: request.thinkingConfig,
       serviceTier: request.serviceTier,
+      ...(request.model ? { model: request.model } : {}),
     };
 
     // Fetch

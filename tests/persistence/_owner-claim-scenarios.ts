@@ -39,6 +39,7 @@ import {
   getServerPersistenceProvider,
   type ServerPersistenceProvider,
 } from '@/lib/persistence/server-provider';
+import { createOwnerAgent } from '@/lib/server/agents/store';
 import type { OwnerPrincipal } from '@/lib/server/identity/types';
 
 export interface ClaimScenarioPool extends TransactionSource {
@@ -247,6 +248,25 @@ export async function seedAnonymousWork(h: ClaimHarness, owner = ANON): Promise<
   // The browser this owner used before signing in, bound to it for the
   // one-way import of pre-server browser data.
   await bindLegacyImport(h.pool, '0123456789abcdef0123456789abcdef', owner);
+  // Custom agents: one of its own, and one whose id the account also uses.
+  const agent = (id: string, name: string) => ({
+    id,
+    name,
+    role: 'student',
+    persona: `${name}'s persona`,
+    avatar: '/avatars/curious.png',
+    color: '#ec4899',
+    allowedActions: [],
+    priority: 5,
+  });
+  const agents = h.pool as unknown as ConnectableQueryable;
+  await createOwnerAgent(agents, owner, agent(`tutor-${owner.slice(-4)}`, 'Tutor'));
+  await createOwnerAgent(agents, owner, agent('study-buddy', 'Anonymous buddy'));
+  await h.pool.query(
+    `INSERT INTO owner_agents (owner_id, agent_id, config) VALUES ($1, 'study-buddy', $2::jsonb)
+     ON CONFLICT DO NOTHING`,
+    [ACCOUNT, JSON.stringify({ ...agent('study-buddy', 'Account buddy'), id: undefined })],
+  );
   return { assetId, sessionId: session.id, skillId: skill.id };
 }
 
@@ -269,6 +289,8 @@ export async function rowsUnder(pool: ClaimScenarioPool, owner: string) {
     runtime: await count('runtime_sessions WHERE learner_key = $1'),
     assets: await count('asset_entries WHERE principal = $1', assetPrincipalForOwner(owner).key),
     legacyImportBindings: await count('legacy_import_bindings WHERE owner_id = $1'),
+    workspaceModelConfig: await count('workspace_model_config WHERE owner_id = $1'),
+    customAgents: await count('owner_agents WHERE owner_id = $1'),
     // The retired ownership column, where an installation still has it.
     legacyDocumentOwners: (await hasLegacyOwnerColumn(pool))
       ? await count('document_stages WHERE owner_id = $1')
@@ -304,6 +326,8 @@ const NOTHING = {
   runtime: 0,
   assets: 0,
   legacyImportBindings: 0,
+  workspaceModelConfig: 0,
+  customAgents: 0,
   legacyDocumentOwners: 0,
 };
 
@@ -324,6 +348,12 @@ export async function fullClaimScenario(h: ClaimHarness): Promise<void> {
   await h.pool.query(
     `UPDATE document_stages AS d SET owner_id = m.owner_id FROM stage_meta AS m
       WHERE m.stage_id = d.id`,
+  );
+  // Model settings made while anonymous; the account has none, so they move.
+  await h.pool.query(
+    `INSERT INTO workspace_model_config (owner_id, config, revision)
+     VALUES ($1, '{"slots":{"video":null}}'::jsonb, 1)`,
+    [ANON],
   );
   // A runtime session written by a newer version: it no longer validates here,
   // and must not stop the claim.
@@ -350,6 +380,7 @@ export async function fullClaimScenario(h: ClaimHarness): Promise<void> {
     sessions: 1,
     sessionEventCounters: 1,
     skills: 2,
+    customAgents: 2,
     legacyDocumentOwners: 2,
   });
 
@@ -368,6 +399,9 @@ export async function fullClaimScenario(h: ClaimHarness): Promise<void> {
       runtime: 2,
       assets: 1,
       'legacy-import-bindings': 1,
+      'workspace-model-config': 1,
+      // The account kept its own "study-buddy".
+      'custom-agents': 1,
     },
   });
   expect(await rowsUnder(h.pool, ANON)).toEqual(NOTHING);
@@ -379,6 +413,16 @@ export async function fullClaimScenario(h: ClaimHarness): Promise<void> {
       )
     ).rows[0]?.owner_id,
   ).toBe(ACCOUNT);
+  expect((await rowsUnder(h.pool, ACCOUNT)).workspaceModelConfig).toBe(1);
+  const accountAgents = await h.pool.query<{ agent_id: string; name: string }>(
+    `SELECT agent_id, config->>'name' AS name FROM owner_agents
+      WHERE owner_id = $1 ORDER BY agent_id`,
+    [ACCOUNT],
+  );
+  expect(accountAgents.rows).toEqual([
+    { agent_id: 'study-buddy', name: 'Account buddy' },
+    { agent_id: `tutor-${ANON.slice(-4)}`, name: 'Tutor' },
+  ]);
   expect(await merges(h.pool)).toEqual([[ANON, ACCOUNT]]);
 
   // Courses, listed under the account, filed per the folder rules.

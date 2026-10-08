@@ -1,24 +1,123 @@
 import { expect, test } from '../fixtures/base';
 import { HomePage } from '../pages/home.page';
 import { createSettingsStorage, SETTINGS_KV_KEY } from '../fixtures/test-data/settings';
+import {
+  createModelSettingsView,
+  type ModelSettingsView,
+} from '../fixtures/test-data/model-settings';
+import type { ModelSettingsChange } from '../../lib/model-settings/client';
 
-function serverProvidersBody(connected: boolean, fastModels = ['gpt-live']) {
-  return JSON.stringify({
-    providers: connected
-      ? {
-          'openai-codex': {
-            models: ['gpt-live', 'gpt-next'],
-            fastModels,
+/** Model settings are server-owned; OAuth discovery enriches this public view. */
+async function mockCodexModelSettings(
+  page: HomePage['page'],
+  options: { connected: () => boolean; fastModels?: string[]; beforeRead?: () => Promise<void> },
+) {
+  const declarations: Array<{ id: string; preset: string }> = [];
+  const assignments: Record<string, string> = { llm: 'openai:gpt-4o' };
+  const writes: ModelSettingsChange[] = [];
+  let revision = 1;
+  const view = (): ModelSettingsView => {
+    const connected = options.connected();
+    const current = createModelSettingsView({
+      providers: { openai: ['gpt-4o'] },
+      llm: assignments.llm,
+    });
+    current.revision = revision;
+    const nativePresets: ModelSettingsView['presets'] = [
+      {
+        id: 'openai-codex',
+        name: 'Codex',
+        kind: 'single',
+        requiresBaseUrl: false,
+        customEndpoint: false,
+        recommended: {},
+        capabilities: {
+          chat: {
+            registryId: 'openai-codex',
+            models: connected
+              ? ['gpt-live', 'gpt-next'].map((id) => ({
+                  id,
+                  name: id,
+                  capabilities: {
+                    serviceTiers: (options.fastModels ?? ['gpt-live']).includes(id)
+                      ? ['priority']
+                      : [],
+                  },
+                }))
+              : [],
           },
+        },
+      },
+      {
+        id: 'codex-image',
+        name: 'Codex Image',
+        kind: 'single',
+        requiresBaseUrl: false,
+        customEndpoint: false,
+        recommended: {},
+        capabilities: {
+          image: {
+            registryId: 'codex-image',
+            models: connected ? [{ id: 'gpt-image-2', name: 'gpt-image-2' }] : [],
+          },
+        },
+      },
+    ];
+    current.presets.push(...nativePresets);
+    for (const declaration of declarations) {
+      const preset = nativePresets.find((entry) => entry.id === declaration.preset)!;
+      current.providers.push({
+        ...declaration,
+        presetName: preset.name,
+        presetKind: 'single',
+        source: 'workspace',
+        connected,
+        capabilities: preset.capabilities,
+      });
+    }
+    for (const slot of current.slots) {
+      if (slot.slot === 'image' && assignments.image) {
+        slot.assignment = assignments.image;
+        slot.source = { kind: 'workspace' };
+        slot.effective = {
+          status: 'assigned',
+          resolvedAt: 'image',
+          source: 'workspace',
+          requirements: [],
+          providerId: assignments.image.split(':')[0],
+          providerSource: 'workspace',
+          presetId: 'codex-image',
+          registryId: 'codex-image',
+          modelId: 'gpt-image-2',
+        };
+      }
+      if (
+        !connected &&
+        slot.effective.status === 'assigned' &&
+        ['openai-codex', 'codex-image'].includes(slot.effective.registryId)
+      ) {
+        slot.effective = { status: 'invalid', message: 'Reconnect Codex to use this model' };
+      }
+    }
+    return current;
+  };
+  await page.route('**/api/model-config', async (route) => {
+    if (route.request().method() === 'PUT') {
+      const { change } = route.request().postDataJSON() as { change: ModelSettingsChange };
+      writes.push(change);
+      if (change.kind === 'provider') declarations.push({ id: change.id, preset: change.preset });
+      if (change.kind === 'slots' && change.set) {
+        for (const [slot, assignment] of Object.entries(change.set)) {
+          if (typeof assignment === 'string') assignments[slot] = assignment;
         }
-      : {},
-    tts: {},
-    asr: {},
-    pdf: {},
-    image: {},
-    video: {},
-    webSearch: {},
+      }
+      revision += 1;
+    } else {
+      await options.beforeRead?.();
+    }
+    await route.fulfill({ json: view() });
   });
+  return { view, writes };
 }
 
 async function openCodexSettings(page: HomePage['page'], connected = false) {
@@ -42,7 +141,7 @@ async function openCodexSettings(page: HomePage['page'], connected = false) {
 test.describe.configure({ mode: 'serial' });
 
 test.describe('Codex OAuth settings', () => {
-  test('runs blocked-popup cleanup, manual device completion, safe test, and logout fallback', async ({
+  test('runs blocked-popup cleanup, manual device completion, safe test, and logout invalidation', async ({
     page,
   }) => {
     let connected = false;
@@ -72,24 +171,17 @@ test.describe('Codex OAuth settings', () => {
       },
       {
         settingsKey: SETTINGS_KV_KEY,
-        settings: createSettingsStorage({
-          providerId: 'openai',
-          modelId: 'gpt-5.5',
-          providersConfig: { openai: { apiKey: 'test-openai-key' } },
-          autoConfigApplied: true,
-        }),
+        settings: createSettingsStorage({ codexFastMode: false }),
       },
     );
-    await page.route('**/api/server-providers', async (route) => {
-      if (connected) {
-        markProviderSyncStarted();
-        await providerSyncGate;
-      }
-      await route.fulfill({
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-        body: serverProvidersBody(connected),
-      });
+    const modelSettings = await mockCodexModelSettings(page, {
+      connected: () => connected,
+      beforeRead: async () => {
+        if (connected) {
+          markProviderSyncStarted();
+          await providerSyncGate;
+        }
+      },
     });
     await page.route('**/api/codex/auth', async (route) => {
       if (route.request().method() === 'DELETE') {
@@ -197,7 +289,15 @@ test.describe('Codex OAuth settings', () => {
     await expect(page.getByRole('button', { name: 'Use device code' })).toBeDisabled();
     releaseProviderSync();
     await expect(page.getByText('Connected with ChatGPT')).toBeVisible({ timeout: 5_000 });
-    await expect(page.getByRole('button', { name: /Codex Connected/ })).toBeVisible();
+    await expect
+      .poll(() => modelSettings.view().slots.find((slot) => slot.slot === 'llm')?.assignment)
+      .toBe('openai-codex:gpt-live');
+    expect(modelSettings.writes).toEqual([
+      { kind: 'provider', id: 'openai-codex', preset: 'openai-codex' },
+      { kind: 'provider', id: 'codex-image', preset: 'codex-image' },
+      { kind: 'slots', set: { llm: 'openai-codex:gpt-live', image: 'codex-image:gpt-image-2' } },
+    ]);
+    await expect(page.getByRole('button', { name: /Codex.*Configured/ }).first()).toBeVisible();
     const fastMode = page.getByRole('switch', { name: 'Fast mode' });
     await expect(fastMode).toBeVisible();
     await expect(fastMode).not.toBeChecked();
@@ -226,14 +326,10 @@ test.describe('Codex OAuth settings', () => {
     await expect(
       page.getByRole('button', { name: 'Sign in with ChatGPT', exact: true }),
     ).toBeVisible();
-    await expect
-      .poll(async () =>
-        page.evaluate((settingsKey) => {
-          const raw = localStorage.getItem(settingsKey);
-          return raw ? JSON.parse(raw).state.providerId : null;
-        }, SETTINGS_KV_KEY),
-      )
-      .toBe('openai');
+    const signedOutLlm = modelSettings.view().slots.find((slot) => slot.slot === 'llm')!;
+    expect(signedOutLlm.assignment).toBe('openai-codex:gpt-live');
+    expect(signedOutLlm.effective.status).toBe('invalid');
+    expect(modelSettings.writes).toHaveLength(3);
     await expect(page.getByRole('switch', { name: 'Fast mode' })).toHaveCount(0);
 
     const storage = await page.evaluate(() => JSON.stringify(localStorage));
@@ -243,13 +339,7 @@ test.describe('Codex OAuth settings', () => {
   });
 
   test('hides fast mode when the connected catalog has no supported model', async ({ page }) => {
-    await page.route('**/api/server-providers', (route) =>
-      route.fulfill({
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-        body: serverProvidersBody(true, []),
-      }),
-    );
+    await mockCodexModelSettings(page, { connected: () => true, fastModels: [] });
     await page.route('**/api/codex/auth', (route) =>
       route.fulfill({
         status: 200,
@@ -270,6 +360,7 @@ test.describe('Codex OAuth settings', () => {
   });
 
   test('shows a fixed unavailable state without credential controls', async ({ page }) => {
+    await mockCodexModelSettings(page, { connected: () => false });
     await page.route('**/api/codex/auth', (route) =>
       route.fulfill({
         status: 200,
@@ -294,9 +385,12 @@ test.describe('Codex OAuth settings', () => {
     await expect(page.locator('input[name^="llm-api-key-openai-codex"]')).toHaveCount(0);
   });
 
-  test('retries server-provider discovery after access-code unlock', async ({ page }) => {
+  test('reloads model settings after access-code unlock without selecting the connected account', async ({
+    page,
+  }) => {
     let authenticated = false;
     let providerFetches = 0;
+    const unexpectedWrites: unknown[] = [];
     await page.route('**/api/access-code/status', (route) =>
       route.fulfill({
         status: 200,
@@ -307,14 +401,15 @@ test.describe('Codex OAuth settings', () => {
       authenticated = true;
       await route.fulfill({ status: 200, json: { success: true } });
     });
-    await page.route('**/api/server-providers', (route) => {
+    const modelSettings = await mockCodexModelSettings(page, { connected: () => true });
+    await page.route('**/api/model-config', (route) => {
       providerFetches += 1;
+      if (route.request().method() === 'PUT') unexpectedWrites.push(route.request().postDataJSON());
       return route.fulfill(
         authenticated
           ? {
               status: 200,
-              headers: { 'content-type': 'application/json' },
-              body: serverProvidersBody(false),
+              json: modelSettings.view(),
             }
           : { status: 401, json: { errorCode: 'UNAUTHORIZED' } },
       );
@@ -325,5 +420,11 @@ test.describe('Codex OAuth settings', () => {
     await page.getByPlaceholder('Access code').press('Enter');
 
     await expect.poll(() => providerFetches).toBeGreaterThanOrEqual(2);
+    await expect(page.getByPlaceholder('Access code')).toHaveCount(0);
+    expect(modelSettings.writes).toEqual([]);
+    expect(unexpectedWrites).toEqual([]);
+    expect(modelSettings.view().slots.find((slot) => slot.slot === 'llm')?.assignment).toBe(
+      'openai:gpt-4o',
+    );
   });
 });

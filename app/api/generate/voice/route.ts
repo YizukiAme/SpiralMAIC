@@ -15,6 +15,15 @@ import { withAccessCode } from '@/lib/server/with-access-code';
  * POST /api/generate/voice
  */
 
+import { TTS_PROVIDERS } from '@/lib/audio/constants';
+import {
+  adapterOptions,
+  mediaResolutionResponse,
+  RequestedProviderRefusedError,
+  resolveMediaSlot,
+  type MediaConnection,
+} from '@/lib/server/model-config/media';
+import { requestWorkspaceId } from '@/lib/server/model-config/runtime';
 import { NextRequest } from 'next/server';
 import {
   isServerConfiguredProvider,
@@ -37,7 +46,6 @@ import { InvalidReferenceAudioError } from '@/lib/audio/wav-validate';
 
 const log = createLogger('Voice Registration API');
 
-export const maxDuration = 30;
 const ROUTE_DEADLINE_MS = 29_000;
 const EXISTS_LOOKUP_SLICE_MS = 5_000;
 
@@ -91,9 +99,6 @@ async function POSTHandler(req: NextRequest) {
     voiceId = typeof body.voiceId === 'string' ? body.voiceId.trim() : undefined;
     const design = normalizeVoiceDesign(body.descriptor);
 
-    if (!providerId) {
-      return apiError('MISSING_REQUIRED_FIELD', 400, 'providerId is required');
-    }
     if (!voiceId) {
       return apiError('MISSING_REQUIRED_FIELD', 400, 'voiceId is required');
     }
@@ -106,10 +111,31 @@ async function POSTHandler(req: NextRequest) {
       );
     }
 
-    // A server-force-disabled provider is off for everyone (#665), same as the TTS route.
-    if (isServerTTSProviderDisabled(providerId)) {
-      return apiError('PROVIDER_DISABLED', 403, 'This TTS provider is disabled by the server');
+    // Voices register on the tts slot's provider; the provider, key and base
+    // URL a request names (deprecated) count only when it is unassigned.
+    const requestedProviderId = providerId;
+    let connection: MediaConnection;
+    try {
+      connection = await resolveMediaSlot('tts', {
+        workspaceId: await requestWorkspaceId(req),
+        legacyRequest: async () =>
+          requestedProviderId
+            ? requestedTTSProvider(requestedProviderId, body.ttsApiKey, body.ttsBaseUrl)
+            : undefined,
+      });
+    } catch (error) {
+      const refused = mediaResolutionResponse(error, 'Text to speech');
+      if (refused) return refused;
+      throw error;
     }
+    if (requestedProviderId && requestedProviderId !== connection.providerId) {
+      return apiError(
+        'INVALID_REQUEST',
+        400,
+        'Voices register on the configured text-to-speech provider, not the one requested',
+      );
+    }
+    providerId = connection.providerId;
 
     const adapter = getVoiceRegistrationAdapter(providerId);
     if (!adapter) {
@@ -120,21 +146,26 @@ async function POSTHandler(req: NextRequest) {
       );
     }
 
-    // Managed providers are admin-owned: ignore any client-sent key/baseUrl.
-    const managed = isServerConfiguredProvider('tts', providerId);
-    const clientBaseUrl = managed ? undefined : body.ttsBaseUrl || undefined;
-    // A client BYOK base URL is always validated under the strict public policy;
-    // only a server-managed backend may inherit ALLOW_LOCAL_NETWORKS.
-    const publicOnly = Boolean(clientBaseUrl);
-    if (clientBaseUrl) {
-      const ssrfError = await validatePublicUrlForSSRF(clientBaseUrl);
-      if (ssrfError) {
-        return apiError('INVALID_URL', 403, ssrfError);
-      }
+    // Whether a configured provider registers voices depends on its options (a
+    // VoxCPM backend without runtime registration does not). The deprecated
+    // request path keeps its behaviour.
+    if (
+      !deleting &&
+      connection.origin === 'configuration' &&
+      !adapter.supportsRegistration(adapterOptions(connection))
+    ) {
+      return apiError(
+        'INVALID_REQUEST',
+        400,
+        `Provider "${providerId}" does not support voice registration with its configured options`,
+      );
     }
 
-    const apiKey = resolveTTSApiKey(providerId, managed ? undefined : body.ttsApiKey || undefined);
-    const baseUrl = resolveTTSBaseUrl(providerId, clientBaseUrl);
+    const { managed } = connection;
+    const publicOnly = connection.userEndpoint;
+    const apiKey = connection.apiKey ?? '';
+    const baseUrl =
+      connection.baseUrl ?? TTS_PROVIDERS[providerId as keyof typeof TTS_PROVIDERS]?.defaultBaseUrl;
     if (!baseUrl) {
       return apiError('MISSING_REQUIRED_FIELD', 400, 'TTS base URL is required');
     }
@@ -148,7 +179,12 @@ async function POSTHandler(req: NextRequest) {
       model:
         providerId === 'qwen-tts'
           ? resolveQwenVoiceCloneModel()
-          : resolveTTSModel(providerId, body.ttsModelId),
+          : connection.origin === 'configuration'
+            ? connection.modelId
+            : resolveTTSModel(
+                providerId,
+                connection.origin === 'request' ? body.ttsModelId : connection.modelId,
+              ),
     };
 
     if (deleting) {
@@ -158,7 +194,7 @@ async function POSTHandler(req: NextRequest) {
       // Vendor IDs may be present in exported classroom data, so possession of
       // an ID is not ownership. Only a caller-supplied account key authorizes
       // provider-side deletion; a managed server key must never be used here.
-      if (managed || !body.ttsApiKey?.trim()) {
+      if (connection.origin !== 'request' || managed || !body.ttsApiKey?.trim()) {
         return apiSuccess({
           voiceId,
           deleted: false,
@@ -263,6 +299,38 @@ async function POSTHandler(req: NextRequest) {
     clearTimeout(deadlineTimer);
     req.signal.removeEventListener('abort', abortFromRequest);
   }
+}
+
+/** The TTS provider a request names in its body (deprecated). */
+async function requestedTTSProvider(
+  providerId: string,
+  clientApiKey: string | undefined,
+  clientBaseUrl: string | undefined,
+): Promise<MediaConnection> {
+  // A server-force-disabled provider is off for everyone (#665), as in the TTS route.
+  if (isServerTTSProviderDisabled(providerId)) {
+    throw new RequestedProviderRefusedError(
+      apiError('PROVIDER_DISABLED', 403, 'This TTS provider is disabled by the server'),
+    );
+  }
+  // Managed providers are admin-owned: ignore any client-sent key/baseUrl.
+  const managed = isServerConfiguredProvider('tts', providerId);
+  const baseUrlFromClient = managed ? undefined : clientBaseUrl || undefined;
+  // A client BYOK base URL is always validated under the strict public policy;
+  // only a server-managed backend may inherit ALLOW_LOCAL_NETWORKS.
+  if (baseUrlFromClient) {
+    const ssrfError = await validatePublicUrlForSSRF(baseUrlFromClient);
+    if (ssrfError) throw new RequestedProviderRefusedError(apiError('INVALID_URL', 403, ssrfError));
+  }
+  const baseUrl = resolveTTSBaseUrl(providerId, baseUrlFromClient);
+  return {
+    providerId,
+    apiKey: resolveTTSApiKey(providerId, managed ? undefined : clientApiKey || undefined),
+    ...(baseUrl ? { baseUrl } : {}),
+    managed,
+    userEndpoint: Boolean(baseUrlFromClient),
+    origin: 'request',
+  };
 }
 
 export const POST = withAccessCode(POSTHandler);
