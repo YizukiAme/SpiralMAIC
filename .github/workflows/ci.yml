@@ -412,6 +412,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22
+
+      - name: Docker context privacy contract
+        run: node scripts/check-docker-context-privacy.mjs
+
       - name: Detect main-image changes
         id: changes
         shell: bash

@@ -223,13 +223,16 @@ jobs:
           STORAGE_PG_BASELINE: ${{ runner.temp }}/storage-pg-baseline.json
         run: |
           set -euo pipefail
-          pnpm --filter "@openmaic/dsl" \
+          # Bound both levels: workspace processes and Vitest workers. Running
+          # them all at once starves heavy DOM/math tests on a 4-core runner.
+          pnpm --workspace-concurrency=1 --filter "@openmaic/dsl" \
             --filter "@openmaic/generation" --filter "@openmaic/renderer" \
             --filter "@openmaic/editor" \
-            --filter "@openmaic/importer" run test
+            --filter "@openmaic/importer" exec vitest run --maxWorkers=1
           node scripts/assert-pg-contract-suites.mjs --capture-baseline "$STORAGE_PG_BASELINE"
           pnpm --filter "@openmaic/storage" exec \
-            vitest run --reporter=default --reporter=json \
+            vitest run --maxWorkers=1 --testTimeout=60000 --hookTimeout=60000 \
+            --reporter=default --reporter=json \
             --outputFile.json="$STORAGE_VITEST_RESULTS"
           node scripts/assert-pg-contract-suites.mjs "$STORAGE_VITEST_RESULTS" \
             --baseline "$STORAGE_PG_BASELINE"

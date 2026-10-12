@@ -174,3 +174,47 @@ describe('package validation source selection', () => {
     expect(result.status).not.toBe(0);
   });
 });
+
+describe('package validation test scheduling', () => {
+  it('runs every package suite with one worker and serializes workspace tests', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'spiral-package-scheduling-'));
+    try {
+      mkdirSync(join(directory, 'scripts'));
+      writeFileSync(join(directory, 'scripts/assert-pg-contract-suites.mjs'), '');
+      writeFileSync(
+        join(directory, 'pnpm'),
+        '#!/usr/bin/env node\nconsole.log(JSON.stringify(process.argv.slice(2)));\n',
+        { mode: 0o755 },
+      );
+      const result = spawnSync(
+        'bash',
+        ['-c', step(parseWorkflow(), 'validate', 'Test & typecheck').run!],
+        {
+          cwd: directory,
+          env: {
+            ...process.env,
+            PATH: `${directory}:${process.env.PATH}`,
+            STORAGE_PG_BASELINE: join(directory, 'baseline.json'),
+            STORAGE_VITEST_RESULTS: join(directory, 'results.json'),
+          },
+          encoding: 'utf8',
+        },
+      );
+      expect(result.status, result.stderr).toBe(0);
+      const calls = result.stdout
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as string[]);
+      const tests = calls.filter((args) => args.includes('vitest') || args.includes('test'));
+      expect(tests).toHaveLength(2);
+      expect(tests[0]).toContain('--workspace-concurrency=1');
+      for (const args of tests) expect(args).toContain('--maxWorkers=1');
+      for (const name of ['dsl', 'generation', 'renderer', 'editor', 'importer']) {
+        expect(tests[0]).toContain(`@openmaic/${name}`);
+      }
+      expect(tests[1]).toContain('@openmaic/storage');
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});
