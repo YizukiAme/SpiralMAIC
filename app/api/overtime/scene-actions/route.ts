@@ -2,7 +2,7 @@ import type { NextRequest } from 'next/server';
 
 import { createLogger } from '@/lib/logger';
 import { ownsGenerationCourse } from '@/lib/overtime/generation-server';
-import { apiSuccess } from '@/lib/server/api-response';
+import { apiSuccess, modelAuthorizationResponse } from '@/lib/server/api-response';
 import {
   ownerApiError,
   ownerNotFound,
@@ -37,6 +37,8 @@ async function POSTHandler(req: NextRequest) {
       const result = await generateSceneActions({ ...body, model }, { log, signal: req.signal });
       return withOwnerResponseHeaders(apiSuccess({ ...result }), headers);
     } catch (error) {
+      const refusal = modelAuthorizationResponse(error);
+      if (refusal) return withOwnerResponseHeaders(refusal, headers);
       log.error('Failed to generate Spiral scene actions:', error);
       return ownerApiError(
         'GENERATION_FAILED',

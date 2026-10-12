@@ -1,5 +1,4 @@
 import { withAccessCode } from '@/lib/server/with-access-code';
-import { attachInteractiveState } from '@/lib/chat/pi/interactive-state-evidence';
 /**
  * Pi Director Chat API Endpoint
  *
@@ -7,6 +6,8 @@ import { attachInteractiveState } from '@/lib/chat/pi/interactive-state-evidence
  * as a single server-side Pi agent loop. The build-time flag can disable this
  * route together with the corresponding client path for legacy rollback.
  */
+import { attachInteractiveState } from '@/lib/chat/pi/interactive-state-evidence';
+import { ModelAuthorizationError } from '@/lib/server/model-config/model-authorization';
 
 import { NextRequest } from 'next/server';
 import { isProviderKeyRequired } from '@/lib/ai/providers';
@@ -261,6 +262,8 @@ async function chat(req: NextRequest, principal: OwnerPrincipal): Promise<Respon
             })
           : undefined;
     } catch (error) {
+      if (error instanceof ModelAuthorizationError)
+        return apiError(error.code, error.httpStatus, error.message);
       const message = error instanceof Error ? error.message : 'Invalid Web Search configuration';
       return apiError('INVALID_REQUEST', 400, message);
     }
@@ -356,6 +359,9 @@ async function chat(req: NextRequest, principal: OwnerPrincipal): Promise<Respon
       },
     });
   } catch (error) {
+    if (error instanceof ModelAuthorizationError) {
+      return apiError('PROVIDER_DISABLED', 403, error.message);
+    }
     log.error(
       `Pi chat request failed [model=${chatModel ?? 'unknown'}, messages=${chatMessageCount ?? 0}]:`,
       error,

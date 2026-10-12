@@ -171,7 +171,8 @@ const TEMPORARY_VENDOR_DEBT: readonly AllowedVendorDebt[] = [
     'Temporary: provider configuration is still a mixed catalog and resolver composition root.',
     [
       ['qwen', 20],
-      ['openai', 24],
+      // The image fallback now reads IMAGE_OPENAI_MODELS for authorization.
+      ['openai', 25],
       ['codex', 3],
       ['azure', 6],
       ['atlascloud', 2],
@@ -180,7 +181,7 @@ const TEMPORARY_VENDOR_DEBT: readonly AllowedVendorDebt[] = [
       ['deepseek', 2],
       ['kimi', 2],
       ['minimax', 13],
-      ['glm', 4],
+      ['glm', 6],
       ['siliconflow', 2],
       ['doubao', 6],
       ['openrouter', 6],

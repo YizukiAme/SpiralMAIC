@@ -18,8 +18,8 @@
   "dependencies": {
     "@hono/node-server": "^1.13.7",
     "@hyperframes/producer": "^0.7.107",
-    "@openmaic/dsl": "0.11.0",
-    "@openmaic/renderer": "0.1.4",
+    "@openmaic/dsl": "0.11.3",
+    "@openmaic/renderer": "0.1.12",
     "echarts": "^6.0.0",
     "esbuild": "0.28.1",
     "fflate": "^0.8.2",
@@ -36,13 +36,13 @@
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
-    "@typescript/native": "npm:typescript@7.0.2",
     "@types/node": "^22.10.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@typescript/native": "npm:typescript@7.0.2",
     "eslint": "10.9.0",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "typescript-eslint": "8.67.0",
-    "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3",
     "vitest": "4.1.11"
   },
   "overrides": {

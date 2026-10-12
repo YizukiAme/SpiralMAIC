@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ModelAuthorizationError } from '@/lib/server/model-config/model-authorization';
 
 const mocks = vi.hoisted(() => ({
   query: vi.fn(),
@@ -73,6 +74,46 @@ describe('owner-scoped Spiral generation adapters', () => {
     });
   });
   afterEach(() => vi.unstubAllEnvs());
+
+  it.each(['scene-content', 'scene-actions', 'agent-profiles'])(
+    'returns the model refusal before %s generation and preserves owner cookies',
+    async (step) => {
+      mocks.model.mockRejectedValueOnce(new ModelAuthorizationError());
+      const { POST } =
+        step === 'scene-content'
+          ? await import('@/app/api/overtime/scene-content/route')
+          : step === 'scene-actions'
+            ? await import('@/app/api/overtime/scene-actions/route')
+            : await import('@/app/api/revisit/agent-profiles/route');
+      const body =
+        step === 'agent-profiles'
+          ? {
+              stageId: 'stage-1',
+              mode: 'spiral',
+              stageInfo: { name: 'Course' },
+              languageDirective: 'English',
+              availableAvatars: ['/a.png'],
+            }
+          : { stageId: 'stage-1', outline, allOutlines: [outline], content: { elements: [] } };
+      const response = await POST(
+        request(
+          step === 'agent-profiles' ? '/api/revisit/agent-profiles' : `/api/overtime/${step}`,
+          body,
+        ),
+      );
+      expect(response.status).toBe(403);
+      expect(response.headers.get('set-cookie')).toBe('owner=test');
+      await expect(response.json()).resolves.toEqual({
+        success: false,
+        errorCode: 'PROVIDER_DISABLED',
+        error: new ModelAuthorizationError().message,
+      });
+      expect(mocks.content).not.toHaveBeenCalled();
+      expect(mocks.actions).not.toHaveBeenCalled();
+      expect(mocks.profiles).not.toHaveBeenCalled();
+      expect(mocks.callLLM).not.toHaveBeenCalled();
+    },
+  );
 
   it('calls the shared content step after verifying the course owner', async () => {
     const { POST } = await import('@/app/api/overtime/scene-content/route');

@@ -17,6 +17,7 @@ import {
   createTextDocument,
   serializeTextDocument,
 } from '../../packages/@openmaic/editor/src/react/text/prosemirror/document';
+import { renderInlineMath } from '../../packages/@openmaic/renderer/src/utils/inlineMath';
 import { sanitizeSlideRichText } from '@/lib/export/standalone-html/rich-text';
 import type { SlideContent } from '@/lib/types/stage';
 
@@ -33,15 +34,12 @@ function editorHtml(): string {
   return html;
 }
 
-/** A fresh KaTeX render of the formula as the DOM serializes it, without its root tag. */
-function freshRenderBody(): string {
-  const template = document.createElement('template');
-  template.innerHTML = katex.renderToString(LATEX, {
-    output: 'html',
-    throwOnError: false,
-    trust: false,
-  });
-  return template.content.firstElementChild!.innerHTML;
+/** Prose as the player shows it: inline formulas typeset by the slide renderer. */
+function typeset(html: string): HTMLElement {
+  const host = document.createElement('div');
+  host.innerHTML = html;
+  renderInlineMath(host);
+  return host;
 }
 
 function slideWith(html: string): SlideContent {
@@ -96,27 +94,26 @@ function proseFields(content: SlideContent): string[] {
 }
 
 describe('standalone HTML inline formulas', () => {
-  it('keeps editor inline math intact in text, shape text and table cells', () => {
+  it('keeps editor inline math as source the player typesets', () => {
     const { content, discarded } = sanitizeSlideRichText(slideWith(editorHtml()));
     expect(discarded).toEqual([]);
     for (const html of proseFields(content)) {
-      expect(html).toContain(`data-inline-math="${LATEX}"`);
-      expect(html).toContain(freshRenderBody());
-      expect(html).toContain('<svg'); // the radical
-      expect(html).toMatch(/style="top:/); // positioned fraction parts
-      expect(html.startsWith('<p>Area: ')).toBe(true);
-      expect(html).toContain(' units</p>');
-      expect(html).not.toContain('contenteditable');
-      expect(html).not.toContain('<math');
-      expect(html).toContain('katex'); // so the export ships the math fonts
+      expect(html).toBe(`<p>Area: <span data-inline-math="${LATEX}">${LATEX}</span> units</p>`);
+      const shown = typeset(html);
+      const root = shown.querySelector('[data-inline-math]')!;
+      expect(root.getAttribute('data-inline-math')).toBe(LATEX);
+      expect(root.classList.contains('katex')).toBe(true);
+      expect(root.querySelector('svg')).not.toBeNull(); // the radical
+      expect(root.innerHTML).toMatch(/style="top:/); // positioned fraction parts
     }
   });
 
   it('recovers the source from the KaTeX annotation when the attribute is missing', () => {
     const withAnnotation = katex.renderToString(LATEX, { output: 'htmlAndMathml' });
     const { content } = sanitizeSlideRichText(slideWith(`<p>${withAnnotation}</p>`));
-    expect(proseFields(content)[0]).toContain(`data-inline-math="${LATEX}"`);
-    expect(proseFields(content)[0]).toContain(freshRenderBody());
+    expect(proseFields(content)[0]).toBe(
+      `<p><span data-inline-math="${LATEX}">${LATEX}</span></p>`,
+    );
   });
 
   it('never carries authored markup through a formula wrapper', () => {
@@ -160,7 +157,8 @@ describe('standalone HTML inline formulas', () => {
         const roots = parse(html).querySelectorAll('[data-inline-math]');
         expect(roots).toHaveLength(1);
         expect(roots[0].getAttribute('data-inline-math')).toBe(latex);
-        expect(roots[0].classList.contains('katex')).toBe(true);
+        expect(roots[0].textContent).toBe(latex);
+        expect(typeset(html).querySelector('.katex')?.getAttribute('data-inline-math')).toBe(latex);
       }
     });
   }
@@ -175,7 +173,7 @@ describe('standalone HTML inline formulas', () => {
     const { content } = sanitizeSlideRichText(slideWith(editorHtmlFor('y^2', forged)));
     for (const html of proseFields(content)) {
       const fragment = parse(html);
-      expect(fragment.querySelectorAll('.katex')).toHaveLength(1);
+      expect(fragment.querySelectorAll('[data-inline-math]')).toHaveLength(1);
       expect(fragment.querySelector('a')?.getAttribute('title')).toBe('openmaicmath0x0x');
       expect(fragment.textContent).toContain('openmaicmath0x0x');
     }
@@ -206,7 +204,7 @@ describe('standalone HTML inline formulas', () => {
     for (const out of proseFields(content)) {
       expect(out).not.toContain('example.com/lost.png');
       expect(out).not.toContain('<img');
-      expect(parse(out).querySelectorAll('.katex')).toHaveLength(1);
+      expect(parse(out).querySelectorAll('[data-inline-math]')).toHaveLength(1);
     }
   });
 

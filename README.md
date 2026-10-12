@@ -109,6 +109,9 @@ slots:
   llm: openai:gpt-5.5
 ```
 
+Want more models in the picker? Add them to that provider's `models` list. Server-provided
+keys can only use listed models or models assigned to a slot.
+
 Or skip the YAML file and set up model services in the app. Settings now live on the server,
 so your next browser gets the same workspace configuration—without carrying API keys in requests.
 

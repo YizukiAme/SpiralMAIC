@@ -1,8 +1,8 @@
 /**
  * Scene-content HTML sanitization for the classroom persistence boundary.
- * Dependency-free apart from `sanitize-html`, so client code can apply the
- * same policy: the standalone HTML export runs it over the working state it
- * embeds, which has not crossed the persistence boundary yet.
+ * Needs no DOM (`sanitize-html` and its parser only), so client code can
+ * apply the same policy: the standalone HTML export runs it over the
+ * working state it embeds, which has not crossed the persistence boundary yet.
  *
  * INVARIANT: stored slide HTML is restricted to the formatting vocabulary the
  * renderer produces. Slide element content is authored as ProseMirror HTML and
@@ -26,8 +26,14 @@
  * `katex.renderToString(..., { output: 'html' })` (see
  * `lib/edit/slide-edit-elements.ts`); that output is spans + layout SVGs and
  * needs its own policy so formulas are not flattened.
+ *
+ * Inline formulas inside prose (the editor's `span[data-inline-math]`) are
+ * stored as LaTeX source only and rendered by the clients that display
+ * slides; see `./inline-math`. The server never runs KaTeX.
  */
 import sanitizeHtml, { type IOptions } from 'sanitize-html';
+
+import { liftInlineMath } from './inline-math';
 
 // ---------------------------------------------------------------------------
 // Allowlist primitives
@@ -196,26 +202,10 @@ const PROSE_OPTIONS: IOptions = {
 };
 
 /**
- * Sanitize one prose-HTML string (a text element's `content`, a shape's
- * `text.content`, or a table cell's `text`).
+ * The prose policy plus `data-inline-math` on `span`, used only on prose whose
+ * formulas have all been reduced to source-only spans; the attribute value is
+ * inert text.
  */
-export function sanitizeProseHtml(html: string): string {
-  return sanitizeHtml(html, PROSE_OPTIONS);
-}
-
-/**
- * Policy variants for callers outside the persistence boundary. Every option
- * defaults to the persistence policy.
- */
-export interface SceneContentSanitizeOptions {
-  /**
-   * Keep `data-inline-math` (an inline formula's LaTeX source) on `span`. Only
-   * for callers that empty those spans first and refill them with their own
-   * KaTeX render; the attribute value itself is inert text.
-   */
-  readonly keepInlineMathSource?: boolean;
-}
-
 const PROSE_OPTIONS_WITH_MATH_SOURCE: IOptions = {
   ...PROSE_OPTIONS,
   allowedAttributes: {
@@ -224,10 +214,20 @@ const PROSE_OPTIONS_WITH_MATH_SOURCE: IOptions = {
   },
 };
 
-function proseSanitizer(options: SceneContentSanitizeOptions): (html: string) => string {
-  return options.keepInlineMathSource
-    ? (html) => sanitizeHtml(html, PROSE_OPTIONS_WITH_MATH_SOURCE)
-    : sanitizeProseHtml;
+/**
+ * Sanitize one prose-HTML string (a text element's `content`, a shape's
+ * `text.content`, or a table cell's `text`). Each inline formula is stored as
+ * `<span data-inline-math="LATEX">LATEX</span>`; prose without a formula is
+ * sanitized exactly as before.
+ */
+export function sanitizeProseHtml(html: string): string {
+  const lifted = liftInlineMath(html);
+  const options = lifted === null ? PROSE_OPTIONS : PROSE_OPTIONS_WITH_MATH_SOURCE;
+  const clean = sanitizeHtml(lifted ?? html, options);
+  // Removing SVG/MathML wrappers can expose nested links that the HTML parser
+  // repairs on the next read. Normalize that repaired prose now, so saving it
+  // again (or opening it in a browser) does not change the stored structure.
+  return sanitizeHtml(clean, options);
 }
 
 // ---------------------------------------------------------------------------
@@ -283,11 +283,11 @@ function isRecord(value: unknown): value is JsonRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function sanitizeCell(row: unknown, prose: (html: string) => string): unknown {
+function sanitizeCell(row: unknown): unknown {
   if (!Array.isArray(row)) return row;
   return row.map((cell) => {
     if (!isRecord(cell) || typeof cell.text !== 'string') return cell;
-    return { ...cell, text: prose(cell.text) };
+    return { ...cell, text: sanitizeProseHtml(cell.text) };
   });
 }
 
@@ -298,25 +298,25 @@ function sanitizeCell(row: unknown, prose: (html: string) => string): unknown {
  * latex uses the KaTeX snapshot policy. Code elements store plain text lines —
  * deliberately NOT treated as HTML, so code like `a < b` is never escaped.
  */
-function sanitizeValue(value: unknown, prose: (html: string) => string): unknown {
-  if (Array.isArray(value)) return value.map((item) => sanitizeValue(item, prose));
+function sanitizeValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sanitizeValue);
   if (!isRecord(value)) return value;
 
   const out: JsonRecord = {};
   for (const [key, child] of Object.entries(value)) {
-    out[key] = sanitizeValue(child, prose);
+    out[key] = sanitizeValue(child);
   }
 
   if (typeof out.type !== 'string') return out;
 
   if (out.type === 'text' && typeof out.content === 'string') {
-    out.content = prose(out.content);
+    out.content = sanitizeProseHtml(out.content);
   } else if (out.type === 'shape') {
     if (isRecord(out.text) && typeof out.text.content === 'string') {
-      out.text = { ...out.text, content: prose(out.text.content) };
+      out.text = { ...out.text, content: sanitizeProseHtml(out.text.content) };
     }
   } else if (out.type === 'table' && Array.isArray(out.data)) {
-    out.data = out.data.map((row) => sanitizeCell(row, prose));
+    out.data = out.data.map(sanitizeCell);
   } else if (out.type === 'latex' && typeof out.html === 'string') {
     out.html = sanitizeLatexHtml(out.html);
   }
@@ -330,6 +330,6 @@ function sanitizeValue(value: unknown, prose: (html: string) => string): unknown
  * (idempotent): the read path applies it over content stored before this
  * change existed, and the write path applies it to new payloads.
  */
-export function sanitizeSceneContent<T>(payload: T, options: SceneContentSanitizeOptions = {}): T {
-  return sanitizeValue(payload, proseSanitizer(options)) as T;
+export function sanitizeSceneContent<T>(payload: T): T {
+  return sanitizeValue(payload) as T;
 }

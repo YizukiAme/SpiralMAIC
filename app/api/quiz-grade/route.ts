@@ -5,6 +5,7 @@ import { withAccessCode } from '@/lib/server/with-access-code';
  * POST: Receives a text question + user answer, calls LLM for scoring and feedback.
  * Used for short-answer (text) questions that cannot be graded locally.
  */
+import { modelAuthorizationResponse } from '@/lib/server/api-response';
 
 import { NextRequest } from 'next/server';
 import { callLLM } from '@/lib/ai/llm';
@@ -106,6 +107,8 @@ ${commentPrompt ? `Grading guidance: ${commentPrompt}\n` : ''}Student answer: ${
 
     return apiSuccess({ ...gradeResult });
   } catch (error) {
+    const authorization = modelAuthorizationResponse(error);
+    if (authorization) return authorization;
     log.error(
       `Quiz grading failed [question="${questionSnippet ?? 'unknown'}...", points=${resolvedPoints ?? 'unknown'}]:`,
       error,

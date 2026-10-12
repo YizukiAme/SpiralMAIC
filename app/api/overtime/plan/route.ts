@@ -10,7 +10,7 @@ import {
   type OvertimeKnownConcept,
 } from '@/lib/overtime/planner';
 import { parseRequestLearningExtensionParams } from '@/lib/overtime/types';
-import { apiError, apiSuccess } from '@/lib/server/api-response';
+import { apiError, apiSuccess, modelAuthorizationResponse } from '@/lib/server/api-response';
 import { ownerNotFound, withOwnerResponseHeaders } from '@/lib/server/agent-runtime/route-response';
 import { withRequestOwner } from '@/lib/server/identity/with-owner';
 import { resolveModelFromRequest } from '@/lib/server/resolve-model';
@@ -116,6 +116,8 @@ async function POSTHandler(req: NextRequest, ownerId: string) {
 
     return apiSuccess({ plan });
   } catch (error) {
+    const refusal = modelAuthorizationResponse(error);
+    if (refusal) return refusal;
     log.error('Failed to plan overtime extension:', error);
     return apiError(
       'INTERNAL_ERROR',

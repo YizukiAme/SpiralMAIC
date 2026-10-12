@@ -37,7 +37,10 @@ import type {
   ImageMapping,
 } from '@/lib/types/generation';
 import { resolveServerGenerationCapabilities } from '@/lib/server/generation-capabilities';
-import { isNonRetryableHostFailure } from '@/lib/server/generation-run-hooks/runtime';
+import {
+  isNonRetryableHostFailure,
+  isProviderQuotaRefusal,
+} from '@/lib/server/generation-run-hooks/runtime';
 import { sortDocumentImagesForVision } from '@/lib/document/bundle';
 import { resolveVocationalActive } from '@/lib/config/feature-flags';
 
@@ -343,8 +346,8 @@ export type OutlineRefusal = 'prompt-unavailable';
 
 /** Every attempt failed to produce an outline; the message is the last failure. */
 export class OutlineGenerationError extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = 'OutlineGenerationError';
   }
 }
@@ -583,7 +586,7 @@ async function streamOutlines(
     fellBack = true;
     logFallbackFired(
       'scene-outlines-stream',
-      error !== undefined ? 'retryable failure' : 'empty output',
+      error,
       model.modelString ?? '?',
       fallback.modelString,
     );
@@ -600,12 +603,14 @@ async function streamOutlines(
   let languageDirective: string | null = null;
   let courseTitle: string | null = null;
   let lastError: string | undefined;
+  let lastCause: unknown;
 
   for (
     let attempt = 1;
     attempt <= MAX_STREAM_RETRIES + 1 && !(fellBack && attempt > 1);
     attempt++
   ) {
+    lastCause = undefined;
     try {
       let fullText = '';
       // In UTF-8 bytes, the unit of the cap (and of the outline normalizer's).
@@ -716,22 +721,8 @@ async function streamOutlines(
       // content-filter finish is a safety refusal — neither may reach
       // the empty-output fallback path.
       if (streamError !== undefined) {
-        lastError = streamError instanceof Error ? streamError.message : String(streamError);
-        log.warn(
-          `Outlines attempt ${attempt} stream error: ${lastError}, finishReason=${finishReason ?? 'none'}`,
-        );
-
-        if (attempt <= MAX_STREAM_RETRIES) {
-          emit({ type: 'retry', attempt, maxAttempts: MAX_STREAM_RETRIES + 1 });
-          continue;
-        }
-
-        // Same-model retries exhausted: retry once on the fallback
-        // model when the failure is retryable.
-        if (await maybeFallback(streamError)) {
-          attempt = 0;
-          continue;
-        }
+        // Thrown and streamed failures share the same retry/fallback decision.
+        throw streamError;
       } else if (finishReason === 'content-filter') {
         lastError = 'LLM response blocked by content filter';
         log.warn(
@@ -747,7 +738,8 @@ async function streamOutlines(
           `Outlines attempt ${attempt} diagnostics: textLen=${fullText.length}, outlines=${parsedOutlines.length}, languageDirective=${languageDirective ? 'yes' : 'no'}, preview=${JSON.stringify(fullText.slice(0, 240))}`,
         );
 
-        if (attempt <= MAX_STREAM_RETRIES) {
+        // The fallback round is the last attempt: it is not retried.
+        if (!fellBack && attempt <= MAX_STREAM_RETRIES) {
           log.warn(`Empty outlines (attempt ${attempt}/${MAX_STREAM_RETRIES + 1}), retrying...`);
           // Report that a retry is happening
           emit({ type: 'retry', attempt, maxAttempts: MAX_STREAM_RETRIES + 1 });
@@ -764,30 +756,36 @@ async function streamOutlines(
       // stop immediately, don't burn retries re-running generation.
       if (signal?.aborted) throw new StepAbortedError();
       if (isNonRetryableHostFailure(error)) throw error;
+      lastCause = error;
       lastError = error instanceof Error ? error.message : String(error);
       log.warn(
         `Outlines stream error detail (attempt ${attempt}/${MAX_STREAM_RETRIES + 1}): ${lastError}`,
       );
 
-      if (attempt <= MAX_STREAM_RETRIES) {
+      // No retry of this model serves an exhausted quota, and the fallback
+      // round is the last attempt.
+      if (!isProviderQuotaRefusal(error) && !fellBack && attempt <= MAX_STREAM_RETRIES) {
         log.warn(`Stream error (attempt ${attempt}/${MAX_STREAM_RETRIES + 1}), retrying...`, error);
         emit({ type: 'retry', attempt, maxAttempts: MAX_STREAM_RETRIES + 1 });
         continue;
       }
 
-      // Same-model retries exhausted: retry once on the fallback model
-      // when the failure is retryable.
+      // Same-model retries exhausted or skipped: retry once on the fallback
+      // model when the failure allows it.
       if (await maybeFallback(error)) {
         attempt = 0;
         continue;
       }
+      break;
     }
   }
 
   if (parsedOutlines.length === 0) {
     // All retries exhausted, no outlines produced
-    log.error(`Outline generation failed after ${MAX_STREAM_RETRIES + 1} attempts: ${lastError}`);
-    throw new OutlineGenerationError(lastError || 'Failed to generate outlines');
+    log.error(`Outline generation failed: ${lastError}`);
+    throw new OutlineGenerationError(lastError || 'Failed to generate outlines', {
+      cause: lastCause,
+    });
   }
 
   return {

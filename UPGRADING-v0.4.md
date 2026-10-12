@@ -17,6 +17,11 @@ Demo sessions remain in the browser.
   `openmaic.yml`, reference keys as `${VAR}`, and choose the default model in `slots.llm`,
   or configure the workspace in Settings. YAML is read at startup; restart after editing.
   The `lock` and `allowUserKeys` options control which settings users may change.
+- With deployment-provided credentials, `providers.<id>.models` is now an authorization
+  list for every model capability, not just the Settings picker. Models explicitly selected
+  in a capability slot are also allowed. List any additional models users should be able to
+  choose; otherwise the server refuses the request before contacting the provider. Requests
+  cannot substitute another endpoint for those credentials. User-owned keys remain separate.
 - Back up `data/instance-secret.key` with the database (or preserve `OPENMAIC_SECRET_KEY`
   when set explicitly). Saved provider keys cannot be decrypted with a different secret.
   Keep uploaded materials in `data/`; instances sharing a database must share that directory.
@@ -70,3 +75,8 @@ endpoint and one core learning loop in the deployment mode you use. The migratio
 tables without deleting old browser data. A code rollback does **not** copy newly created
 server learning records back to the browser; retain the database backup and avoid editing the
 same course in both versions during a rollback.
+
+If you use the optional MP4 render service, upgrade it together with the app. Render jobs are
+now bound to the requesting owner; mixing old and new service versions is refused instead of
+falling back to unscoped jobs. Keep the service reachable only through the trusted app proxy;
+the service's owner header is an assertion from that proxy, not browser authentication.

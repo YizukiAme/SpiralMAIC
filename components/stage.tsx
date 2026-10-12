@@ -64,10 +64,12 @@ export function Stage({
   classroomId,
   onRetryOutline,
   revisitConfig,
+  generationFailureMessage,
 }: {
   classroomId?: string;
   onRetryOutline?: (outlineId: string) => Promise<void>;
   revisitConfig?: RevisitPlaybackConfig;
+  generationFailureMessage?: string;
 }) {
   const { mode, setMode, scenes, currentSceneId, generatingOutlines, stage } = useStageStore();
   const router = useRouter();
@@ -364,6 +366,7 @@ export function Stage({
             ref={playbackRef}
             onInteractivePickerChange={setPlaybackInteractivePicker}
             onRetryOutline={onRetryOutline}
+            generationFailureMessage={generationFailureMessage}
             canEnterProMode={workbenchPlayback || isEditable}
             onEnterProMode={chromeToggleHandler}
             proModeActive={hosted && workbenchPlayback}

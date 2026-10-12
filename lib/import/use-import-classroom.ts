@@ -547,7 +547,18 @@ export function useImportClassroom(onSuccess?: (importedStageId: string) => void
         // replaces.
         await mutateDocument(
           newStageId,
-          async (_existing, store) => store.saveDocument(document),
+          async (_existing, store) => {
+            try {
+              await store.saveDocument(document);
+            } catch (saveError) {
+              try {
+                if (await store.loadDocument(newStageId)) return;
+              } catch (verificationError) {
+                log.error('Failed to verify rejected document write:', verificationError);
+              }
+              throw saveError;
+            }
+          },
           {},
           { mode: 'replace' },
         );
@@ -564,9 +575,9 @@ export function useImportClassroom(onSuccess?: (importedStageId: string) => void
             : t('import.error.invalidZip');
         toast.error(message, { id: toastId });
       } finally {
-        // Local rows cannot join the document transaction. Server allocations
-        // are left to the pending-asset collector: the browser cannot safely
-        // delete them after a document write with an ambiguous outcome.
+        // A rejected response does not prove the atomic document write failed.
+        // Never delete by stage id here. Local rows are disposable caches, and
+        // the pending collector reclaims unreferenced server assets.
         const cleanup = async (label: string, operation: () => Promise<unknown>) => {
           try {
             await operation();
@@ -576,11 +587,6 @@ export function useImportClassroom(onSuccess?: (importedStageId: string) => void
         };
         if (!importCommitted && importedStageId) {
           const stageId = importedStageId;
-          await cleanup('document', async () => {
-            await mutateDocument(stageId, async (_document, store) =>
-              store.deleteDocument(stageId),
-            );
-          });
           await cleanup('generated media', () =>
             db.mediaFiles.where('stageId').equals(stageId).delete(),
           );

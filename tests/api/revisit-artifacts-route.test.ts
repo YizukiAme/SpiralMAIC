@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ModelAuthorizationError } from '@/lib/server/model-config/model-authorization';
 
 const mocks = vi.hoisted(() => ({
   buildStudyArtifactPrompt: vi.fn(),
@@ -53,6 +54,39 @@ describe('revisit artifacts route', () => {
     });
     mocks.suggestStudyArtifactTitle.mockReturnValue('English Grammar Flashcards');
     mocks.callLLM.mockResolvedValue({ text: '{}' });
+  });
+
+  it('returns the model refusal without calling the provider', async () => {
+    mocks.resolveModelFromRequest.mockRejectedValueOnce(new ModelAuthorizationError());
+    const response = await POST(
+      new Request('http://localhost/api/revisit/artifacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jobId: 'artifact-job-1',
+          kind: 'flashcards',
+          options: { focusMode: 'balanced', count: 12, difficulty: 'medium' },
+          stage: { id: 'stage-1', name: 'Grammar', createdAt: 1, updatedAt: 2 },
+          scenes: [
+            {
+              id: 'scene-2',
+              stageId: 'stage-1',
+              type: 'quiz',
+              title: 'Predicate',
+              order: 1,
+              content: { type: 'quiz', questions: [] },
+            },
+          ],
+        }),
+      }) as NextRequest,
+    );
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      success: false,
+      errorCode: 'PROVIDER_DISABLED',
+      error: new ModelAuthorizationError().message,
+    });
+    expect(mocks.callLLM).not.toHaveBeenCalled();
   });
 
   it('validates the request and returns one unsaved artifact payload', async () => {

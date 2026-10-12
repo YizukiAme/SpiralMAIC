@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ModelAuthorizationError } from '@/lib/server/model-config/model-authorization';
 
 const mocks = vi.hoisted(() => ({
   buildBlueprintPrompt: vi.fn(),
@@ -33,6 +34,28 @@ describe('revisit blueprint route', () => {
     });
     mocks.callLLM.mockResolvedValue({ text: '{}' });
     mocks.parseBlueprintResponse.mockReturnValue({ id: 'bp-1' });
+  });
+
+  it('returns the model refusal without calling the provider', async () => {
+    mocks.resolveModelFromRequest.mockRejectedValueOnce(new ModelAuthorizationError());
+    const response = await POST(
+      new Request('http://localhost/api/revisit/blueprint', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          attemptId: 'attempt-1',
+          stage: { id: 'stage-1', name: 'Fallacies', createdAt: 1, updatedAt: 1 },
+          scenes: [],
+        }),
+      }) as NextRequest,
+    );
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      success: false,
+      errorCode: 'PROVIDER_DISABLED',
+      error: new ModelAuthorizationError().message,
+    });
+    expect(mocks.callLLM).not.toHaveBeenCalled();
   });
 
   it('passes completed challenge history into prompt construction', async () => {

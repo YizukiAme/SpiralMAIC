@@ -78,6 +78,7 @@ export type ImageProviderId =
   | 'nano-banana'
   | 'minimax-image'
   | 'grok-image'
+  | 'glm-image'
   | 'comfyui-image'
   | 'openrouter-image'
   | 'lemonade';
@@ -116,7 +117,7 @@ export interface ImageProviderConfig {
   /** Available models for this provider */
   models: ImageModelInfo[];
   /** Aspect ratios supported by this provider */
-  supportedAspectRatios: Array<'16:9' | '4:3' | '1:1' | '9:16'>;
+  supportedAspectRatios: Array<'16:9' | '4:3' | '1:1' | '9:16' | '3:4'>;
   /** Optional artistic styles supported by this provider */
   supportedStyles?: string[];
   /** Maximum supported output resolution */

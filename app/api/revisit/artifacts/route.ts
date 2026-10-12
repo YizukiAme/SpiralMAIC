@@ -11,7 +11,7 @@ import {
   validateStudyArtifactRequest,
 } from '@/lib/revisit/artifacts';
 import { createLogger } from '@/lib/logger';
-import { apiError, apiSuccess } from '@/lib/server/api-response';
+import { apiError, apiSuccess, modelAuthorizationResponse } from '@/lib/server/api-response';
 import { resolveModelFromRequest } from '@/lib/server/resolve-model';
 import { parseCodexLogicalSession } from '@/lib/server/codex/logical-session';
 
@@ -65,6 +65,8 @@ async function POSTHandler(req: NextRequest) {
       },
     });
   } catch (error) {
+    const refusal = modelAuthorizationResponse(error);
+    if (refusal) return refusal;
     if (error instanceof StudyArtifactRequestError) {
       return apiError('INVALID_REQUEST', 400, error.message);
     }

@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ModelAuthorizationError } from '@/lib/server/model-config/model-authorization';
 
 const mocks = vi.hoisted(() => ({
   buildJudgePrompt: vi.fn(),
@@ -120,6 +121,18 @@ describe('revisit judge route logical session', () => {
     mocks.buildJudgePrompt.mockReturnValue({ system: 'system', user: 'user' });
     mocks.callLLM.mockResolvedValue({ text: '{}' });
     mocks.parseJudgeResponse.mockReturnValue({ attemptId: 'attempt-1' });
+  });
+
+  it('returns the model refusal without calling the provider', async () => {
+    mocks.resolveModelFromRequest.mockRejectedValueOnce(new ModelAuthorizationError());
+    const response = await POST(makeRequest(validBody) as NextRequest);
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      success: false,
+      errorCode: 'PROVIDER_DISABLED',
+      error: new ModelAuthorizationError().message,
+    });
+    expect(mocks.callLLM).not.toHaveBeenCalled();
   });
 
   it('resolves the judge model with the persisted attempt identity', async () => {

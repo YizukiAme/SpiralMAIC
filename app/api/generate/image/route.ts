@@ -14,6 +14,7 @@ import { withAccessCode } from '@/lib/server/with-access-code';
  * Body: { prompt, negativePrompt?, width?, height?, aspectRatio?, style? }
  * Response: { success: boolean, result?: ImageGenerationResult, error?: string }
  */
+import { modelAuthorizationResponse } from '@/lib/server/api-response';
 
 import { NextRequest } from 'next/server';
 import {
@@ -90,6 +91,8 @@ async function POSTHandler(request: NextRequest) {
 
     return apiSuccess({ result });
   } catch (error) {
+    const authorization = modelAuthorizationResponse(error);
+    if (authorization) return authorization;
     const nativeResponse = nativeProvider?.errorResponse(error) ?? nativeImageErrorResponse(error);
     if (nativeResponse) return nativeResponse;
     const message = error instanceof Error ? error.message : String(error);

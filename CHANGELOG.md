@@ -4,7 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased] - 2026-10-08
+## [Unreleased] - 2026-10-12
+
+- Keep SpiralMAIC learning flows while integrating the latest upstream fixes.
+- Restrict server-managed credentials to explicitly authorized models; user-owned keys keep their existing behavior.
+- Bind render jobs to their owner and stop serving media from deleted courses. Upgrade the app and render-service together.
+- Preserve inline mathematics as LaTeX source and disable formula-defined macros in rendered content.
+- Play exported HTML classrooms with narration, effects and video, with a ZIP fallback for larger courses.
+- Retain committed courses when an import response is lost, and reject oversized material uploads before sending them.
+- Update Next.js to 16.4.0 and compatible AI/provider patches while retaining durable Agent sessions.
+
+### Earlier maintenance
 
 - Sync server-side course generation, persistent model slots and the material library.
 - Keep Spiral overtime, Revisit and Codex sign-in/Fast mode on the shared generation steps.

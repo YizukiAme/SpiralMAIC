@@ -1,5 +1,10 @@
 import { withAccessCode } from '@/lib/server/with-access-code';
 import { NextRequest } from 'next/server';
+import { resolveRequestOwner } from '@/lib/server/identity/resolve';
+import {
+  attachOwnerCookies,
+  invalidOwnerCredentialResponse,
+} from '@/lib/server/identity/with-owner';
 import { createLogger } from '@/lib/logger';
 import { apiError, apiSuccess } from '@/lib/server/api-response';
 import { resolveModel } from '@/lib/server/resolve-model';
@@ -46,6 +51,12 @@ function codexErrorResponse(error: unknown) {
 }
 
 async function POSTHandler(req: NextRequest) {
+  const owner = await resolveRequestOwner(req);
+  if (!owner.ok) return invalidOwnerCredentialResponse();
+  return attachOwnerCookies(await verify(req), owner.setCookies);
+}
+
+async function verify(req: NextRequest) {
   let model: string | undefined;
   let isCodex = false;
   try {
@@ -53,7 +64,7 @@ async function POSTHandler(req: NextRequest) {
     const { apiKey, baseUrl, providerType, serviceTier } = body;
     model = body.model;
 
-    if (!model) {
+    if (typeof model !== 'string' || !model.trim()) {
       return apiError('MISSING_REQUIRED_FIELD', 400, 'Model name is required');
     }
 
@@ -92,6 +103,8 @@ async function POSTHandler(req: NextRequest) {
         languageModel = result.model;
         isCodex = result.providerId === 'openai-codex';
       } catch (error) {
+        const refused = savedProviderResponse(error, 'language model');
+        if (refused) return refused;
         if (model.startsWith('openai-codex:')) return codexErrorResponse(error);
         return apiError(
           'INVALID_REQUEST',

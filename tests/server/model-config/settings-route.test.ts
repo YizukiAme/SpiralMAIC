@@ -86,7 +86,13 @@ describe('/api/model-config', () => {
       layer: {
         source: 'deployment',
         config: {
-          providers: { operator: { preset: 'deepseek', apiKey: 'sk-operator' } },
+          providers: {
+            operator: {
+              preset: 'deepseek',
+              apiKey: 'sk-operator',
+              models: ['deepseek-v4-pro', 'deepseek-v4-flash'],
+            },
+          },
           slots: { video: null },
           lock: ['video'],
         },
@@ -196,7 +202,13 @@ describe('/api/model-config', () => {
       layer: {
         source: 'deployment',
         config: {
-          providers: { operator: { preset: 'deepseek', apiKey: 'sk-operator' } },
+          providers: {
+            operator: {
+              preset: 'deepseek',
+              apiKey: 'sk-operator',
+              models: ['deepseek-v4-pro', 'deepseek-v4-flash'],
+            },
+          },
           slots: { llm: 'operator:deepseek-v4-pro' },
           lock: ['llm'],
         },

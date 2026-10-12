@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OwnerAuthRequest } from '@/lib/server/identity/types';
+import { ModelAuthorizationError } from '@/lib/server/model-config/model-authorization';
 
 const mocks = vi.hoisted(() => ({
   buildOvertimePlanPrompt: vi.fn(),
@@ -84,6 +85,25 @@ describe('overtime plan route', () => {
     });
   });
   afterEach(() => vi.unstubAllEnvs());
+
+  it('returns the model refusal and preserves owner cookies without calling the provider', async () => {
+    mocks.resolveModelFromRequest.mockRejectedValueOnce(new ModelAuthorizationError());
+    const response = await POST(
+      new Request('http://localhost/api/overtime/plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-test-owner': 'alice' },
+        body: JSON.stringify(validBody),
+      }) as NextRequest,
+    );
+    expect(response.status).toBe(403);
+    expect(response.headers.get('set-cookie')).toBe('owner=alice');
+    await expect(response.json()).resolves.toEqual({
+      success: false,
+      errorCode: 'PROVIDER_DISABLED',
+      error: new ModelAuthorizationError().message,
+    });
+    expect(mocks.callLLM).not.toHaveBeenCalled();
+  });
 
   it('uses the dedicated route and validates the model output against supplied ids', async () => {
     const request = new Request('http://localhost/api/overtime/plan', {

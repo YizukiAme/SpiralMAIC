@@ -30,6 +30,7 @@ const IMAGE_PROVIDER_ICONS: Record<string, string> = {
   'nano-banana': '/logos/gemini.svg',
   'minimax-image': '/logos/minimax.svg',
   'grok-image': '/logos/grok.svg',
+  'glm-image': '/logos/glm.svg',
   'comfyui-image': '/logos/comfyui.svg',
   'openrouter-image': '/logos/openrouter.svg',
   lemonade: '/logos/lemonade.svg',

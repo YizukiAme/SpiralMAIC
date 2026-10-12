@@ -4,6 +4,7 @@
  * the request's deprecated provider headers) and mapping failures to its
  * responses.
  */
+import { authorizeMediaModel } from '@/lib/server/model-config/media';
 import { generateImage, IMAGE_PROVIDERS } from '@/lib/media/image-providers';
 import type {
   ImageGenerationOptions,
@@ -67,6 +68,7 @@ export async function generateImageStep(
     );
   }
 
+  authorizeMediaModel(connection, 'image', model);
   const sizedOptions = resolveImageSize(input.options, { providerId, modelId: model });
 
   ctx.log.info(

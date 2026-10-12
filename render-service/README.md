@@ -18,21 +18,48 @@ rendering. Nothing here is required for the app to run.
 Rendering is asynchronous (a 10-minute video can take tens of minutes): submit,
 poll, then download. Job ids are opaque.
 
-| Method + path                 | Purpose                                                                              |
-| ----------------------------- | ------------------------------------------------------------------------------------ |
-| `POST /render`                | multipart: `project` (the ZIP) + `fps`, `quality`, `format` fields → `202 { jobId }` |
-| `POST /preview`               | JSON: persisted `scene`, stage context, and viewport → synchronous PNG               |
-| `GET /render/:jobId`          | status/progress plus actual capture, worker, profile, and runtime metrics            |
-| `GET /render/:jobId/download` | stream the MP4 (or `302` to a presigned URL) once `succeeded`                        |
-| `DELETE /render/:jobId`       | cancel a queued/running job                                                          |
-| `GET /health`                 | resource profile, observed runtime versions, and whether renders are being admitted  |
+| Method + path                             | Purpose                                                                              |
+| ----------------------------------------- | ------------------------------------------------------------------------------------ |
+| `POST /owner-bound/render`                | multipart: `project` (the ZIP) + `fps`, `quality`, `format` fields → `202 { jobId }` |
+| `POST /preview`                           | JSON: persisted `scene`, stage context, and viewport → synchronous PNG               |
+| `GET /owner-bound/render/:jobId`          | status/progress plus actual capture, worker, profile, and runtime metrics            |
+| `GET /owner-bound/render/:jobId/download` | stream the MP4 (or `302` to a presigned URL) once `succeeded`                        |
+| `DELETE /owner-bound/render/:jobId`       | cancel a queued/running job                                                          |
+| `GET /health`                             | resource profile, observed runtime versions, and whether renders are being admitted  |
 
 `status` is one of `queued | running | succeeded | failed | cancelled`;
 `progress` is `0..1`.
 
+### Video job ownership
+
+Every video job request requires `x-openmaic-render-owner`. The app proxy sets
+this header from `OwnerPrincipal.ownerId` when it submits, polls, cancels, or
+downloads a job. The render service stores that owner on submission and returns
+`404 Job not found` when the owner does not match. A job id alone does not grant
+access. `POST /owner-bound/render` also requires `x-openmaic-client` for admission control.
+
+The render service validates the header format but does not authenticate the
+header. Treat it as an assertion from the trusted app proxy. Keep the service on
+a network that only the app can reach, as the default Compose deployment does.
+For a standalone deployment, put the service behind the app proxy and do not
+publish its port to browsers or other untrusted clients.
+
+Upgrade every render-service instance behind the configured URL (or drain old
+instances) before or together with the main app. Job operations are served only
+under `/owner-bound/render`; legacy `/render` job routes are no longer served.
+The new namespace makes mixed pools fail closed: old service instances refuse
+new job paths, and upgraded instances refuse an old app's legacy paths.
+
+Owner-aware service builds return `x-openmaic-render-owner-bound: 1` on health
+and job responses. The app uses the health marker for its UI capability flag
+and checks each job response as defense in depth. An unmarked response,
+including a namespace 404 from an old instance, is reported as a service error.
+A reverse proxy must never add this marker; it is an assertion made by the
+render service itself.
+
 ### Admission: 429s and `/health`
 
-Admission rejections are machine-readable. `POST /render` answers `429` with a
+Admission rejections are machine-readable. `POST /owner-bound/render` answers `429` with a
 JSON body `{ error, reason }` where `reason` is one of:
 
 - `queue_full` — the deployment-wide cap `RENDER_MAX_QUEUE` (reserved + queued +
@@ -49,8 +76,13 @@ one of:
   live (buffering or executing).
 - `preview_per_user_limit` — this client identity already holds
   `RENDER_PREVIEW_MAX_PER_USER` previews.
-- `capacity_busy` — the shared execution slot is occupied, including by a video
-  render. Previews never queue for this slot; retry later.
+- `capacity_busy` — all preview execution slots are occupied by other previews.
+  Previews never queue for these slots; retry later.
+
+An aborted or timed-out preview keeps its execution slot until Chromium launch
+settles and any browser it returns finishes bounded cleanup. Cancellation is
+also passed to the launcher, so a browser still starting is killed rather than
+left running behind a released slot.
 
 The opt-in per-task resource mode does not expose `/preview`: it returns `503`
 with `reason: resource_mode_unsupported` before reading the request body. Preview
@@ -66,9 +98,13 @@ data. Identity keys are client IPs when the service runs behind
 `TRUST_PROXY_HEADERS=true`, so exposing the per-identity map would publish the
 IP address of everyone currently rendering.
 
-Previews share the service's single Chromium execution slot with video renders,
-but never wait in the video queue. Once a preview has passed its body and
-semantic checks, it renders immediately or fails with `capacity_busy`.
+Previews have their own execution budget, defaulting to one concurrent preview,
+independent of the video render queue. Once a preview has passed its body and
+semantic checks, it renders immediately or fails with `capacity_busy`. Each
+executing preview launches its own Chromium browser and cleans it up when the
+request finishes or aborts. A video export and a preview can therefore run at
+the same time. Request buffering still shares the bounded extraction gate;
+the preview deadline also covers waiting for that gate.
 
 `/preview` requires fully self-contained scenes (inline code and data: URLs
 only); network, blob:, and relative references are rejected. Slide media must
@@ -92,7 +128,8 @@ caller-side preparation (tracked separately).
 | `RENDER_MAX_QUEUE`                       | `20`                                           | Max jobs in the system (reserved+queued+running) before new submits get `429`.                                                                                                                                                                    |
 | `RENDER_JOB_TTL_MS`                      | `1800000`                                      | How long finished jobs + artifacts live before cleanup.                                                                                                                                                                                           |
 | `RENDER_JOB_DEADLINE_MS`                 | `2700000`                                      | Hard per-job wall-clock deadline; overruns are aborted and marked **failed**.                                                                                                                                                                     |
-| `RENDER_PREVIEW_TIMEOUT_MS`              | `20000`                                        | Hard wall-clock deadline for a synchronous preview, including body parsing and Chromium cleanup.                                                                                                                                                  |
+| `RENDER_PREVIEW_TIMEOUT_MS`              | `20000`                                        | Deadline for preview work, including body parsing; launch settlement and bounded browser cleanup complete before the slot is reused.                                                                                                                                                  |
+| `RENDER_PREVIEW_MAX_CONCURRENCY`         | `1`                                            | Maximum executing previews, independent of video exports. At most 2 in `standard`, 1 in `low-memory`; exceeding the profile limit fails startup. Each slot can launch one Chromium browser.                                                                         |
 | `RENDER_PREVIEW_MAX_IN_FLIGHT`           | `8`                                            | Maximum admitted previews across buffering and execution.                                                                                                                                                                                         |
 | `RENDER_PREVIEW_MAX_PER_USER`            | `2`                                            | Concurrent previews per owner identity; 0 disables the guard for deployments whose preview callers do not supply an owner identity (see note below).                                                                                              |
 | `RENDER_PREVIEW_MAX_JSON_BYTES`          | `33554432`                                     | Maximum preview JSON body size (32 MiB), enforced on declared length and streamed bytes independently of the ZIP upload cap.                                                                                                                      |
@@ -183,7 +220,7 @@ no outbound access.
 The injected CSP plus request interception close script, fetch/XHR, WebSocket,
 image, frame and form egress from the untrusted documents. Two channels remain:
 
-- **Top-level navigation on `/render`.** `location`, a `<meta http-equiv=refresh>`,
+- **Top-level navigation on `/owner-bound/render`.** `location`, a `<meta http-equiv=refresh>`,
   `window.open` and `target=_top` can replace the top frame; CSP has no
   `navigate-to` directive, and the producer's browser exposes no request
   interception we can install. The service therefore relies on the container's
@@ -233,7 +270,7 @@ at a time. It requires at least 8 GiB of host/cgroup memory and an existing
 headless shell so ordinary compositions remain BeginFrame-eligible. No host GPU
 is required or requested; Chromium uses its software/SwiftShader selector.
 
-Use the safe `low-memory` profile only when BeginFrame latency is less important
+Use the `low-memory` profile only when BeginFrame latency is less important
 than a smaller memory ceiling. It fixes screenshot capture, one worker, one
 render, and one extraction, and requires at least 4 GiB:
 
@@ -243,11 +280,33 @@ RENDER_SERVICE_MEMORY_LIMIT=4g \
 docker compose --profile video-export up --build
 ```
 
-Both `/health` and `GET /render/:jobId` make the selection observable. Health
-reports the capture policy, requested mode, worker/concurrency bounds, minimum
-memory, and observed Node, producer, Chromium, and FFmpeg versions. A completed
-job reports requested versus actual capture mode and worker count with the same
-version record, so a standard-profile screenshot fallback remains explicit.
+Both profiles additionally allow one preview to execute by default, alongside
+the video export and extraction. The existing startup minima remain 8 GiB for
+`standard` and 4 GiB for `low-memory`; these are shared by both workloads, not
+separate allowances for each. Preview pixels remain limited to 3840 × 2160 in
+`standard` and 1920 × 1080 in `low-memory` (including device scale factor).
+`RENDER_PREVIEW_MAX_CONCURRENCY` may be raised to 2 in `standard`; `low-memory`
+is capped at 1. A value above the selected profile limit fails startup, just
+like an oversized chunk-concurrency setting. Raising concurrency adds browsers
+without increasing the container memory limit. Measure combined peak memory
+with representative scenes and provision additional RAM before raising it,
+especially when also enabling parallel export chunks.
+
+A bounded concurrent smoke run used the emitted mixed slide/quiz/PBL sample
+(9.1 seconds, 1080p, 30 fps) on `low-memory` with 4 vCPU and a 4 GiB container
+limit. The export completed while 54 consecutive 1080p interactive previews
+returned PNGs; cgroup peak memory was 2.47 GiB with no OOM events. Preview
+latency was 0.31–1.19 seconds. This sample checks the default combined workload,
+not a memory ceiling or latency guarantee for arbitrary scenes or higher
+preview concurrency.
+
+Both `/health` and `GET /owner-bound/render/:jobId` make the selection observable. Health
+reports the configured `previewMaxConcurrency` and the profile ceiling as
+`resourceProfile.maxPreviewConcurrency`, alongside the capture policy, requested
+mode, worker/concurrency bounds, minimum memory, and observed Node, producer,
+Chromium, and FFmpeg versions. A completed job reports requested versus actual
+capture mode and worker count with the same version record, so a
+standard-profile screenshot fallback remains explicit.
 
 The previous fixed 720p short-sample comparison that motivated these profiles was:
 

@@ -2,7 +2,7 @@ import { withAccessCode } from '@/lib/server/with-access-code';
 import { NextRequest } from 'next/server';
 
 import { callLLM } from '@/lib/ai/llm';
-import { apiError, apiSuccess } from '@/lib/server/api-response';
+import { apiError, apiSuccess, modelAuthorizationResponse } from '@/lib/server/api-response';
 import { resolveModelFromRequest } from '@/lib/server/resolve-model';
 import type { Scene, Stage } from '@/lib/types/stage';
 import type { RevisitAdaptiveContext } from '@/lib/revisit/types';
@@ -77,6 +77,8 @@ async function POSTHandler(req: NextRequest) {
 
     return apiSuccess({ blueprint });
   } catch (error) {
+    const refusal = modelAuthorizationResponse(error);
+    if (refusal) return refusal;
     log.error('Failed to create revisit blueprint:', error);
     return apiError('INTERNAL_ERROR', 500, 'Failed to create revisit blueprint');
   }

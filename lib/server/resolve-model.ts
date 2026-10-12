@@ -8,6 +8,12 @@
 import type { NextRequest } from 'next/server';
 import { resolveNativeLanguageModel } from '@/lib/server/model-config/native-language';
 import type { ModelLogicalSession } from '@/lib/server/model-config/request-context';
+import {
+  assertDeploymentModelAuthorized,
+  ModelAuthorizationError,
+  usesServerCredentials,
+} from '@/lib/server/model-config/model-authorization';
+import { presetIdFor } from '@/lib/config/preset-ids';
 import { getModel, getProvider, parseModelString, type ModelWithInfo } from '@/lib/ai/providers';
 import type { ModelServiceTier, ProviderType, ThinkingConfig } from '@/lib/types/provider';
 import {
@@ -167,6 +173,24 @@ export async function resolveRequestedModel(
   // public targets, so the hop target is checked regardless of who chose the
   // origin.
   const managed = isServerConfiguredProvider('providers', providerId);
+  if (
+    managed &&
+    usesServerCredentials({
+      preset: presetIdFor('chat', providerId),
+      apiKey: resolveApiKey(providerId),
+    })
+  ) {
+    const { deploymentConfig } = await import('@/lib/server/model-config/runtime');
+    const deployment = deploymentConfig();
+    // Do not revive legacy credentials when openmaic.yml replaced them. Use
+    // the saved-provider path for credentials declared by that file instead.
+    if (!deployment.legacy) throw new ModelAuthorizationError();
+    assertDeploymentModelAuthorized(
+      deployment.layer?.config,
+      presetIdFor('chat', providerId),
+      modelId,
+    );
+  }
   const registeredProviderType = getProvider(providerId)?.type;
   if (
     clientProviderType &&

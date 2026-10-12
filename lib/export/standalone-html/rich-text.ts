@@ -1,31 +1,23 @@
 /**
  * Slide rich text for the standalone HTML export: sanitized with the
- * persistence policy, without losing what that policy cannot express.
+ * persistence policy, plus a report of what that policy removes.
  *
- * - Inline formulas. The editor stores an inline formula as rendered KaTeX
- *   (`<span class="katex" data-inline-math="…">`, with SVG and positioned
- *   spans) inside prose HTML, which the prose policy would flatten. Each
- *   formula element is replaced by an empty `<span data-inline-math>` carrying
- *   only its LaTeX source, the result is sanitized (with that one attribute
- *   allowed), and the sanitized spans are then filled with a fresh KaTeX
- *   render of the source read back from the sanitized DOM. KaTeX's generated
- *   markup is the only markup added after sanitizing; nothing authored is
- *   ever re-inserted, and no authored text is spliced into strings.
+ * - Inline formulas survive sanitization as LaTeX source
+ *   (`<span data-inline-math>`, see `lib/sanitize/inline-math.ts`); the
+ *   player's slide renderer typesets them when the file is opened.
  * - Resources the policy drops. Images (`src`, `srcset`, posters) and CSS
  *   `url(...)` / `image-set(...)` / `@import` references cannot be shown
  *   offline once removed; they are inventoried over the whole authored tree
  *   first, formula subtrees included, and reported as unresolved media.
  *
- * Runs where a DOM is available (the browser export; jsdom in tests).
+ * The inventory runs where a DOM is available (the browser export; jsdom in
+ * tests).
  */
-import katex from 'katex';
 import parseSrcset from 'parse-srcset';
 import postcss from 'postcss';
 import valueParser from 'postcss-value-parser';
 import { sanitizeSceneContent } from '@/lib/sanitize/scene-content';
 import type { SlideContent } from '@/lib/types/stage';
-
-const INLINE_MATH_ATTRIBUTE = 'data-inline-math';
 
 /** Element attributes that load a resource, per tag. */
 const RESOURCE_ATTRIBUTES: Record<string, readonly string[]> = {
@@ -179,100 +171,32 @@ function inventoryResources(root: DocumentFragment): string[] {
   return found.map(resourceLabel);
 }
 
-/** The LaTeX source of an inline-formula element, or `null` for anything else. */
-function inlineMathSource(element: Element): string | null {
-  const source = element.getAttribute(INLINE_MATH_ATTRIBUTE);
-  if (source !== null) return source;
-  if (!element.classList.contains('katex')) return null;
-  const annotation = element.querySelector('annotation[encoding="application/x-tex"]');
-  return annotation ? (annotation.textContent ?? '') : null;
-}
-
-function parseFragment(doc: Document, html: string): HTMLTemplateElement {
+/** The resources one prose string references, before sanitizing. */
+function proseResources(doc: Document, html: string): string[] {
+  // Without markup there is no element to inventory.
+  if (!html.includes('<')) return [];
   // A template parses in place: leading <style>/<meta> stay in the fragment.
   const template = doc.createElement('template');
   template.innerHTML = html;
-  return template;
+  return inventoryResources(template.content);
 }
 
-/**
- * Pre-sanitize pass for one prose string: inventory resources, then replace
- * every formula element with an empty source-only span.
- */
-function stripFormulas(doc: Document, html: string): { html: string; discarded: string[] } {
-  // Without markup there is no element to inventory or replace.
-  if (!html.includes('<')) return { html, discarded: [] };
-  const template = parseFragment(doc, html);
-  const fragment = template.content;
-  const discarded = inventoryResources(fragment);
-  // Formulas inside template contents too: the sanitizer drops the template
-  // tag but keeps its permitted children.
-  for (const root of fragmentsOf(fragment)) {
-    for (const element of root.querySelectorAll(`[${INLINE_MATH_ATTRIBUTE}], .katex`)) {
-      // Skip descendants of a formula already replaced.
-      if (!root.contains(element)) continue;
-      const latex = inlineMathSource(element);
-      if (latex === null) continue;
-      const placeholder = doc.createElement('span');
-      placeholder.setAttribute(INLINE_MATH_ATTRIBUTE, latex);
-      element.replaceWith(placeholder);
-    }
-  }
-  return { html: template.innerHTML, discarded };
-}
-
-/** A fresh, inert KaTeX render of one inline formula, as an element. */
-function renderFormula(doc: Document, latex: string): Element | null {
-  if (!latex.trim()) return null;
-  const host = doc.createElement('template');
-  host.innerHTML = katex.renderToString(latex, {
-    displayMode: false,
-    output: 'html',
-    throwOnError: false,
-    trust: false,
-  });
-  return host.content.firstElementChild;
-}
-
-/** Post-sanitize pass: fill each source-only span with a generated render. */
-function renderFormulas(doc: Document, html: string): string {
-  if (!html.includes(INLINE_MATH_ATTRIBUTE)) return html;
-  const template = parseFragment(doc, html);
-  for (const span of template.content.querySelectorAll(`span[${INLINE_MATH_ATTRIBUTE}]`)) {
-    const latex = span.getAttribute(INLINE_MATH_ATTRIBUTE) ?? '';
-    const formula = renderFormula(doc, latex);
-    if (!formula) continue;
-    // The editor's storage shape: the KaTeX root carries the source.
-    formula.setAttribute(INLINE_MATH_ATTRIBUTE, latex);
-    span.replaceWith(formula);
-  }
-  return template.innerHTML;
-}
-
-/** Apply a rewrite to every prose field the sanitizer treats as HTML. */
-function mapProse(content: SlideContent, rewrite: (html: string) => string): SlideContent {
-  const elements = (content.canvas.elements ?? []).map((element) => {
-    if (element.type === 'text' && typeof element.content === 'string') {
-      return { ...element, content: rewrite(element.content) };
-    }
+/** Every prose field the sanitizer treats as HTML. */
+function proseFields(content: SlideContent): string[] {
+  return (content.canvas.elements ?? []).flatMap((element) => {
+    if (element.type === 'text' && typeof element.content === 'string') return [element.content];
     if (element.type === 'shape' && typeof element.text?.content === 'string') {
-      return { ...element, text: { ...element.text, content: rewrite(element.text.content) } };
+      return [element.text.content];
     }
     if (element.type === 'table' && Array.isArray(element.data)) {
-      return {
-        ...element,
-        data: element.data.map((row) =>
-          Array.isArray(row)
-            ? row.map((cell) =>
-                typeof cell?.text === 'string' ? { ...cell, text: rewrite(cell.text) } : cell,
-              )
-            : row,
-        ),
-      };
+      return element.data.flatMap((row) =>
+        Array.isArray(row)
+          ? row.flatMap((cell) => (typeof cell?.text === 'string' ? [cell.text] : []))
+          : [],
+      );
     }
-    return element;
+    return [];
   });
-  return { ...content, canvas: { ...content.canvas, elements } };
 }
 
 /**
@@ -283,12 +207,6 @@ export function sanitizeSlideRichText(
   content: SlideContent,
   doc: Document = globalThis.document,
 ): { content: SlideContent; discarded: string[] } {
-  const discarded: string[] = [];
-  const stripped = mapProse(content, (html) => {
-    const prepared = stripFormulas(doc, html);
-    discarded.push(...prepared.discarded);
-    return prepared.html;
-  });
-  const sanitized = sanitizeSceneContent(stripped, { keepInlineMathSource: true });
-  return { content: mapProse(sanitized, (html) => renderFormulas(doc, html)), discarded };
+  const discarded = proseFields(content).flatMap((html) => proseResources(doc, html));
+  return { content: sanitizeSceneContent(content), discarded };
 }

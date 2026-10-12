@@ -14,6 +14,7 @@ import { withAccessCode } from '@/lib/server/with-access-code';
  *
  * Response: { success: boolean, message: string }
  */
+import { modelAuthorizationResponse } from '@/lib/server/api-response';
 
 import { NextRequest } from 'next/server';
 import { IMAGE_PROVIDERS, testImageConnectivity } from '@/lib/media/image-providers';
@@ -136,6 +137,8 @@ async function POSTHandler(request: NextRequest) {
 
     return apiSuccess({ message: result.message });
   } catch (err) {
+    const authorization = modelAuthorizationResponse(err);
+    if (authorization) return authorization;
     log.error(`Image provider verification failed: ${err}`, err);
     return apiError('INTERNAL_ERROR', 500, 'Connectivity test error');
   }

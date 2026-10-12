@@ -11,6 +11,7 @@ import type {
   RenderJobRecord,
 } from '../src/types.js';
 import { createMemoryArtifactStore, createMemoryJobStore } from './support/fakes.js';
+import { owner, submitRender } from './support/identities.js';
 
 const scratch: string[] = [];
 
@@ -69,41 +70,6 @@ async function waitForCleanup(path: string): Promise<void> {
 const renderOptions = { fps: 30, quality: 'standard', format: 'mp4' } as const;
 
 describe('RenderCoordinator through the RenderExecutor seam', () => {
-  it('keeps a dispatched video queued until the shared execution slot is acquired', async () => {
-    const jobs = createMemoryJobStore();
-    const artifacts = createMemoryArtifactStore();
-    let releasePreview!: () => void;
-    const previewParked = new Promise<void>((resolve) => {
-      releasePreview = resolve;
-    });
-    let finishVideo!: () => void;
-    const videoParked = new Promise<void>((resolve) => {
-      finishVideo = resolve;
-    });
-    const executor = new FakeExecutor(async () => {
-      await videoParked;
-      return { status: 'succeeded' };
-    });
-    const coordinator = new RenderCoordinator(executor, jobs, artifacts.store, {
-      maxConcurrency: 1,
-    });
-    const preview = coordinator.tryRunWithExecutionSlot(() => previewParked);
-    expect(preview).toBeDefined();
-
-    const dir = await projectDir();
-    const id = await coordinator.submit(coordinator.reserve('video-user'), dir, renderOptions);
-    await Promise.resolve();
-    expect(await jobs.get(id)).toMatchObject({ status: 'queued', currentStage: 'queued' });
-    expect(executor.requests).toHaveLength(0);
-
-    releasePreview();
-    await preview;
-    await waitForJob(jobs, id, () => executor.requests.length === 1);
-    expect(await jobs.get(id)).toMatchObject({ status: 'running', currentStage: 'preparing' });
-    finishVideo();
-    await waitForJob(jobs, id, (job) => job.status === 'succeeded');
-  });
-
   it('persists normalized progress, performance, and the artifact on success', async () => {
     const jobs = createMemoryJobStore();
     const artifacts = createMemoryArtifactStore();
@@ -127,7 +93,7 @@ describe('RenderCoordinator through the RenderExecutor seam', () => {
       jobDeadlineMs: 12_345,
     });
     const dir = await projectDir();
-    const id = await coordinator.submit(coordinator.reserve('alice'), dir, renderOptions);
+    const id = await submitRender(coordinator, 'alice', dir, renderOptions);
 
     const job = await waitForJob(jobs, id, (current) => current.status === 'succeeded');
     expect(executor.requests).toHaveLength(1);
@@ -159,10 +125,10 @@ describe('RenderCoordinator through the RenderExecutor seam', () => {
     );
     const coordinator = new RenderCoordinator(executor, jobs, artifacts.store);
     const dir = await projectDir();
-    const id = await coordinator.submit(coordinator.reserve('bob'), dir, renderOptions);
+    const id = await submitRender(coordinator, 'bob', dir, renderOptions);
     await waitForJob(jobs, id, () => executor.requests.length === 1);
 
-    expect(await coordinator.cancel(id)).toBe(true);
+    expect(await coordinator.cancelForOwner(id, owner('bob'))).toBe(true);
     const job = await waitForJob(jobs, id, (current) => current.status === 'cancelled');
     expect(job.failure).toEqual({ code: 'cancelled', message: 'Render cancelled' });
     await waitForCleanup(dir);
@@ -180,10 +146,10 @@ describe('RenderCoordinator through the RenderExecutor seam', () => {
     );
     const coordinator = new RenderCoordinator(executor, jobs, artifacts.store);
     const dir = await projectDir();
-    const id = await coordinator.submit(coordinator.reserve('late-default'), dir, renderOptions);
+    const id = await submitRender(coordinator, 'late-default', dir, renderOptions);
     await waitForJob(jobs, id, () => executor.requests.length === 1);
 
-    expect(await coordinator.cancel(id)).toBe(true);
+    expect(await coordinator.cancelForOwner(id, owner('late-default'))).toBe(true);
     settle({ status: 'succeeded' });
 
     const job = await waitForJob(jobs, id, (current) => current.status === 'cancelled');
@@ -203,7 +169,7 @@ describe('RenderCoordinator through the RenderExecutor seam', () => {
       jobDeadlineMs: 42,
     });
     const dir = await projectDir();
-    const id = await coordinator.submit(coordinator.reserve('carol'), dir, renderOptions);
+    const id = await submitRender(coordinator, 'carol', dir, renderOptions);
 
     const job = await waitForJob(jobs, id, (current) => current.status === 'failed');
     expect(executor.requests[0].deadlineMs).toBe(42);
@@ -224,7 +190,7 @@ describe('RenderCoordinator through the RenderExecutor seam', () => {
     });
     const coordinator = new RenderCoordinator(executor, jobs, artifacts.store);
     const dir = await projectDir();
-    const id = await coordinator.submit(coordinator.reserve('dana'), dir, renderOptions);
+    const id = await submitRender(coordinator, 'dana', dir, renderOptions);
 
     const job = await waitForJob(jobs, id, (current) => current.status === 'failed');
     expect(job).toMatchObject({

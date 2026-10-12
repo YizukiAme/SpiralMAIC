@@ -11,6 +11,8 @@ import { withAccessCode } from '@/lib/server/with-access-code';
  *     that has not failed, or failed for a reason Retry cannot change).
  *     Idempotent by `commandId`.
  */
+import { assertWorkspaceModelsAuthorized } from '@/lib/server/model-config/runtime';
+import { GENERATION_MODEL_SLOTS } from '@/lib/server/generation/run/start';
 import type { NextRequest } from 'next/server';
 
 import { apiSuccess } from '@/lib/server/api-response';
@@ -50,6 +52,7 @@ async function POSTHandler(req: NextRequest, { params }: { params: Promise<{ id:
       return ownerApiError('INVALID_REQUEST', 400, command.message, responseHeaders);
     }
     try {
+      await assertWorkspaceModelsAuthorized(ownerId, GENERATION_MODEL_SLOTS);
       const result = await retryGenerationRun(id, ownerId, command.value, {
         maxActiveRunsPerOwner: generationRunConfig().maxActiveRunsPerOwner,
       });
