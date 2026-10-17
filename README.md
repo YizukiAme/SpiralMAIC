@@ -128,6 +128,10 @@ There are plenty of other options—Gemini, Anthropic, Bedrock, DeepSeek, Qwen, 
 MiniMax, GLM, Xiaomi MiMo, OpenRouter, Ollama, Lemonade, and more. The always-current list
 lives in [`openmaic.example.yml`](openmaic.example.yml) and [`.env.example`](.env.example).
 
+Classroom chat and teach-back now run on Pi. Pick a Classroom model with tool calling;
+for Gemini, use the native Google provider. Remove the old `NEXT_PUBLIC_PI_CHAT_ENABLED`
+switch if you kept it from an earlier setup.
+
 <details>
 <summary><strong>Docker, persistence, and production</strong></summary>
 
@@ -150,6 +154,9 @@ process or container. Back up both PostgreSQL and `data/`, including `instance-s
 which protects saved provider keys. Mount your `openmaic.yml` into the container if using one.
 See the [storage guide](packages/@openmaic/storage/README.md) and
 [render-service guide](render-service/README.md).
+
+The current server-backed app does not support Vercel's serverless Next.js deployment.
+Use a long-running host for generation and learning records.
 
 Shared deployments should set `ACCESS_CODE`. Local instances remain open when it is unset;
 when enabled, a verified browser stays signed in for up to seven days before asking again.

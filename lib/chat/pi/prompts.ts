@@ -4,14 +4,16 @@ import { resolveSceneOutline } from '@/lib/agent/client/resolve-scene-outline';
 import { buildPeerContextSection } from '@/lib/orchestration/summarizers/peer-context';
 import { buildStateContext } from '@/lib/orchestration/summarizers/state-context';
 import { buildVirtualWhiteboardContext } from '@/lib/orchestration/summarizers/whiteboard-ledger';
-import { getActionDescriptions } from '@/lib/orchestration/tool-schemas';
+import { getActionDescriptions } from '@/lib/chat/pi/tool-schemas';
 import type { AgentTurnSummary, WhiteboardActionRecord } from '@/lib/orchestration/types';
 import type { StatelessChatRequest } from '@/lib/types/chat';
 import { validateOvertimeChatContext } from '@/lib/overtime/chat';
+import { buildRevisitChildContext, buildRevisitDirectorPrompt } from '@/lib/revisit/pi-prompts';
+import type { RevisitAgentPromptContext } from '@/lib/revisit/types';
 import {
   buildOvertimeStateContext,
   buildOvertimeTeachingSection,
-} from '@/lib/orchestration/prompt-builder';
+} from '@/lib/overtime/prompt-context';
 
 function compactOutlineText(value: string, maxLength: number): string {
   const compact = value.replace(/\s+/g, ' ').trim();
@@ -77,6 +79,7 @@ export function buildDirectorPrompt(
   agents: AgentConfig[],
   maxAgentTurns: number,
 ): string {
+  if (body.config.revisitGateContext) return buildRevisitDirectorPrompt(body, agents);
   const overtimeContext = validateOvertimeChatContext(body.config.overtimeContext, body.storeState);
   const agentList = agents
     .map(
@@ -115,6 +118,9 @@ export function buildDirectorPrompt(
     '# Terminal Tool Policy',
     'Use exactly one terminal tool per loop.',
     'Use `cue_user` when the classroom should wait for the user to continue, ask something new, or answer a visible follow-up.',
+    'When calling `cue_user`, include a concise learner-facing `prompt`. If the response can be expressed as 2-4 clear, mutually exclusive choices, also include `options`; omit options for open-ended replies.',
+    'Each option is a short string of at most 60 characters. The client sends the selected label as an ordinary user message; use the terminal tool policy to decide whether its next turn continues or closes the session.',
+    'The cue prompt and options must match the last visible classroom-agent turn; do not introduce a new question or teaching content only inside the tool call.',
     'Use `close_session` when the latest user message or immediate history clearly indicates goodbye, no more, thanks-and-done, conclusion, wrap-up, an explicit end, or a request to return to the lesson.',
     '`close_session` closes only the current Q&A/discussion side session. It does NOT mean the whole class is over unless the user explicitly says the lesson/class is over.',
     'When ending a Q&A/discussion, keep the visible agent response brief and avoid saying "class dismissed", "下课", "再见", or equivalent whole-class farewell language unless the user explicitly asks to end the entire class.',
@@ -169,6 +175,7 @@ export function buildChildPrompt(
   agentResponses: AgentTurnSummary[],
   whiteboardLedger: WhiteboardActionRecord[],
   availableActions: string[] = [],
+  revisitContext?: RevisitAgentPromptContext,
 ): string {
   const overtimeContext = validateOvertimeChatContext(body.config.overtimeContext, body.storeState);
   const currentScene = body.storeState.currentSceneId
@@ -216,6 +223,7 @@ export function buildChildPrompt(
     overtimeContext ? buildOvertimeStateContext(body.storeState) : buildThinChildContext(body),
     overtimeContext ? '' : buildVirtualWhiteboardContext(body.storeState, whiteboardLedger),
     buildOvertimeTeachingSection(overtimeContext, body.storeState),
+    buildRevisitChildContext(revisitContext),
     '',
     `Current scene: ${currentScene?.title ?? currentScene?.id ?? 'none'}`,
     `Stage title: ${body.storeState.stage?.name ?? 'unknown'}`,
@@ -231,6 +239,7 @@ export function buildNativeChildPrompt(
   agentResponses: AgentTurnSummary[],
   availableTools: string[],
   requestStartScene?: { sceneId: string; sceneType: string },
+  revisitContext?: RevisitAgentPromptContext,
 ): string {
   const overtimeContext = validateOvertimeChatContext(body.config.overtimeContext, body.storeState);
   const nativeToolInventory =
@@ -282,6 +291,7 @@ export function buildNativeChildPrompt(
     `Stage title: ${body.storeState.stage?.name ?? 'unknown'}`,
     body.userProfile?.nickname ? `User nickname: ${body.userProfile.nickname}` : '',
     buildOvertimeTeachingSection(overtimeContext, body.storeState),
+    buildRevisitChildContext(revisitContext),
   ]
     .filter(Boolean)
     .join('\n');

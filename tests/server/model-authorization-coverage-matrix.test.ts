@@ -22,11 +22,6 @@ vi.mock('@/lib/ai/llm', () => ({
     return { text: '{"score":1,"comment":"OK"}' };
   },
 }));
-vi.mock('@/lib/orchestration/stateless-generate', () => ({
-  statelessGenerate: async function* () {
-    mocks.upstream();
-  },
-}));
 vi.mock('@/lib/chat/pi/director-loop', () => ({
   runPiDirectorLoop: async () => {
     mocks.upstream();
@@ -435,11 +430,6 @@ const ROUTES: RouteCase[] = [
       ),
   },
   {
-    path: 'chat',
-    invoke: async (m) =>
-      (await import('@/app/api/chat/route')).POST(request('/api/chat', chatBody(m))),
-  },
-  {
     path: 'chat/pi',
     invoke: async (m) =>
       (await import('@/app/api/chat/pi/route')).POST(request('/api/chat/pi', chatBody(m))),
@@ -640,7 +630,6 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.saved = null;
   vi.stubEnv('DATABASE_URL', '');
-  vi.stubEnv('NEXT_PUBLIC_PI_CHAT_ENABLED', 'true');
   for (const name of [
     'OPENAI',
     'IMAGE_SEEDREAM',

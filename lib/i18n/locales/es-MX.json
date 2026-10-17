@@ -245,6 +245,8 @@
     "endQA": "Terminar Q&A",
     "softClosing": "Continuar debate",
     "error": {
+      "toolCallingRequired": "El chat del aula necesita un modelo que admita llamadas a herramientas. Selecciona uno para el espacio del aula en Configuración → Configuración de modelos del curso, o contacta al administrador si esta opción está administrada.",
+      "geminiNativeRequired": "La interacción con Gemini requiere Google nativo. Agrega Google (preajuste google) en Configuración → Servicios de modelos y selecciónalo para “Aula” en Configuración de modelos del curso. Si la configuración está administrada, contacta al administrador.",
       "emptyAgentResponses": "Los agentes devolvieron respuestas vacías; el debate se detuvo. Inténtalo de nuevo o revisa la configuración de tu modelo.",
       "streamInterrupted": "El streaming terminó inesperadamente; el debate no se completó. Inténtalo de nuevo."
     },
@@ -1290,6 +1292,8 @@
       "system": "Sistema"
     },
     "apiKey": "Clave API",
+    "credentialStorageHint": "Encrypted on this instance's server",
+    "credentialStorageHintDetail": "Saved encrypted on this instance's server and used to call the provider for you. The operator of this deployment can access it, so only enter keys on instances you trust.",
     "apiKeyDesc": "Configura tu clave API",
     "apiBaseUrl": "URL del endpoint de la API",
     "apiBaseUrlDesc": "Configura la URL del endpoint de la API",
@@ -1379,7 +1383,8 @@
       "baidu": "Baidu",
       "claude": "Claude",
       "searxng": "SearXNG",
-      "openai-codex": "Codex"
+      "openai-codex": "Codex",
+      "builtin": "Lector integrado"
     },
     "modelCount": "modelos",
     "modelSingular": "modelo",
@@ -1917,7 +1922,7 @@
     "tokenPlan": {
       "nav": "Plan de tokens",
       "title": "Configuración del plan de tokens",
-      "desc": "Elige tu proveedor de plan de tokens e ingresa la clave — se autoconfigura cada modalidad adaptada (LLM/imagen/video/voz/búsqueda web).",
+      "desc": "Elige tu proveedor de plan de tokens e ingresa la clave — se autoconfigura cada modalidad adaptada (LLM/imagen/video/voz/búsqueda web/obtención de páginas web).",
       "selectPlan": "Seleccionar proveedor",
       "apiKey": "Clave API",
       "updateKey": "Actualizar clave",
@@ -1925,7 +1930,7 @@
       "capabilities": "Capacidades ofrecidas",
       "offeredNote": "Modelos que ofrece este plan. Elige los que quieras en la barra de generación — la disponibilidad depende del nivel de tu plan, y los modelos no compatibles darán error al momento de generar.",
       "statusConnected": "Conectado",
-      "keyStorage": "La clave se guarda cifrada en el servidor y no se vuelve a mostrar. Al conectar, se aplican a las etapas del curso los modelos recomendados de este plan; si eso reemplaza lo que una etapa usa ahora (un modelo que elegiste o el predeterminado del servidor), se te pregunta antes.",
+      "applyModelsNote": "Al conectar, se aplican a las etapas del curso los modelos recomendados de este plan; si eso reemplaza lo que una etapa usa ahora (un modelo que elegiste o el predeterminado del servidor), se te pregunta antes.",
       "saveKey": "Guardar y activar",
       "cancelKeyUpdate": "Cancelar actualización",
       "manageAccount": "Gestionar cuenta",
@@ -1943,6 +1948,7 @@
       "capTts": "Síntesis de voz",
       "capVideo": "Generación de video",
       "capWebSearch": "Búsqueda web",
+      "capWebFetch": "Obtener páginas web",
       "saved": "Ajustes de conexión guardados",
       "stageInteractive": "Interactivo",
       "stageSlide": "Diapositivas",
@@ -2063,7 +2069,8 @@
         "providers": "Configura credenciales, endpoints y catálogos de modelos de los servicios de modelos de lenguaje",
         "tts": "Configura servicios de síntesis de voz, voces y modelos",
         "video": "Configura credenciales y catálogos de modelos de los servicios de generación de video",
-        "webSearch": "Configura servicios de búsqueda web y fuentes de recuperación"
+        "webSearch": "Configura servicios de búsqueda web y fuentes de recuperación",
+        "webFetch": "Configurar servicios de extracción de páginas web"
       },
       "nav": "Servicios de modelos",
       "notConfigured": "Sin configurar",
@@ -2202,7 +2209,7 @@
         },
         "classroom": {
           "name": "Aula",
-          "desc": "Debate, calificación de cuestionarios y proyectos durante el aprendizaje."
+          "desc": "Debate, calificación de cuestionarios y proyectos durante el aprendizaje. El chat del aula necesita un modelo que admita llamadas a herramientas."
         },
         "agent": {
           "name": "Agente",
@@ -2231,6 +2238,10 @@
         "document": {
           "name": "Análisis de documentos",
           "desc": "Lee los documentos subidos."
+        },
+        "webFetch": {
+          "name": "Obtener páginas web",
+          "desc": "Permite al agente leer páginas web autorizadas en la sesión."
         }
       },
       "source": {
@@ -2244,6 +2255,7 @@
         "lines": {
           "rewrite": "Consulta",
           "search": "Búsqueda",
+          "fetch": "Lectura",
           "image": "Imagen",
           "video": "Video"
         }
@@ -2276,7 +2288,11 @@
         "unconfirmed": "El servidor no confirmó que se importara."
       }
     },
-    "serverConfiguredAddOwn": "Para usar tus propias credenciales, agrega un proveedor aparte."
+    "serverConfiguredAddOwn": "Para usar tus propias credenciales, agrega un proveedor aparte.",
+    "webFetchSettings": "Obtener páginas web",
+    "webFetchHint": "Elige cómo leer las páginas web. Los servicios alojados reciben URL públicas autorizadas en la sesión. Los resultados siguen siendo datos no confiables y los errores no cambian el lector.",
+    "webFetchApiKey": "Clave de API",
+    "webFetchSharedKeyHint": "Esta clave también se usa para chatear con este proveedor. Cambiarla o eliminarla afecta al chat."
   },
   "profile": {
     "title": "Perfil",

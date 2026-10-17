@@ -36,9 +36,11 @@ export type { ThinkingConfig } from '@/lib/types/provider';
 
 // Re-export the parameter types accepted by AI SDK
 type GenerateTextParams = Parameters<typeof generateText>[0];
-type StreamTextParams = Parameters<typeof streamText>[0];
+// This wrapper exposes replay/final-content getters; single-consumer streams
+// intentionally have a different contract in AI SDK 7.0.143.
+type StreamTextParams = Parameters<typeof streamText>[0] & { experimental_lowMemory?: false };
 type GenerateTextResponse = Awaited<ReturnType<typeof generateText>>;
-type StreamTextResponse = ReturnType<typeof streamText>;
+type StreamTextResponse = Extract<ReturnType<typeof streamText>, { text: PromiseLike<string> }>;
 
 function _extractRequestInfo(params: GenerateTextParams | StreamTextParams) {
   const tools = params.tools ? Object.keys(params.tools as Record<string, unknown>) : undefined;

@@ -4,7 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased] - 2026-10-12
+## [Unreleased] - 2026-10-17
+
+- Move Revisit teach-back onto the shared Pi runtime without losing page gates, student states or assistant rescue.
+- Retire the legacy chat endpoint; keep Codex sign-in, Fast mode and overtime on the surviving runtime.
+- Add suggested replies, opt-in Kimi search and configurable web-page readers.
+- Match the initial server and browser language and preserve chats on HTTP origins without Web Locks.
+- Keep inline math intact in previews and PPTX exports, and validate scene rotations and vision-image limits.
+- Update Next.js to 16.4.2 for the current security fixes, with compatible AI SDK patches.
+
+### Previous maintenance — 2026-10-12
 
 - Keep SpiralMAIC learning flows while integrating the latest upstream fixes.
 - Restrict server-managed credentials to explicitly authorized models; user-owned keys keep their existing behavior.

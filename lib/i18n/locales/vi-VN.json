@@ -245,6 +245,8 @@
     "endQA": "Kết thúc hỏi đáp",
     "softClosing": "Tiếp tục thảo luận",
     "error": {
+      "toolCallingRequired": "Trò chuyện trong lớp cần mô hình hỗ trợ gọi công cụ. Hãy chọn mô hình đó cho ô lớp học trong Cài đặt → Cấu hình mô hình khóa học, hoặc liên hệ quản trị viên nếu cài đặt này do quản trị viên quản lý.",
+      "geminiNativeRequired": "Tương tác với Gemini cần Google gốc. Thêm Google (cấu hình sẵn google) trong Cài đặt → Dịch vụ mô hình, rồi chọn cho “Lớp học” trong Cấu hình mô hình khóa học. Nếu cấu hình do quản trị viên quản lý, hãy liên hệ quản trị viên.",
       "emptyAgentResponses": "Các tác nhân trả về nội dung rỗng nên thảo luận đã dừng. Hãy thử lại hoặc kiểm tra cài đặt model.",
       "streamInterrupted": "Luồng dữ liệu dừng bất ngờ, thảo luận chưa hoàn tất. Vui lòng thử lại."
     },
@@ -1290,6 +1292,8 @@
       "system": "Theo hệ thống"
     },
     "apiKey": "Khóa API",
+    "credentialStorageHint": "Encrypted on this instance's server",
+    "credentialStorageHintDetail": "Saved encrypted on this instance's server and used to call the provider for you. The operator of this deployment can access it, so only enter keys on instances you trust.",
     "apiKeyDesc": "Thiết lập khóa API của bạn",
     "apiBaseUrl": "Địa chỉ API",
     "apiBaseUrlDesc": "Thiết lập địa chỉ endpoint API của bạn",
@@ -1379,7 +1383,8 @@
       "baidu": "Baidu",
       "claude": "Claude",
       "searxng": "SearXNG",
-      "openai-codex": "Codex"
+      "openai-codex": "Codex",
+      "builtin": "Trình đọc tích hợp"
     },
     "modelCount": "model",
     "modelSingular": "mô hình",
@@ -1917,7 +1922,7 @@
     "tokenPlan": {
       "nav": "Gói token",
       "title": "Thiết lập gói token",
-      "desc": "Chọn nhà cung cấp gói token và nhập khóa — hệ thống sẽ tự cấu hình mọi loại nội dung tương thích (model ngôn ngữ / ảnh / video / giọng nói / tìm web).",
+      "desc": "Chọn nhà cung cấp gói token và nhập khóa — hệ thống sẽ tự cấu hình mọi loại nội dung tương thích (model ngôn ngữ / ảnh / video / giọng nói / tìm web / lấy trang web).",
       "selectPlan": "Chọn nhà cung cấp",
       "apiKey": "Khóa API",
       "updateKey": "Cập nhật khóa",
@@ -1925,7 +1930,7 @@
       "capabilities": "Khả năng được cung cấp",
       "offeredNote": "Các model gói này cung cấp. Hãy chọn những model bạn muốn hiện trên thanh tạo bài — mức khả dụng tùy hạng gói của bạn, và model không được hỗ trợ sẽ báo lỗi lúc tạo bài.",
       "statusConnected": "Đã kết nối",
-      "keyStorage": "Khóa được mã hóa và lưu trên máy chủ, không hiển thị lại. Khi kết nối, các mô hình được gói này đề xuất sẽ được áp dụng cho các bước khóa học; nếu việc đó thay thế mô hình một bước đang dùng (mô hình bạn đã chọn hoặc mặc định của máy chủ), bạn sẽ được hỏi trước.",
+      "applyModelsNote": "Khi kết nối, các mô hình được gói này đề xuất sẽ được áp dụng cho các bước khóa học; nếu việc đó thay thế mô hình một bước đang dùng (mô hình bạn đã chọn hoặc mặc định của máy chủ), bạn sẽ được hỏi trước.",
       "saveKey": "Lưu và bật",
       "cancelKeyUpdate": "Hủy cập nhật",
       "manageAccount": "Quản lý tài khoản",
@@ -1943,6 +1948,7 @@
       "capTts": "Tổng hợp giọng nói",
       "capVideo": "Tạo video",
       "capWebSearch": "Tìm kiếm web",
+      "capWebFetch": "Lấy trang web",
       "saved": "Đã lưu cài đặt kết nối",
       "stageInteractive": "Tương tác",
       "stageSlide": "Trang slide",
@@ -2063,7 +2069,8 @@
         "providers": "Cấu hình thông tin xác thực, điểm cuối và danh mục mô hình của dịch vụ mô hình ngôn ngữ",
         "tts": "Cấu hình dịch vụ tổng hợp giọng nói, giọng đọc và mô hình",
         "video": "Cấu hình thông tin xác thực và danh mục mô hình của dịch vụ tạo video",
-        "webSearch": "Cấu hình dịch vụ tìm kiếm web và nguồn truy xuất"
+        "webSearch": "Cấu hình dịch vụ tìm kiếm web và nguồn truy xuất",
+        "webFetch": "Cấu hình dịch vụ trích xuất trang web"
       },
       "nav": "Dịch vụ mô hình",
       "notConfigured": "Chưa cấu hình",
@@ -2202,7 +2209,7 @@
         },
         "classroom": {
           "name": "Lớp học",
-          "desc": "Thảo luận, chấm bài kiểm tra và dự án trong khi học."
+          "desc": "Thảo luận, chấm bài kiểm tra và dự án trong khi học. Trò chuyện trong lớp cần mô hình hỗ trợ gọi công cụ."
         },
         "agent": {
           "name": "Tác tử",
@@ -2231,6 +2238,10 @@
         "document": {
           "name": "Phân tích tài liệu",
           "desc": "Đọc các tài liệu đã tải lên."
+        },
+        "webFetch": {
+          "name": "Lấy trang web",
+          "desc": "Để tác tử đọc các trang web được cho phép trong phiên."
         }
       },
       "source": {
@@ -2244,6 +2255,7 @@
         "lines": {
           "rewrite": "Truy vấn",
           "search": "Tìm kiếm",
+          "fetch": "Đọc trang",
           "image": "Ảnh",
           "video": "Video"
         }
@@ -2276,7 +2288,11 @@
         "unconfirmed": "Máy chủ không xác nhận đã nhập."
       }
     },
-    "serverConfiguredAddOwn": "Muốn dùng thông tin đăng nhập riêng, hãy thêm một nhà cung cấp khác."
+    "serverConfiguredAddOwn": "Muốn dùng thông tin đăng nhập riêng, hãy thêm một nhà cung cấp khác.",
+    "webFetchSettings": "Lấy trang web",
+    "webFetchHint": "Chọn cách đọc trang web. Dịch vụ lưu trữ chỉ nhận URL công khai được cho phép trong phiên. Kết quả vẫn là dữ liệu không đáng tin cậy và lỗi không làm chuyển sang dịch vụ khác.",
+    "webFetchApiKey": "Khóa API",
+    "webFetchSharedKeyHint": "Khóa này cũng được dùng để trò chuyện với nhà cung cấp này. Thay đổi hoặc xóa khóa sẽ ảnh hưởng đến trò chuyện."
   },
   "profile": {
     "title": "Trang cá nhân",

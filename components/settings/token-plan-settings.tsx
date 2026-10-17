@@ -26,6 +26,7 @@ import {
   Video,
   Volume2,
   Search,
+  Globe,
   type LucideIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -64,7 +65,12 @@ import {
   type PlanApplyMode,
   type PlanConflict,
 } from '@/lib/model-settings/token-plan';
-import { applyErrorText, reportApply, ServerOnlyNotice } from './server-settings';
+import {
+  applyErrorText,
+  CredentialStorageHint,
+  reportApply,
+  ServerOnlyNotice,
+} from './server-settings';
 import { MS, slotName } from './models/slot-meta';
 
 const MODALITY_LABEL_KEYS: Record<TokenPlanModality, string> = {
@@ -73,6 +79,7 @@ const MODALITY_LABEL_KEYS: Record<TokenPlanModality, string> = {
   video: 'settings.videoSettings',
   tts: 'settings.ttsSettings',
   webSearch: 'settings.webSearchSettings',
+  webFetch: 'settings.webFetchSettings',
 };
 
 const MODALITY_ICONS: Record<TokenPlanModality, LucideIcon> = {
@@ -81,6 +88,7 @@ const MODALITY_ICONS: Record<TokenPlanModality, LucideIcon> = {
   video: Video,
   tts: Volume2,
   webSearch: Search,
+  webFetch: Globe,
 };
 
 /** Display-name mapping: the volcengine-ark preset is shown as "Seed". */
@@ -119,6 +127,7 @@ const MODEL_PLAN_CAPABILITY_LABEL_KEYS: Record<TokenPlanModality, string> = {
   video: 'settings.tokenPlan.capVideo',
   tts: 'settings.tokenPlan.capTts',
   webSearch: 'settings.tokenPlan.capWebSearch',
+  webFetch: 'settings.tokenPlan.capWebFetch',
 };
 
 function modelPlanItems(preset: TokenPlanPreset): ModelPlanItem[] {
@@ -140,7 +149,9 @@ function modelPlanItems(preset: TokenPlanPreset): ModelPlanItem[] {
     }
   }
   // Modalities with no model concept (e.g. web search) do not disclose a model.
-  if (preset.modalities.webSearch) items.push({ capability: 'webSearch' });
+  for (const capability of ['webSearch', 'webFetch'] as const) {
+    if (preset.modalities[capability]) items.push({ capability });
+  }
   return items;
 }
 
@@ -291,7 +302,7 @@ export function TokenPlanSettings({
     const capability = conflict.slot.capability;
     const { providerId, modelId } = splitRef(ref);
     const known = view.providers.some((provider) => provider.id === providerId);
-    const provider = known ? providerLabel(view, providerId) : (preset?.name ?? providerId);
+    const provider = known ? providerLabel(view, providerId, t) : (preset?.name ?? providerId);
     if (!modelId) return provider;
     const model = known
       ? modelName(view, capability, providerId, modelId)
@@ -537,8 +548,9 @@ export function TokenPlanSettings({
                           {t(editingKey ? `${tp}.updateKey` : `${tp}.saveKey`)}
                         </Button>
                       </div>
+                      <CredentialStorageHint />
                       <p className="text-xs leading-5 text-muted-foreground">
-                        {t(`${tp}.keyStorage`)}
+                        {t(`${tp}.applyModelsNote`)}
                       </p>
                     </form>
                   )}

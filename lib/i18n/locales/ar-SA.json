@@ -245,6 +245,8 @@
     "endQA": "إنهاء الأسئلة والأجوبة",
     "softClosing": "متابعة النقاش",
     "error": {
+      "toolCallingRequired": "تحتاج دردشة الصف إلى نموذج يدعم استدعاء الأدوات. اختر نموذجًا مناسبًا لـ «الصف» في الإعدادات ← إعداد نماذج المقرر، أو تواصل مع المسؤول إذا كان هو من يدير هذا الإعداد.",
+      "geminiNativeRequired": "يتطلب التفاعل مع Gemini استخدام Google الأصلي. أضف Google (الإعداد المسبق google) في الإعدادات ← خدمات النماذج، ثم اختره لـ «الصف» في «إعداد نماذج المقرر». إذا كان المسؤول يدير هذه الإعدادات، فتواصل معه.",
       "emptyAgentResponses": "أعاد الوكلاء استجابات فارغة; توقف النقاش. حاول مرة أخرى أو راجع إعدادات النموذج.",
       "streamInterrupted": "انتهى تدفق البيانات بشكل غير متوقع; لم يكتمل النقاش. يرجى المحاولة مرة أخرى."
     },
@@ -1290,6 +1292,8 @@
       "system": "النظام"
     },
     "apiKey": "مفتاح API",
+    "credentialStorageHint": "Encrypted on this instance's server",
+    "credentialStorageHintDetail": "Saved encrypted on this instance's server and used to call the provider for you. The operator of this deployment can access it, so only enter keys on instances you trust.",
     "apiKeyDesc": "تكوين مفتاح API الخاص بك",
     "apiBaseUrl": "عنوان نقطة نهاية API",
     "apiBaseUrlDesc": "تكوين عنوان نقطة نهاية API",
@@ -1379,7 +1383,8 @@
       "baidu": "Baidu",
       "claude": "Claude",
       "searxng": "SearXNG",
-      "openai-codex": "Codex"
+      "openai-codex": "Codex",
+      "builtin": "القارئ المدمج"
     },
     "modelCount": "نماذج",
     "modelSingular": "نموذج",
@@ -1917,7 +1922,7 @@
     "tokenPlan": {
       "nav": "Token Plan",
       "title": "Token Plan Setup",
-      "desc": "Pick your token plan provider and enter the key — it auto-configures every adapted modality (LLM/image/video/speech/web search).",
+      "desc": "Pick your token plan provider and enter the key — it auto-configures every adapted modality (LLM/image/video/speech/web search/web fetch).",
       "selectPlan": "Select Provider",
       "apiKey": "API Key",
       "updateKey": "Update key",
@@ -1925,7 +1930,7 @@
       "capabilities": "Capabilities offered",
       "offeredNote": "Models offered by this plan. Pick the ones you want on the generation bar — availability depends on your plan tier, and unsupported models will error at generation time.",
       "statusConnected": "متصل",
-      "keyStorage": "يُحفظ المفتاح مشفّرًا على الخادم ولا يُعرض مرة أخرى. عند الاتصال تُطبَّق النماذج الموصى بها في هذه الخطة على مراحل الدورة؛ وإذا كان ذلك سيستبدل ما تستخدمه مرحلة الآن (نموذجًا اخترته أو قيمة الخادم الافتراضية)، فسيُطلب منك التأكيد أولًا.",
+      "applyModelsNote": "عند الاتصال تُطبَّق النماذج الموصى بها في هذه الخطة على مراحل الدورة؛ وإذا كان ذلك سيستبدل ما تستخدمه مرحلة الآن (نموذجًا اخترته أو قيمة الخادم الافتراضية)، فسيُطلب منك التأكيد أولًا.",
       "saveKey": "حفظ وتشغيل",
       "cancelKeyUpdate": "إلغاء التحديث",
       "manageAccount": "إدارة الحساب",
@@ -1943,6 +1948,7 @@
       "capTts": "تحويل النص إلى كلام",
       "capVideo": "توليد الفيديو",
       "capWebSearch": "البحث في الويب",
+      "capWebFetch": "جلب صفحات الويب",
       "saved": "تم حفظ إعدادات الربط",
       "stageInteractive": "تفاعلي",
       "stageSlide": "شرائح الدرس",
@@ -2063,7 +2069,8 @@
         "providers": "هيّئ بيانات الاعتماد والعناوين وكتالوجات النماذج لخدمات النماذج اللغوية",
         "tts": "هيّئ خدمات تحويل النص إلى كلام والأصوات والنماذج",
         "video": "هيّئ بيانات الاعتماد وكتالوجات النماذج لخدمات توليد الفيديو",
-        "webSearch": "هيّئ خدمات البحث في الويب ومصادر الاسترجاع"
+        "webSearch": "هيّئ خدمات البحث في الويب ومصادر الاسترجاع",
+        "webFetch": "إعداد خدمات استخراج محتوى صفحات الويب"
       },
       "nav": "خدمات النماذج",
       "notConfigured": "غير مهيّأ",
@@ -2202,7 +2209,7 @@
         },
         "classroom": {
           "name": "الصف",
-          "desc": "النقاش وتصحيح الاختبارات والمشاريع أثناء التعلّم."
+          "desc": "النقاش وتصحيح الاختبارات والمشاريع أثناء التعلّم. تحتاج دردشة الفصل إلى نموذج يدعم استدعاء الأدوات."
         },
         "agent": {
           "name": "الوكيل",
@@ -2231,6 +2238,10 @@
         "document": {
           "name": "تحليل المستندات",
           "desc": "يقرأ المستندات المرفوعة."
+        },
+        "webFetch": {
+          "name": "جلب صفحات الويب",
+          "desc": "يتيح للوكيل قراءة صفحات الويب المسموح بها في الجلسة."
         }
       },
       "source": {
@@ -2244,6 +2255,7 @@
         "lines": {
           "rewrite": "الاستعلام",
           "search": "البحث",
+          "fetch": "الجلب",
           "image": "صورة",
           "video": "فيديو"
         }
@@ -2276,7 +2288,11 @@
         "unconfirmed": "لم يؤكد الخادم أنه تم استيراده."
       }
     },
-    "serverConfiguredAddOwn": "لاستخدام بيانات الاعتماد الخاصة بك، أضِف مزوّدًا منفصلاً."
+    "serverConfiguredAddOwn": "لاستخدام بيانات الاعتماد الخاصة بك، أضِف مزوّدًا منفصلاً.",
+    "webFetchSettings": "جلب صفحات الويب",
+    "webFetchHint": "اختر طريقة قراءة صفحات الويب. تتلقى الخدمات المستضافة روابط عامة مسموحًا بها في الجلسة. تظل النتائج غير موثوقة، ولا يؤدي الفشل إلى تبديل القارئ.",
+    "webFetchApiKey": "مفتاح API",
+    "webFetchSharedKeyHint": "يُستخدم هذا المفتاح أيضًا للدردشة مع هذا المزوّد. تغييره أو حذفه يؤثر في الدردشة."
   },
   "profile": {
     "title": "الملف الشخصي",

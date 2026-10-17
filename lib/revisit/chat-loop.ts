@@ -1,10 +1,5 @@
 import { StreamBuffer, type StreamBufferOptions } from '@/lib/buffer/stream-buffer';
-import {
-  runAgentLoop,
-  type AgentLoopOutcome,
-  type AgentLoopStoreState,
-  type AgentLoopIterationResult,
-} from '@/lib/chat/agent-loop';
+import type { AgentLoopStoreState } from '@/lib/chat/store-state';
 import {
   isRevisitStudentQuestion,
   roleForRevisitAgent,
@@ -47,8 +42,19 @@ export interface RunRevisitAgentLoopArgs {
 }
 
 export interface RunRevisitAgentLoopResult {
-  outcome: AgentLoopOutcome;
+  outcome: {
+    reason: 'end' | 'cue_user' | 'aborted' | 'empty_turns' | 'no_done';
+    directorState?: StatelessChatRequest['directorState'];
+    turnCount: number;
+  };
   gate: RevisitGateDecision | null;
+}
+
+interface AgentLoopIterationResult {
+  directorState?: StatelessChatRequest['directorState'];
+  totalAgents: number;
+  agentHadContent: boolean;
+  cueUserReceived: boolean;
 }
 
 export async function runRevisitAgentLoop({
@@ -71,8 +77,7 @@ export async function runRevisitAgentLoop({
   let pendingGate: RevisitGateDecision | null = null;
   let lastGate: RevisitGateDecision | null = null;
   let streamError: Error | null = null;
-  let agentTurnsThisTeacherTurn = 0;
-  let currentIterationMessages = new Map<string, RevisitMessage>();
+  const currentIterationMessages = new Map<string, RevisitMessage>();
 
   const createBuffer = () => {
     const buffer = new StreamBuffer(
@@ -154,75 +159,96 @@ export async function runRevisitAgentLoop({
   };
 
   const outcome = await (async () => {
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    const aborted = (): RunRevisitAgentLoopResult['outcome'] => ({
+      reason: 'aborted',
+      directorState: request.directorState,
+      turnCount: 0,
+    });
+    const onAbort = () => {
+      void reader?.cancel().catch(() => {});
+      currentBuffer?.dispose();
+    };
+    if (loopSignal.aborted) return aborted();
+    loopSignal.addEventListener('abort', onAbort, { once: true });
     try {
-      return await runAgentLoop(
+      // Pi owns the server-side loop. Keep the whole request (including Codex
+      // Fast mode and model credentials), and refresh only the live snapshot.
+      const response = await fetchChat(
         {
-          session: request.session,
-          config: request.config,
-          userProfile: request.userProfile,
-          serviceTier: request.serviceTier,
-          initialDirectorState: request.directorState,
-        },
-        {
-          getStoreState: () => getStoreState?.() ?? request.storeState,
-          getMessages: () => getMessages?.() ?? request.messages,
-          fetchChat,
-          onEvent: (event) => {
-            processRevisitLoopEvent(event, ensureBuffer(), {
-              getCurrentMessageId: () => currentMessageId,
-              setCurrentMessageId: (messageId) => {
-                currentMessageId = messageId;
-              },
-              setGate: (gate) => {
-                pendingGate = gate;
-              },
-              setError: (error) => {
-                streamError = error;
-              },
-            });
-          },
-          onIterationEnd: async () => {
-            if (!currentBuffer) return null;
-            await currentBuffer.waitUntilDrained();
-            currentBuffer = null;
-
-            if (streamError) {
-              throw streamError;
-            }
-
-            if (pendingGate) {
-              lastGate = pendingGate;
-              callbacks.onGate?.(pendingGate);
-              pendingGate = null;
-            }
-
-            const result = doneData;
-            doneData = null;
-            currentMessageId = null;
-            const iterationHadStudentQuestion = Array.from(currentIterationMessages.values()).some(
-              (message) => message.role === 'student' && isRevisitStudentQuestion(message.text),
-            );
-            currentIterationMessages = new Map();
-            if (result && result.totalAgents > 0) {
-              agentTurnsThisTeacherTurn += result.totalAgents;
-              if (!result.cueUserReceived && iterationHadStudentQuestion) {
-                callbacks.onCueUser?.();
-                return { ...result, cueUserReceived: true };
-              }
-              if (
-                !result.cueUserReceived &&
-                agentTurnsThisTeacherTurn >= REVISIT_MAX_AGENT_TURNS_PER_TEACHER_TURN
-              ) {
-                callbacks.onCueUser?.();
-                return { ...result, cueUserReceived: true };
-              }
-            }
-            return result;
-          },
+          ...request,
+          storeState: getStoreState?.() ?? request.storeState,
+          messages: getMessages?.() ?? request.messages,
         },
         loopSignal,
       );
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status} - ${await response.text()}`);
+      }
+      reader = response.body?.getReader();
+      if (!reader) throw new Error('No response body');
+      const decoder = new TextDecoder();
+      let pending = '';
+      let sawDone = false;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        pending = (pending + decoder.decode(value, { stream: true })).replace(/\r\n/g, '\n');
+        const parts = pending.split('\n\n');
+        pending = parts.pop() ?? '';
+        for (const part of parts) {
+          const dataLine = part.split('\n').find((line) => line.startsWith('data: '));
+          if (!dataLine) continue;
+          const event = JSON.parse(dataLine.slice(6)) as StatelessEvent;
+          if (event.type === 'done') sawDone = true;
+          processRevisitLoopEvent(event, ensureBuffer(), {
+            getCurrentMessageId: () => currentMessageId,
+            setCurrentMessageId: (messageId) => {
+              currentMessageId = messageId;
+            },
+            setGate: (gate) => {
+              pendingGate = gate;
+            },
+            setError: (error) => {
+              streamError = error;
+            },
+          });
+        }
+      }
+      if (loopSignal.aborted) return aborted();
+      if (streamError) throw streamError;
+      if (!sawDone) throw new Error('Revisit chat stream interrupted');
+      const buffer = currentBuffer as StreamBuffer | null;
+      await buffer?.waitUntilDrained();
+      if (loopSignal.aborted) return aborted();
+      if (streamError) throw streamError;
+      const result = doneData as AgentLoopIterationResult | null;
+      if (!result) throw new Error('Revisit chat stream interrupted');
+      if (pendingGate) {
+        lastGate = pendingGate;
+        callbacks.onGate?.(pendingGate);
+      }
+      const studentQuestion = Array.from(currentIterationMessages.values()).some(
+        (message) => message.role === 'student' && isRevisitStudentQuestion(message.text),
+      );
+      if (
+        !result.cueUserReceived &&
+        (studentQuestion || result.totalAgents >= REVISIT_MAX_AGENT_TURNS_PER_TEACHER_TURN)
+      ) {
+        callbacks.onCueUser?.();
+        result.cueUserReceived = true;
+      }
+      return {
+        reason: result.cueUserReceived ? ('cue_user' as const) : ('end' as const),
+        directorState: result.directorState,
+        turnCount: result.directorState?.turnCount ?? 1,
+      };
+    } catch (error) {
+      if (loopSignal.aborted) return aborted();
+      throw error;
     } finally {
+      loopSignal.removeEventListener('abort', onAbort);
+      reader?.releaseLock();
       const leftoverBuffer = currentBuffer as StreamBuffer | null;
       leftoverBuffer?.dispose();
     }
@@ -305,7 +331,7 @@ function processRevisitLoopEvent(
 }
 
 async function defaultFetchChat(body: Record<string, unknown>, signal: AbortSignal) {
-  return fetch('/api/chat', {
+  return fetch('/api/chat/pi', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

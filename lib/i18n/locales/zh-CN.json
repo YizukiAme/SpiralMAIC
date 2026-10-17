@@ -245,6 +245,8 @@
     "endQA": "结束问答",
     "softClosing": "继续讨论",
     "error": {
+      "toolCallingRequired": "课堂聊天需要支持工具调用的模型。请在设置 → 课程模型配置中为「课堂互动」选择此类模型；如果该设置由管理员管理，请联系管理员。",
+      "geminiNativeRequired": "Gemini 课堂互动需要使用 Google 原生路线。请在设置 → 模型服务中添加 Google（google 预设），再在课程模型配置中为「课堂互动」选择该模型；如果配置由管理员管理，请联系管理员。",
       "emptyAgentResponses": "智能体连续无响应,讨论已停止。请重新尝试或检查模型配置。",
       "streamInterrupted": "数据流意外中断,讨论未能完成。请重新尝试。"
     },
@@ -1291,6 +1293,8 @@
     },
     "apiKey": "API密钥",
     "apiKeyDesc": "配置你的API密钥",
+    "credentialStorageHint": "已加密保存在本实例服务器",
+    "credentialStorageHintDetail": "凭据会加密保存在此实例的服务器上，并由服务器代你调用服务。此部署的运营者可能访问这些凭据，请只在你信任的实例上输入。",
     "apiBaseUrl": "API端点地址",
     "apiBaseUrlDesc": "配置你的API端点地址",
     "apiKeyRequired": "API密钥不能为空",
@@ -1379,7 +1383,8 @@
       "baidu": "百度",
       "claude": "Claude",
       "searxng": "SearXNG",
-      "openai-codex": "Codex"
+      "openai-codex": "Codex",
+      "builtin": "内置读取服务"
     },
     "modelCount": "个模型",
     "modelSingular": "个模型",
@@ -1917,7 +1922,7 @@
     "tokenPlan": {
       "nav": "Token Plan",
       "title": "Token Plan 一键配置",
-      "desc": "选择你的 Token Plan 服务商并填入密钥，将自动配置所有已适配的模态(语言模型/图像/视频/语音/网络搜索)。",
+      "desc": "选择你的 Token Plan 服务商并填入密钥，将自动配置所有已适配的模态(语言模型/图像/视频/语音/网络搜索/网页抓取)。",
       "selectPlan": "选择服务商",
       "apiKey": "API 密钥",
       "updateKey": "更新密钥",
@@ -1925,7 +1930,7 @@
       "capabilities": "套餐提供的能力",
       "offeredNote": "套餐提供的模型清单。请在生成界面选择需要使用的模型——是否可用取决于你的套餐档位，不支持的模型会在生成时报错。",
       "statusConnected": "已连接",
-      "keyStorage": "密钥加密保存在服务器上，之后不再显示。连接后会将该套餐推荐的模型应用到课程环节；如果会替换环节当前所用的模型（你选的模型或服务端默认值），会先征求你的确认。",
+      "applyModelsNote": "连接后会将该套餐推荐的模型应用到课程环节；如果会替换环节当前所用的模型（你选的模型或服务端默认值），会先征求你的确认。",
       "saveKey": "保存并启用",
       "cancelKeyUpdate": "取消更新",
       "manageAccount": "管理账号",
@@ -1943,6 +1948,7 @@
       "capTts": "语音合成",
       "capVideo": "视频生成",
       "capWebSearch": "联网搜索",
+      "capWebFetch": "网页抓取",
       "saved": "连接设置已保存",
       "stageInteractive": "互动页面",
       "stageSlide": "课件页面",
@@ -2063,7 +2069,8 @@
         "providers": "配置语言模型服务的凭证、接口地址与模型目录",
         "tts": "配置语音合成服务、音色与模型",
         "video": "配置视频生成服务的凭证与模型目录",
-        "webSearch": "配置网络搜索服务与检索来源"
+        "webSearch": "配置网络搜索服务与检索来源",
+        "webFetch": "配置网页内容提取服务"
       },
       "nav": "模型服务",
       "notConfigured": "未配置",
@@ -2140,7 +2147,7 @@
       },
       "picker": {
         "follow": "跟随{{name}}",
-        "providers": "Provider",
+        "providers": "服务商",
         "providerDefault": "默认模型",
         "modelId": "模型 ID",
         "use": "使用",
@@ -2202,7 +2209,7 @@
         },
         "classroom": {
           "name": "课堂互动",
-          "desc": "学习过程中的讨论、测验批改和项目。"
+          "desc": "学习过程中的讨论、测验批改和项目。课堂聊天需要支持工具调用的模型。"
         },
         "agent": {
           "name": "智能体",
@@ -2231,6 +2238,10 @@
         "document": {
           "name": "文档解析",
           "desc": "读取上传的文档。"
+        },
+        "webFetch": {
+          "name": "网页抓取",
+          "desc": "供智能体读取会话中已获准的网页。"
         }
       },
       "source": {
@@ -2244,6 +2255,7 @@
         "lines": {
           "rewrite": "改写",
           "search": "搜索",
+          "fetch": "抓取",
           "image": "图像",
           "video": "视频"
         }
@@ -2276,7 +2288,11 @@
         "unconfirmed": "服务器未确认已导入。"
       }
     },
-    "serverConfiguredAddOwn": "如需使用自己的凭据，请新增一个提供方。"
+    "serverConfiguredAddOwn": "如需使用自己的凭据，请新增一个提供方。",
+    "webFetchSettings": "网页抓取",
+    "webFetchHint": "选择网页读取方式。托管服务只会收到会话中已获准的公开网址。结果仍是不可信数据，失败时不会切换读取服务。",
+    "webFetchApiKey": "API 密钥",
+    "webFetchSharedKeyHint": "此密钥也用于与同一服务商进行对话。修改或移除密钥也会影响对话。"
   },
   "profile": {
     "title": "个人资料",

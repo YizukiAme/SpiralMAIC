@@ -124,6 +124,9 @@ Gemini、Anthropic、Bedrock、DeepSeek、Qwen、Kimi、MiniMax、GLM、小米 M
 OpenRouter、Ollama、Lemonade 等也都可以用。配置清单见
 [`openmaic.example.yml`](openmaic.example.yml) 和 [`.env.example`](.env.example)。
 
+课堂聊天和 teach-back 现在统一走 Pi：Classroom 模型需要支持工具调用，Gemini 请用
+原生 Google 提供商。旧配置里如果留着 `NEXT_PUBLIC_PI_CHAT_ENABLED`，可以删掉了。
+
 <details>
 <summary><strong>Docker、持久化和生产部署</strong></summary>
 
@@ -146,6 +149,8 @@ Docker Compose 默认包含 PostgreSQL；隔离 MP4 渲染服务是可选项。
 使用 YAML 配置时，将自己的 `openmaic.yml` 挂载到容器里。
 细节见[存储说明](packages/@openmaic/storage/README.md)和
 [渲染服务说明](render-service/README.md)。
+
+当前服务器版不支持 Vercel 的无服务器 Next.js 部署；生成任务和学习记录需要常驻服务。
 
 公共部署应设置 `ACCESS_CODE`；未设置时，本地实例仍可直接使用。启用后，浏览器验证
 最长保留七天，之后需要重新输入。兼容性和回滚说明见 [v0.4 升级指南](UPGRADING-v0.4.md)。

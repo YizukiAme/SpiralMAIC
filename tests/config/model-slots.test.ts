@@ -49,6 +49,7 @@ const EXPECTED_ROOTS = {
   asr: 'asr',
   image: 'image',
   video: 'video',
+  webFetch: 'webFetch',
   webSearch: 'webSearch',
   document: 'document',
 } as const;

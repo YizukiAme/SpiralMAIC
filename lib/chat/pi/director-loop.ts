@@ -51,6 +51,8 @@ export async function runPiDirectorLoop(opts: {
   nativeWhiteboardLearnerKey?: string;
   requestStartManualVisibilityRevision?: number;
 }): Promise<void> {
+  const revisitMode = Boolean(opts.body.config.revisitGateContext);
+  if (revisitMode) opts = { ...opts, maxAgentTurns: 1 };
   if (validateOvertimeChatContext(opts.body.config.overtimeContext, opts.body.storeState)) {
     opts = {
       ...opts,
@@ -64,6 +66,7 @@ export async function runPiDirectorLoop(opts: {
   let agentHadContent = false;
   let userCued = false;
   let sessionClosed = false;
+  let revisitListenerFailed = false;
   let endReason: string | undefined;
   let directorToolCalls = 0;
   const pendingSceneEvidence = new Map<string, DirectorSceneEvidencePacket>();
@@ -211,14 +214,14 @@ export async function runPiDirectorLoop(opts: {
     }),
     buildCloseSessionTool({
       closeSession,
-      canCloseSession: hasVisibleAgentTurn,
+      canCloseSession: () => !revisitMode && hasVisibleAgentTurn(),
       isUserCued: () => userCued,
     }),
     buildCueUserTool({
       cueUser,
       getLastAgentId: () => piAgentResponses.at(-1)?.agentId,
-      canCueUser: hasTeachingSubstantiveTurn,
-      cueUserSkipReason: 'no_substantive_teaching_turn',
+      canCueUser: revisitMode ? hasVisibleAgentTurn : hasTeachingSubstantiveTurn,
+      cueUserSkipReason: revisitMode ? 'no_agent_turns' : 'no_substantive_teaching_turn',
       isSessionClosed: () => sessionClosed,
     }),
   ];
@@ -231,7 +234,7 @@ export async function runPiDirectorLoop(opts: {
     history: toHistoryMessages(opts.body.messages, null),
     transformContext: compactionRuntime.transformContext,
     convertToLlm,
-    afterToolCall: (context) => {
+    afterToolCall: async (context) => {
       directorToolCalls += 1;
       const evidenceStatus =
         context.toolCall.name === 'read_scene'
@@ -251,6 +254,15 @@ export async function runPiDirectorLoop(opts: {
         resultPreview,
         details: context.result.details,
       });
+      // A failed Revisit listener already emitted an SSE error. End this turn
+      // without another inference or a misleading hand-back/assessment.
+      if (revisitMode && context.toolCall.name === 'call_agent' && isError) {
+        revisitListenerFailed = true;
+        return { terminate: true, isError: true };
+      }
+      if (revisitMode && hasVisibleAgentTurn()) {
+        await cueUser({ fromAgentId: piAgentResponses.at(-1)?.agentId });
+      }
       const terminate = sessionClosed || userCued || directorToolCalls >= maxDirectorToolCalls;
       if (!terminate && !evidenceError) return undefined;
       return {
@@ -275,6 +287,11 @@ export async function runPiDirectorLoop(opts: {
   // Pi settles provider failures in state rather than rejecting prompt(). Let
   // the route log and stream the actual reason instead of emitting a normal done.
   if (director.state.errorMessage) throw new Error(director.state.errorMessage);
+
+  if (revisitListenerFailed) return;
+  if (revisitMode && !hasVisibleAgentTurn()) {
+    throw new Error('No listener response was completed. Please retry this turn.');
+  }
 
   if (!sessionClosed && !userCued && hasAgentContent()) {
     await cueUser({ fromAgentId: piAgentResponses.at(-1)?.agentId });

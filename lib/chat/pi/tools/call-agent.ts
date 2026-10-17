@@ -11,7 +11,7 @@ import {
   looksLikeStructuredFragment,
   parseStructuredChunk,
   type ParseResult,
-} from '@/lib/orchestration/stateless-generate';
+} from '@/lib/chat/structured-output';
 import type { AgentConfig } from '@/lib/orchestration/registry/types';
 import type { AgentTurnSummary, WhiteboardActionRecord } from '@/lib/orchestration/types';
 import type { ThinkingConfig } from '@/lib/types/provider';
@@ -42,6 +42,8 @@ import type { ElementReferenceEvidence } from '../element-reference';
 import { validateOvertimeChatContext } from '@/lib/overtime/chat';
 import { parseRequestLearningExtensionParams } from '@/lib/overtime/types';
 import { buildLearningExtensionTools } from './learning-extension';
+import { resolveDirectorDecisionForAvailableAgents } from '@/lib/revisit/director-policy';
+import { RevisitGateParams, revisitResponseDirective } from '@/lib/revisit/pi-prompts';
 
 const CallAgentParams = Type.Object({
   agentId: Type.String({
@@ -50,6 +52,7 @@ const CallAgentParams = Type.Object({
   instruction: Type.String({
     description: 'Specific instruction and context for the selected agent response.',
   }),
+  revisitGate: Type.Optional(RevisitGateParams),
 });
 
 type CallAgentParams = Static<typeof CallAgentParams>;
@@ -628,7 +631,20 @@ export function buildCallAgentTool(opts: {
         };
       }
 
-      const agent = opts.agentConfigs.find((candidate) => candidate.id === params.agentId);
+      const revisitMode = Boolean(opts.body.config.revisitGateContext);
+      const selectedId = revisitMode
+        ? resolveDirectorDecisionForAvailableAgents({
+            decision: {
+              nextAgentId: params.agentId,
+              shouldEnd: false,
+              revisitGate: params.revisitGate,
+            },
+            agents: opts.agentConfigs,
+            revisitMode: true,
+            revisitFallbackDirective: opts.body.config.revisitFallbackDirective,
+          }).nextAgentId
+        : params.agentId;
+      const agent = opts.agentConfigs.find((candidate) => candidate.id === selectedId);
       if (!agent) {
         const availableAgentIds = opts.agentConfigs.map((candidate) => candidate.id).join(', ');
         return {
@@ -674,6 +690,30 @@ export function buildCallAgentTool(opts: {
           details: { skipped: true, reason: 'consecutive_empty_turns', consecutiveEmptyTurns },
         };
       }
+
+      const revisitContext = revisitMode
+        ? {
+            pageContext: opts.body.config.revisitProbeContext ?? '',
+            responseDirective: revisitResponseDirective(
+              params.revisitGate?.status,
+              opts.body.config.revisitFallbackDirective,
+            ),
+          }
+        : undefined;
+      const finishRevisitResponse = async (completed: boolean, visibleText: string) => {
+        if (!revisitMode) return true;
+        if (!completed || !visibleText.trim()) {
+          await opts.send({
+            type: 'error',
+            data: { message: 'The listener could not finish responding. Please retry this turn.' },
+          });
+          return false;
+        }
+        // Assessment becomes visible only after its listener actually completes.
+        // Failed/partial child output must never advance the learning gate.
+        if (params.revisitGate) await opts.send({ type: 'revisit_gate', data: params.revisitGate });
+        return true;
+      };
 
       // read_scene evidence remains pending/take-once. Selected-element evidence is
       // immutable request context and is attached to every valid child delegation,
@@ -809,6 +849,7 @@ export function buildCallAgentTool(opts: {
               opts.getAgentResponses(),
               availableToolNames,
               capturedScene,
+              revisitContext,
             ),
             prompt: buildNativeChildTurnPrompt(params.instruction, agent.role, {
               scene: sceneEvidence?.content,
@@ -844,6 +885,7 @@ export function buildCallAgentTool(opts: {
         const isCompleted = nativeResult.status === 'completed';
         consecutiveEmptyTurns = isCompleted ? 0 : consecutiveEmptyTurns + 1;
         await opts.send({ type: 'agent_end', data: { messageId, agentId: agent.id } });
+        const revisitCompleted = await finishRevisitResponse(isCompleted, finalText);
         opts.onAgentDone({
           agentId: agent.id,
           agentName: agent.name,
@@ -874,7 +916,7 @@ export function buildCallAgentTool(opts: {
                 }
               : {}),
           },
-          ...(isCompleted ? {} : { isError: true }),
+          ...(isCompleted && revisitCompleted ? {} : { isError: true }),
         };
       }
 
@@ -911,6 +953,7 @@ export function buildCallAgentTool(opts: {
           opts.getAgentResponses(),
           opts.getWhiteboardLedger(),
           childTools.map((tool) => tool.name),
+          revisitContext,
         ),
         tools: [],
         allowedToolNames: new Set(),
@@ -996,6 +1039,13 @@ export function buildCallAgentTool(opts: {
       const isEmptyTurn = childErrored || (!hasVisibleText && actionCount === 0);
       consecutiveEmptyTurns = isEmptyTurn ? consecutiveEmptyTurns + 1 : 0;
       await opts.send({ type: 'agent_end', data: { messageId, agentId: agent.id } });
+      const lastAssistant = child.state.messages.findLast(
+        (message) => message.role === 'assistant',
+      );
+      const revisitCompleted = await finishRevisitResponse(
+        !childErrored && !child.state.errorMessage && lastAssistant?.stopReason === 'stop',
+        finalText,
+      );
       opts.onAgentDone({
         agentId: agent.id,
         agentName: agent.name,
@@ -1006,6 +1056,7 @@ export function buildCallAgentTool(opts: {
       });
 
       return {
+        ...(!revisitCompleted ? { isError: true } : {}),
         content: [
           {
             type: 'text',

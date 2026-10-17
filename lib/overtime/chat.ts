@@ -1,6 +1,18 @@
 import type { OvertimeChatContext } from '@/lib/overtime/types';
 import type { StatelessChatRequest } from '@/lib/types/chat';
 import type { Scene } from '@/lib/types/stage';
+import type { AgentConfig } from '@/lib/orchestration/registry/types';
+
+export function selectOvertimeInstructorIds(
+  agents: Pick<AgentConfig, 'id' | 'role' | 'priority'>[],
+): string[] {
+  const byPriority = (a: Pick<AgentConfig, 'priority'>, b: Pick<AgentConfig, 'priority'>) =>
+    (b.priority ?? 0) - (a.priority ?? 0);
+  const teacher = agents.filter((agent) => agent.role === 'teacher').sort(byPriority)[0];
+  if (teacher) return [teacher.id];
+  const assistant = agents.filter((agent) => agent.role === 'assistant').sort(byPriority)[0];
+  return assistant ? [assistant.id] : [];
+}
 
 export function buildOvertimeChatContext(args: {
   stageId?: string;

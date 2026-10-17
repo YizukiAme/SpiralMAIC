@@ -4,6 +4,6 @@
     "incremental": false,
     "types": ["node", "@playwright/test"]
   },
-  "include": ["e2e/**/*.ts", "playwright.config.ts"],
+  "include": ["e2e/**/*.ts", "playwright.config.ts", "types/web-extraction-vendors.d.ts"],
   "exclude": ["node_modules"]
 }

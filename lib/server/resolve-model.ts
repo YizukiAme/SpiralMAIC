@@ -13,6 +13,10 @@ import {
   ModelAuthorizationError,
   usesServerCredentials,
 } from '@/lib/server/model-config/model-authorization';
+import {
+  isPiGeminiCompatibleRoute,
+  PiGeminiNativeRequiredError,
+} from '@/lib/server/model-config/pi-gemini-route';
 import { presetIdFor } from '@/lib/config/preset-ids';
 import { getModel, getProvider, parseModelString, type ModelWithInfo } from '@/lib/ai/providers';
 import type { ModelServiceTier, ProviderType, ThinkingConfig } from '@/lib/types/provider';
@@ -67,6 +71,8 @@ export interface ModelRequest {
    * defaults an older deployment set with DEFAULT_MODEL.
    */
   stage?: LlmStage;
+  /** Server call-site requirement; Pi chat needs tools, other classroom uses do not. */
+  requireToolCalling?: boolean;
   /** Whose web settings apply; null for none. */
   workspaceId?: string | null;
   /**
@@ -109,6 +115,7 @@ export async function resolveModel(params: ModelRequest): Promise<ResolvedModel>
       workspaceId: params.workspaceId ?? null,
       serviceTier: params.serviceTier,
       logicalSession: params.logicalSession,
+      requireToolCalling: params.requireToolCalling,
       ...(allowed ? { legacyRequest: () => resolveRequestedModel(params) } : {}),
     });
     assertExpectedModel(resolved, params.expectedResolvedModel);
@@ -225,6 +232,15 @@ export async function resolveRequestedModel(
   const apiKey = resolveApiKey(providerId, clientApiKey || '');
   const baseUrl = resolveBaseUrl(providerId, clientBaseUrl);
   const proxy = resolveProxy(providerId);
+  if (
+    params.requireToolCalling &&
+    isPiGeminiCompatibleRoute(
+      effectiveProviderType,
+      baseUrl || getProvider(providerId)?.defaultBaseUrl || undefined,
+    )
+  ) {
+    throw new PiGeminiNativeRequiredError();
+  }
   const { model, modelInfo } = getModel({
     providerId,
     modelId,

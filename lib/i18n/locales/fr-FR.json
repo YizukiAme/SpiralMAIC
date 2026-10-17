@@ -245,6 +245,8 @@
     "endQA": "Terminer les questions",
     "softClosing": "Poursuivre la discussion",
     "error": {
+      "toolCallingRequired": "Le chat de la classe nécessite un modèle prenant en charge les appels d’outils. Sélectionnez-en un pour « Classe » dans Paramètres → Configuration des modèles de cours, ou contactez votre administrateur si ce paramètre est géré par celui-ci.",
+      "geminiNativeRequired": "L’interaction avec Gemini nécessite Google natif. Ajoutez Google (préréglage google) dans Paramètres → Services de modèles, puis sélectionnez-le pour « Classe » dans Configuration des modèles de cours. Si la configuration est gérée, contactez votre administrateur.",
       "emptyAgentResponses": "Les agents n’ont renvoyé aucune réponse ; la discussion s’est arrêtée. Réessayez ou vérifiez les paramètres de votre modèle.",
       "streamInterrupted": "Le flux s’est interrompu de façon inattendue ; la discussion n’a pas abouti. Veuillez réessayer."
     },
@@ -1290,6 +1292,8 @@
       "system": "Système"
     },
     "apiKey": "Clé d’API",
+    "credentialStorageHint": "Encrypted on this instance's server",
+    "credentialStorageHintDetail": "Saved encrypted on this instance's server and used to call the provider for you. The operator of this deployment can access it, so only enter keys on instances you trust.",
     "apiKeyDesc": "Configurez votre clé d’API",
     "apiBaseUrl": "URL du point d’accès de l’API",
     "apiBaseUrlDesc": "Configurez l’URL du point d’accès de votre API",
@@ -1379,7 +1383,8 @@
       "baidu": "Baidu",
       "claude": "Claude",
       "searxng": "SearXNG",
-      "openai-codex": "Codex"
+      "openai-codex": "Codex",
+      "builtin": "Lecteur intégré"
     },
     "modelCount": "modèles",
     "modelSingular": "modèle",
@@ -1917,7 +1922,7 @@
     "tokenPlan": {
       "nav": "Forfait de jetons",
       "title": "Configuration du forfait de jetons",
-      "desc": "Choisissez votre fournisseur de forfait de jetons et saisissez la clé : toutes les modalités prises en charge sont configurées automatiquement (LLM, image, vidéo, parole, recherche web).",
+      "desc": "Choisissez votre fournisseur de forfait de jetons et saisissez la clé : toutes les modalités prises en charge sont configurées automatiquement (LLM, image, vidéo, parole, recherche web, récupération web).",
       "selectPlan": "Choisir un fournisseur",
       "apiKey": "Clé d’API",
       "updateKey": "Mettre à jour la clé",
@@ -1925,7 +1930,7 @@
       "capabilities": "Capacités proposées",
       "offeredNote": "Modèles proposés par ce forfait. Choisissez ceux que vous voulez voir dans la barre de génération : leur disponibilité dépend de votre niveau de forfait, et les modèles non pris en charge produiront une erreur au moment de la génération.",
       "statusConnected": "Connecté",
-      "keyStorage": "La clé est conservée chiffrée sur le serveur et n'est plus jamais affichée. La connexion applique aux étapes du cours les modèles recommandés par cette offre ; si cela remplace ce qu’une étape utilise actuellement (un modèle que vous avez choisi ou le défaut du serveur), une confirmation vous est demandée.",
+      "applyModelsNote": "La connexion applique aux étapes du cours les modèles recommandés par cette offre ; si cela remplace ce qu’une étape utilise actuellement (un modèle que vous avez choisi ou le défaut du serveur), une confirmation vous est demandée.",
       "saveKey": "Enregistrer et activer",
       "cancelKeyUpdate": "Annuler la mise à jour",
       "manageAccount": "Gérer le compte",
@@ -1943,6 +1948,7 @@
       "capTts": "Synthèse vocale",
       "capVideo": "Génération de vidéo",
       "capWebSearch": "Recherche web",
+      "capWebFetch": "Récupération web",
       "saved": "Paramètres de connexion enregistrés",
       "stageInteractive": "Interactif",
       "stageSlide": "Diapositives",
@@ -2063,7 +2069,8 @@
         "providers": "Configurer les identifiants, points de terminaison et catalogues de modèles des services de modèles de langue",
         "tts": "Configurer les services de synthèse vocale, les voix et les modèles",
         "video": "Configurer les identifiants et catalogues de modèles des services de génération vidéo",
-        "webSearch": "Configurer les services de recherche web et les sources de récupération"
+        "webSearch": "Configurer les services de recherche web et les sources de récupération",
+        "webFetch": "Configurer les services d’extraction de pages web"
       },
       "nav": "Services de modèles",
       "notConfigured": "Non configuré",
@@ -2202,7 +2209,7 @@
         },
         "classroom": {
           "name": "Classe",
-          "desc": "Discussion, correction des quiz et projets pendant l’apprentissage."
+          "desc": "Discussion, correction des quiz et projets pendant l’apprentissage. Le chat de la classe nécessite un modèle prenant en charge les appels d’outils."
         },
         "agent": {
           "name": "Agent",
@@ -2231,6 +2238,10 @@
         "document": {
           "name": "Analyse de documents",
           "desc": "Lit les documents importés."
+        },
+        "webFetch": {
+          "name": "Récupération web",
+          "desc": "Permet à l’agent de lire les pages web autorisées dans la session."
         }
       },
       "source": {
@@ -2244,6 +2255,7 @@
         "lines": {
           "rewrite": "Requête",
           "search": "Recherche",
+          "fetch": "Lecture",
           "image": "Image",
           "video": "Vidéo"
         }
@@ -2276,7 +2288,11 @@
         "unconfirmed": "Le serveur n'a pas confirmé l'importation."
       }
     },
-    "serverConfiguredAddOwn": "Pour utiliser vos propres identifiants, ajoutez un fournisseur distinct."
+    "serverConfiguredAddOwn": "Pour utiliser vos propres identifiants, ajoutez un fournisseur distinct.",
+    "webFetchSettings": "Récupération web",
+    "webFetchHint": "Choisissez comment lire les pages web. Les services hébergés reçoivent les URL publiques autorisées dans la session. Les résultats restent non fiables et aucun autre lecteur n’est utilisé en cas d’échec.",
+    "webFetchApiKey": "Clé API",
+    "webFetchSharedKeyHint": "Cette clé sert aussi au chat avec ce fournisseur. La modifier ou la supprimer affecte le chat."
   },
   "profile": {
     "title": "Profil",

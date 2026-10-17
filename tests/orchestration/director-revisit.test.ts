@@ -3,7 +3,7 @@ import { describe, expect, test } from 'vitest';
 import {
   hasAgentResponseAfterLatestHumanTurn,
   resolveDirectorDecisionForAvailableAgents,
-} from '@/lib/orchestration/director-graph';
+} from '@/lib/revisit/director-policy';
 import type { AgentConfig } from '@/lib/orchestration/registry/types';
 
 const studentLow: Pick<AgentConfig, 'id' | 'role' | 'priority'> = {

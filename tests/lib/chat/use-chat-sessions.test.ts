@@ -7,7 +7,6 @@ import {
   createPiSessionBoundaryContext,
   getPiSessionBoundaryContext,
   getPiSingleRequestOutcome,
-  fetchStatelessChat,
   isOpenLiveSession,
   normalizeStoredSessionsForRestore,
   retireLiveRequestResources,
@@ -366,6 +365,151 @@ describe('lectureActionPersistParams', () => {
 
 describe('runPiSingleRequest', () => {
   it.each([
+    ['qa', 'tool_calling_required', 'toolCallingRequired'],
+    ['discussion', 'tool_calling_required', 'toolCallingRequired'],
+    ['qa', 'gemini_native_required', 'geminiNativeRequired'],
+    ['discussion', 'gemini_native_required', 'geminiNativeRequired'],
+  ] as const)(
+    'shows the localized configuration error for %s (%s)',
+    async (sessionType, reason, key) => {
+      const response = new Response(
+        JSON.stringify({
+          errorCode: 'MODEL_CONFIG_INVALID',
+          reason,
+          error: 'Server English explanation',
+        }),
+        { status: 400 },
+      );
+      const json = vi.spyOn(response, 'json');
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => response),
+      );
+      const onEvent = vi.fn();
+      const onResponseAccepted = vi.fn();
+      try {
+        await expect(
+          runPiSingleRequest(
+            'session-1',
+            {
+              messages: [],
+              storeState: {
+                stage: null,
+                scenes: [],
+                currentSceneId: null,
+                mode: 'autonomous',
+                whiteboardOpen: false,
+              },
+              config: { agentIds: ['teacher'] },
+            },
+            new AbortController(),
+            sessionType,
+            () => ({ onEvent, onIterationEnd: vi.fn() }),
+            vi.fn(),
+            vi.fn(),
+            vi.fn(),
+            vi.fn(),
+            { current: vi.fn() },
+            (key) => `translated:${key}`,
+            onResponseAccepted,
+          ),
+        ).rejects.toThrow(`translated:chat.error.${key}`);
+        expect(json).toHaveBeenCalledOnce();
+        expect(onEvent).not.toHaveBeenCalled();
+        expect(onResponseAccepted).not.toHaveBeenCalled();
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
+  it.each([
+    ['not JSON', 400],
+    ['{}', 400],
+    ['{"reason":"unknown"}', 400],
+    ['{"reason":"gemini_native_required"}', 500],
+    ['{"reason":"tool_calling_required"}', 500],
+  ])('keeps the status fallback for %s (%s)', async (body, status) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(body, { status })),
+    );
+    try {
+      await expect(
+        runPiSingleRequest(
+          'session-1',
+          {
+            messages: [],
+            storeState: {
+              stage: null,
+              scenes: [],
+              currentSceneId: null,
+              mode: 'autonomous',
+              whiteboardOpen: false,
+            },
+            config: { agentIds: ['teacher'] },
+          },
+          new AbortController(),
+          'qa',
+          () => ({ onEvent: vi.fn(), onIterationEnd: vi.fn() }),
+          vi.fn(),
+          vi.fn(),
+          vi.fn(),
+          vi.fn(),
+          { current: vi.fn() },
+          (key) => key,
+        ),
+      ).rejects.toThrow(`Pi chat request failed: ${status}`);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  // The hook builds the fresh store state before calling runPiSingleRequest,
+  // so a teardown during that read arrives here as an already-aborted controller.
+  it('does not fetch when the turn was aborted while its store state was read', async () => {
+    const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+    controller.abort();
+    const createConsumer = vi.fn(() => ({ onEvent: vi.fn(), onIterationEnd: vi.fn() }));
+    const clearLiveSessionAfterError = vi.fn();
+    const markSessionCompleted = vi.fn();
+    try {
+      await expect(
+        runPiSingleRequest(
+          'session-1',
+          {
+            messages: [],
+            storeState: {
+              stage: null,
+              scenes: [],
+              currentSceneId: null,
+              mode: 'autonomous',
+              whiteboardOpen: false,
+            },
+            config: { agentIds: ['teacher'] },
+          },
+          controller,
+          'qa',
+          createConsumer,
+          clearLiveSessionAfterError,
+          vi.fn(),
+          markSessionCompleted,
+          vi.fn(),
+          { current: vi.fn() },
+          (key) => key,
+        ),
+      ).rejects.toMatchObject({ name: 'AbortError' });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(clearLiveSessionAfterError).not.toHaveBeenCalled();
+      expect(markSessionCompleted).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each([
     'removed-before-post',
     'runtime-authoritative',
     'server-rejected',
@@ -696,20 +840,6 @@ describe('Pi Native whiteboard Browser events', () => {
 
 describe('classroom chat requests carry no provider data', () => {
   afterEach(() => vi.unstubAllGlobals());
-
-  it('sends the stateless /api/chat request without model headers', async () => {
-    const fetchMock = vi.fn(async () => new Response('data: {}\n\n', { status: 200 }));
-    vi.stubGlobal('fetch', fetchMock);
-
-    await fetchStatelessChat({ messages: [] }, new AbortController().signal);
-
-    expect(fetchMock).toHaveBeenCalledWith('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: [] }),
-      signal: expect.any(AbortSignal),
-    });
-  });
 
   it('sends the /api/chat/pi request without model headers or keys', async () => {
     const body = new ReadableStream<Uint8Array>({

@@ -1,3 +1,5 @@
+import type { OvertimeChatContext } from '@/lib/overtime/types';
+import type { StatelessChatRequest } from '@/lib/types/chat';
 import { buildSceneDigest } from '@/lib/revisit/source';
 import type { Scene } from '@/lib/types/stage';
 
@@ -68,4 +70,35 @@ export function buildOvertimeCourseDigest(
   }
 
   return `${pageIndex}${detailsHeading}${details.join('\n\n')}`.slice(0, maxChars);
+}
+
+export function buildOvertimeTeachingSection(
+  context: OvertimeChatContext | undefined,
+  storeState: StatelessChatRequest['storeState'],
+): string {
+  if (!context) return '';
+  const courseDigest = buildOvertimeCourseDigest(storeState.scenes);
+  return `
+# Post-class Overtime Teaching
+The original course is already complete. You are answering one learner in a post-class follow-up, not opening a lesson or addressing a class. Answer the learner's latest message directly and continue naturally from what they asked.
+
+You can see the bounded summary of the completed course below. Use it as factual context. Never claim that you cannot see the earlier lesson, and never restart it from the beginning.
+
+${courseDigest || 'The completed course currently has no readable page details.'}
+
+Never greet the class, restart the course, repeat the original opening, invite a general classroom discussion, or send the learner back to page 1. Do not narrate or point at an existing slide. Always give an ordinary text answer first. Then choose one of these outcomes:
+- No action: the answer is transient clarification and does not deserve a permanent page.
+- request_learning_extension with disposition "append_page": the answer deserves exactly one durable classroom page in this course.
+- request_learning_extension with disposition "new_course": the request is clearly off-topic or needs multiple pages of systematic teaching.
+
+Do not call the action merely because it is available. Prefer no action for small factual questions, confirmations, and answers already covered by an existing page. For append_page, choose exactly one teachingMove: extend (deeper/new concept), remediate (reteach forgotten material), apply (practice or transfer), or trace (origin/history). Quiz may check or apply known concepts but must not introduce a new concept.
+
+Calling request_learning_extension submits a generation request; it does not mean the page is ready. When you call it, say only that the request was submitted and the page is being prepared. Never say it has already been generated, is visible, or is ready. The application state is the only source of truth for planning, generation, failure, and readiness.`;
+}
+
+export function buildOvertimeStateContext(storeState: StatelessChatRequest['storeState']): string {
+  return `# Current State
+Mode: post-class overtime
+Course: ${storeState.stage?.name || 'Untitled course'}
+Completed pages: ${storeState.scenes.length}`;
 }

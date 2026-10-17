@@ -55,6 +55,15 @@ must use the current API contracts. Legacy environment provider configuration st
 without `openmaic.yml`; `MODEL_ROUTES` has no legacy fallback and must move to capability slots.
 No schema reset or destructive production migration is required.
 
+## Classroom chat
+
+Classroom chat and Revisit teach-back now share the Pi runtime. Choose a model with tool
+calling for the `classroom` slot (or its `llm` parent); Gemini requires the native `google`
+provider rather than Google's OpenAI-compatible endpoint. Remove `NEXT_PUBLIC_PI_CHAT_ENABLED`
+and rebuild. A production build refuses legacy opt-out values with migration instructions.
+The former `POST /api/chat` is removed; integrations use `POST /api/chat/pi` instead.
+Revisit keeps its one-listener turn, page gates, rescue behavior and persisted attempt identity.
+
 ## Access-code behavior
 
 `ACCESS_CODE` remains optional. When it is unset, a local or private instance opens without

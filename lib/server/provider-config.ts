@@ -1,4 +1,5 @@
 import { presetIdFor } from '@/lib/config/preset-ids';
+import { WEB_SEARCH_PROVIDERS } from '@/lib/web-search/constants';
 import {
   assertDeploymentModelAuthorized,
   selectsUpstreamModel,
@@ -193,7 +194,10 @@ const DISABLE_ENV_MAPS: Record<CapabilitySection, Record<string, string>> = {
     IMAGE_COMFYUI: 'comfyui-image',
   },
   video: { ...VIDEO_ENV_MAP },
-  webSearch: { ...WEB_SEARCH_ENV_MAP },
+  webSearch: {
+    ...WEB_SEARCH_ENV_MAP,
+    WEB_SEARCH_KIMI: 'kimi',
+  },
 };
 
 /** YAML section key per capability (web-search is hyphenated in YAML). */
@@ -534,6 +538,30 @@ function buildConfig(yamlData: YamlData): ServerConfig {
   // turn it into a client-overridable OpenAI-compatible provider.
   delete providers[NATIVE_CODEX_PROVIDER_ID];
 
+  const webSearch = loadEnvSection(WEB_SEARCH_ENV_MAP, yamlData['web-search'], {
+    keylessProviders: new Set(['brave', 'searxng']),
+  });
+  for (const provider of Object.values(WEB_SEARCH_PROVIDERS)) {
+    if (!provider.sharedChatProviderId) continue;
+    const explicit = yamlData['web-search']?.[provider.id];
+    const optIn = provider.enableEnvVar && process.env[provider.enableEnvVar];
+    if (!explicit && !(optIn?.trim() && parseBooleanEnv(optIn))) continue;
+    const shared = providers[provider.sharedChatProviderId];
+    const configured = webSearch[provider.id];
+    const apiKey = configured?.apiKey || shared?.apiKey;
+    // Append shared accounts after existing search providers, including when
+    // their explicit YAML entry was loaded earlier, preserving default order.
+    delete webSearch[provider.id];
+    if (!apiKey) continue;
+    webSearch[provider.id] = {
+      apiKey,
+      baseUrl: configured?.baseUrl ?? explicit?.baseUrl ?? shared?.baseUrl,
+      proxy: configured?.proxy ?? explicit?.proxy ?? shared?.proxy,
+      // Search has no model selector; chat pins must stay on the chat account.
+      models: undefined,
+    };
+  }
+
   return {
     providers,
     tts: loadEnvSection(TTS_ENV_MAP, yamlData.tts, {
@@ -551,9 +579,7 @@ function buildConfig(yamlData: YamlData): ServerConfig {
     ),
     image,
     video: loadEnvSection(VIDEO_ENV_MAP, yamlData.video),
-    webSearch: loadEnvSection(WEB_SEARCH_ENV_MAP, yamlData['web-search'], {
-      keylessProviders: new Set(['brave', 'searxng']),
-    }),
+    webSearch,
     disabled: collectDisabledProviders(yamlData),
   };
 }

@@ -9,11 +9,6 @@ export type PromptId =
   | 'interactive-outlines'
   | 'task-engine-outlines'
   | 'web-search-query-rewrite'
-  | 'agent-system'
-  | 'agent-system-wb-teacher'
-  | 'agent-system-wb-assistant'
-  | 'agent-system-wb-student'
-  | 'director'
   | 'revisit-exam-blueprint'
   | 'revisit-judge'
   | 'revisit-study-artifact-briefing'
@@ -37,9 +32,7 @@ export type SnippetId =
   | 'slide-image-instructions'
   | 'slide-generated-image-instructions'
   | 'slide-video-instructions'
-  | 'speech-guidelines'
-  | 'revisit-probe-context'
-  | 'whiteboard-reference';
+  | 'revisit-probe-context';
 
 /**
  * Loaded prompt template

@@ -1,4 +1,5 @@
 'use client';
+import { registryIdsFor } from '@/components/settings/service-display';
 
 /**
  * The "Model Services" section: one tab per capability, each with the list of
@@ -56,16 +57,17 @@ import { CodexProviderSettings } from './codex-provider-settings';
 import { PINNED_PROVIDER_ID } from './provider-links';
 import { ProviderList } from './provider-list';
 import { removeServiceProvider, rootUse } from './server-settings';
-import { REGISTRY_INFO, entryIcon, entryName, isEntryConfigured } from './service-display';
+import { entryIcon, entryName, isEntryConfigured } from './service-display';
 import { TTSSettings } from './tts-settings';
 import { UnimportedSettingsNotice } from './unimported-settings-notice';
 import { VideoSettings } from './video-settings';
+import { WebFetchSettings } from './web-fetch-settings';
 import { WebSearchSettings } from './web-search-settings';
 
 /** 「模型服务」分区内的服务 tab：沿用旧一级分区的值与面板组件。 */
 export type ServiceTab = Extract<
   SettingsSection,
-  'providers' | 'image' | 'video' | 'tts' | 'asr' | 'pdf' | 'web-search'
+  'providers' | 'image' | 'video' | 'tts' | 'asr' | 'pdf' | 'web-search' | 'web-fetch'
 >;
 
 export const SERVICE_TABS = [
@@ -75,6 +77,7 @@ export const SERVICE_TABS = [
   'tts',
   'asr',
   'pdf',
+  'web-fetch',
   'web-search',
 ] as const satisfies readonly ServiceTab[];
 
@@ -85,6 +88,7 @@ export const SERVICE_TAB_LABELS: Record<ServiceTab, string> = {
   tts: 'settings.ttsSettings',
   asr: 'settings.asrSettings',
   pdf: 'settings.documentParsingSettings',
+  'web-fetch': 'settings.webFetchSettings',
   'web-search': 'settings.webSearchSettings',
 };
 
@@ -95,6 +99,7 @@ const SERVICE_TAB_ICONS: Record<ServiceTab, LucideIcon> = {
   tts: Volume2,
   asr: Mic,
   pdf: FileText,
+  'web-fetch': FileText,
   'web-search': Search,
 };
 
@@ -105,6 +110,7 @@ export const SERVICE_TAB_DESCRIPTIONS: Record<ServiceTab, string> = {
   tts: 'settings.modelServices.desc.tts',
   asr: 'settings.modelServices.desc.asr',
   pdf: 'settings.modelServices.desc.pdf',
+  'web-fetch': 'settings.modelServices.desc.webFetch',
   'web-search': 'settings.modelServices.desc.webSearch',
 };
 
@@ -116,6 +122,7 @@ export const TAB_CAPABILITY: Record<ServiceTab, SlotCapability> = {
   tts: 'tts',
   asr: 'asr',
   pdf: 'document',
+  'web-fetch': 'webFetch',
   'web-search': 'webSearch',
 };
 
@@ -138,7 +145,7 @@ export function ModelServicesPanel({
   const { t } = useI18n();
   const capability = TAB_CAPABILITY[tab];
   const entries = useMemo(() => {
-    const list = serviceEntries(view, capability, REGISTRY_INFO[capability].ids);
+    const list = serviceEntries(view, capability, registryIdsFor(view, capability));
     // Kimi 推广位：置顶于内置服务之首（其他账号/自定义服务在前，其余保持原顺序）。
     const rank = (entry: ServiceEntry) =>
       entry.provider && !entry.serviceId ? 0 : entry.id === PINNED_PROVIDER_ID ? 1 : 2;
@@ -307,6 +314,7 @@ export function ModelServicesPanel({
               {tab === 'tts' && <TTSSettings {...panelProps} />}
               {tab === 'asr' && <ASRSettings {...panelProps} />}
               {tab === 'pdf' && <PDFSettings {...panelProps} />}
+              {tab === 'web-fetch' && <WebFetchSettings {...panelProps} />}
               {tab === 'web-search' && <WebSearchSettings {...panelProps} />}
             </div>
           )}

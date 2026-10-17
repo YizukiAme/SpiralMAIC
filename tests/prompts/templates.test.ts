@@ -1,41 +1,82 @@
 /**
- * Structural assertion tests for the orchestration prompt templates.
+ * Structural assertion tests for the prompt templates.
  *
  * These replace the byte-equal snapshot suite that was initially added — the
- * goal here is catching real regressions (missing variables, broken role
- * dispatch, broken scene-type stripping) without forcing a snapshot update
- * for every intentional prompt-content tweak.
+ * goal here is catching real regressions (missing variables, broken
+ * placeholder naming) without forcing a snapshot update for every intentional
+ * prompt-content tweak.
  */
 
 import { describe, test, expect } from 'vitest';
-import { buildStructuredPrompt } from '@/lib/orchestration/prompt-builder';
-import { buildDirectorPrompt } from '@/lib/orchestration/director-prompt';
-import { buildBlueprintPrompt } from '@/lib/revisit/prompt-builders';
 import { loadPrompt } from '@openmaic/generation';
-import type { AgentConfig } from '@/lib/orchestration/registry/types';
+import { buildBlueprintPrompt } from '@/lib/revisit/prompt-builders';
 import type { StatelessChatRequest } from '@/lib/types/chat';
 
-const baseAgent: AgentConfig = {
-  id: 'a1',
-  name: 'Mr. Chen',
-  role: 'teacher',
-  persona: 'Patient physics teacher.',
-  avatar: '',
-  color: '#000',
-  allowedActions: [
-    'spotlight',
-    'laser',
-    'wb_open',
-    'wb_draw_text',
-    'wb_draw_latex',
-    'wb_draw_shape',
-    'wb_close',
-  ],
-  priority: 100,
-  createdAt: new Date(0),
-  updatedAt: new Date(0),
-  isDefault: true,
-};
+describe('PBL action workflow', () => {
+  test('previews the v2 instructor-guided milestone workspace', () => {
+    const prompt = loadPrompt('pbl-actions');
+
+    expect(prompt?.systemPrompt).toContain(
+      'complete project configuration with milestones and a guided project workspace led by an instructor',
+    );
+    expect(prompt?.systemPrompt).toContain(
+      'Briefly previews what the project involves, including its driving goal and key milestones',
+    );
+    expect(prompt?.systemPrompt).toContain(
+      'Encourages students to enter the project workspace and start the first task',
+    );
+    expect(prompt?.systemPrompt).toContain('## Project Plan');
+    expect(prompt?.systemPrompt).toContain('{{projectSummary}}');
+    expect(prompt?.systemPrompt).toContain('do not invent or rename them');
+    expect(prompt?.systemPrompt).not.toContain('available roles');
+    expect(prompt?.systemPrompt).not.toContain('select a role');
+  });
+});
+
+describe('placeholder naming convention lint', () => {
+  // The `interpolateVariables` regex is /\{\{(\w+)\}\}/, which is
+  // strictly [A-Za-z0-9_]. Kebab-case placeholders would silently pass
+  // through. Convention (per README) is camelCase. This test scans every
+  // template for non-conforming placeholders.
+  //
+  // slide-content/{system,user}.md predates the convention and still uses
+  // snake_case ({{canvas_width}}, {{canvas_height}}). Grandfather it here;
+  // new templates must be camelCase.
+  test('templates (excluding grandfathered) use camelCase placeholders', async () => {
+    const { readdirSync, readFileSync, statSync } = await import('fs');
+    const { join } = await import('path');
+
+    const templatesDir = join(process.cwd(), 'lib', 'prompts', 'templates');
+    const GRANDFATHERED = new Set(['slide-content']);
+
+    const offenders: string[] = [];
+    for (const promptId of readdirSync(templatesDir)) {
+      if (GRANDFATHERED.has(promptId)) continue;
+      const promptDir = join(templatesDir, promptId);
+      if (!statSync(promptDir).isDirectory()) continue;
+
+      for (const file of ['system.md', 'user.md']) {
+        const p = join(promptDir, file);
+        try {
+          const content = readFileSync(p, 'utf-8');
+          // Match {{placeholder}} but NOT {{snippet:name}}, {{#if}}, or {{/if}}
+          const matches = content.match(/\{\{(?!snippet:|#if |\/if)([^}]+)\}\}/g) || [];
+          for (const m of matches) {
+            const name = m.slice(2, -2);
+            // camelCase: starts with lowercase, rest alphanumeric; reject _ and -
+            if (!/^[a-z][a-zA-Z0-9]*$/.test(name)) {
+              offenders.push(`${promptId}/${file}: ${m}`);
+            }
+          }
+        } catch {
+          // user.md is optional
+        }
+      }
+    }
+
+    expect(offenders).toEqual([]);
+  });
+});
 
 const slideState: StatelessChatRequest['storeState'] = {
   stage: {
@@ -73,53 +114,6 @@ const slideState: StatelessChatRequest['storeState'] = {
   mode: 'autonomous',
   whiteboardOpen: false,
 };
-
-const quizState: StatelessChatRequest['storeState'] = {
-  ...slideState,
-  scenes: [
-    {
-      ...slideState.scenes[0],
-      type: 'quiz',
-      content: { type: 'quiz', questions: [] },
-    },
-  ],
-};
-
-// Matches any surviving {{placeholder}} token in rendered output
-const UNRESOLVED_PLACEHOLDER = /\{\{\w[\w-]*\}\}/;
-
-describe('no surviving placeholders', () => {
-  test('agent-system / teacher / slide', () => {
-    const out = buildStructuredPrompt(baseAgent, slideState);
-    expect(out).not.toMatch(UNRESOLVED_PLACEHOLDER);
-  });
-
-  test('director prompt', () => {
-    const out = buildDirectorPrompt([baseAgent], 'No history', [], 0);
-    expect(out).not.toMatch(UNRESOLVED_PLACEHOLDER);
-  });
-});
-
-describe('PBL action workflow', () => {
-  test('previews the v2 instructor-guided milestone workspace', () => {
-    const prompt = loadPrompt('pbl-actions');
-
-    expect(prompt?.systemPrompt).toContain(
-      'complete project configuration with milestones and a guided project workspace led by an instructor',
-    );
-    expect(prompt?.systemPrompt).toContain(
-      'Briefly previews what the project involves, including its driving goal and key milestones',
-    );
-    expect(prompt?.systemPrompt).toContain(
-      'Encourages students to enter the project workspace and start the first task',
-    );
-    expect(prompt?.systemPrompt).toContain('## Project Plan');
-    expect(prompt?.systemPrompt).toContain('{{projectSummary}}');
-    expect(prompt?.systemPrompt).toContain('do not invent or rename them');
-    expect(prompt?.systemPrompt).not.toContain('available roles');
-    expect(prompt?.systemPrompt).not.toContain('select a role');
-  });
-});
 
 describe('revisit blueprint prompt', () => {
   test('fades scaffolding across challenge attempts, not across pages', () => {
@@ -196,302 +190,5 @@ describe('revisit blueprint prompt', () => {
     expect(first.user).toContain('Maximum cues per page: 4');
     expect(fourth.user).toContain('Current challenge number: 4');
     expect(fourth.user).toContain('Maximum cues per page: 1');
-  });
-});
-
-describe('role dispatch', () => {
-  test('teacher prompt carries LEAD TEACHER guideline', () => {
-    const out = buildStructuredPrompt(baseAgent, slideState);
-    expect(out).toContain('LEAD TEACHER');
-  });
-
-  test('student prompt does NOT carry LEAD TEACHER guideline', () => {
-    const studentAgent: AgentConfig = { ...baseAgent, role: 'student' };
-    const out = buildStructuredPrompt(studentAgent, slideState);
-    expect(out).not.toContain('LEAD TEACHER');
-    expect(out).toContain('STUDENT');
-  });
-
-  test('assistant prompt carries TEACHING ASSISTANT guideline', () => {
-    const assistantAgent: AgentConfig = { ...baseAgent, role: 'assistant' };
-    const out = buildStructuredPrompt(assistantAgent, slideState);
-    expect(out).toContain('TEACHING ASSISTANT');
-    expect(out).not.toContain('LEAD TEACHER');
-  });
-
-  test('teacher whiteboard prompt is sourced from agent-system-wb-teacher template', () => {
-    const out = buildStructuredPrompt(baseAgent, slideState);
-    expect(out).toContain('Whiteboard — Teacher Role');
-  });
-
-  test('assistant whiteboard prompt is sourced from agent-system-wb-assistant template', () => {
-    const assistantAgent: AgentConfig = { ...baseAgent, role: 'assistant' };
-    const out = buildStructuredPrompt(assistantAgent, slideState);
-    expect(out).toContain('Whiteboard — Teaching Assistant Role');
-  });
-
-  test('student whiteboard prompt is sourced from agent-system-wb-student template', () => {
-    const studentAgent: AgentConfig = { ...baseAgent, role: 'student' };
-    const out = buildStructuredPrompt(studentAgent, slideState);
-    expect(out).toContain('Whiteboard — Student Role');
-  });
-
-  test('student prompt can inject reverse-teaching acknowledgment instructions', () => {
-    const studentAgent: AgentConfig = { ...baseAgent, role: 'student' };
-    const out = buildStructuredPrompt(
-      studentAgent,
-      slideState,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      {
-        pageContext: 'Candidate probes: [p1] Why does this matter?',
-        responseDirective: 'acknowledge',
-      },
-    );
-    expect(out).toContain('Reverse Teaching Challenge');
-    expect(out).toContain('Candidate probes: [p1] Why does this matter?');
-    expect(out).toContain('Do not ask about topics covered by later pages');
-    expect(out).toContain('ACKNOWLEDGE');
-    expect(out).toContain('Do not ask a question');
-    expect(out).toContain('Questions are not required');
-  });
-
-  test('student and assistant prompts receive explicit probe and rescue instructions', () => {
-    const studentAgent: AgentConfig = { ...baseAgent, role: 'student' };
-    const assistantAgent: AgentConfig = { ...baseAgent, role: 'assistant' };
-    const probe = buildStructuredPrompt(
-      studentAgent,
-      slideState,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { pageContext: 'Page 1', responseDirective: 'probe' },
-    );
-    const rescue = buildStructuredPrompt(
-      assistantAgent,
-      slideState,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { pageContext: 'Page 1', responseDirective: 'rescue' },
-    );
-
-    expect(probe).toContain('PROBE');
-    expect(probe).toContain('exactly one short');
-    expect(rescue).toContain('RESCUE');
-    expect(rescue).toContain('Do not create another question');
-  });
-});
-
-describe('scene-type action stripping', () => {
-  test('slide scene exposes spotlight action description', () => {
-    const out = buildStructuredPrompt(baseAgent, slideState);
-    expect(out).toMatch(/^- spotlight:/m);
-  });
-
-  test('quiz scene strips spotlight + laser from action descriptions', () => {
-    const out = buildStructuredPrompt(baseAgent, quizState);
-    expect(out).not.toMatch(/^- spotlight:/m);
-    expect(out).not.toMatch(/^- laser:/m);
-  });
-});
-
-describe('whiteboard close contract', () => {
-  test('keeps the shared action description consistent with role prompts', () => {
-    const out = buildStructuredPrompt(baseAgent, slideState);
-
-    expect(out).not.toContain('Always close after you finish drawing');
-    expect(out).toContain('Do not close merely because your own drawing is complete');
-    expect(out).toContain('a later classroom agent still needs the board');
-    expect(out).toContain('Close only when explicitly requested');
-    expect(out).toContain('Do NOT call `wb_close` at the end of a drawing turn');
-    expect(out).toContain('Only close when returning to the slide canvas');
-  });
-});
-
-describe('optional sections toggle on / off correctly', () => {
-  test('peer context appears when other agents have spoken this round', () => {
-    const out = buildStructuredPrompt(baseAgent, slideState, undefined, undefined, undefined, [
-      {
-        agentId: 'other',
-        agentName: 'Lily',
-        contentPreview: 'quick thought',
-        actionCount: 1,
-        whiteboardActions: [],
-      },
-    ]);
-    expect(out).toContain("This Round's Context");
-    expect(out).toContain('Lily');
-  });
-
-  test('peer context is absent when agentResponses is empty/undefined', () => {
-    const out = buildStructuredPrompt(baseAgent, slideState);
-    expect(out).not.toContain("This Round's Context");
-  });
-
-  test('language constraint is omitted when stage.languageDirective is absent', () => {
-    const stateNoLang: StatelessChatRequest['storeState'] = {
-      ...slideState,
-      stage: { ...slideState.stage!, languageDirective: undefined },
-    };
-    const out = buildStructuredPrompt(baseAgent, stateNoLang);
-    expect(out).not.toContain('# Language (CRITICAL)');
-  });
-});
-
-describe('director routing contract', () => {
-  test('output spec mentions next_agent JSON field', () => {
-    const out = buildDirectorPrompt([baseAgent], 'No history', [], 0);
-    expect(out).toContain('next_agent');
-  });
-
-  test('balances turns among equally suitable student agents', () => {
-    const out = buildDirectorPrompt([baseAgent], 'No history', [], 0);
-    expect(out).toContain(
-      'When multiple student agents are equally suitable, rotate among them instead of repeatedly selecting the same student.',
-    );
-  });
-
-  test('Q&A mode omits Discussion Mode block', () => {
-    const out = buildDirectorPrompt([baseAgent], 'No history', [], 0);
-    expect(out).not.toContain('Discussion Mode');
-  });
-
-  test('discussion mode inserts Discussion Mode block with topic', () => {
-    const out = buildDirectorPrompt(
-      [baseAgent],
-      'No history',
-      [],
-      0,
-      { topic: 'Force decomposition', prompt: 'Think of real examples' },
-      'student_1',
-    );
-    expect(out).toContain('# Discussion Mode');
-    expect(out).toContain('Force decomposition');
-    expect(out).toContain('student_1');
-  });
-
-  test('director prompt inserts reverse gate section when provided', () => {
-    const studentAgent: AgentConfig = {
-      ...baseAgent,
-      id: 'student-1',
-      name: 'Student',
-      role: 'student',
-    };
-    const assistantAgent: AgentConfig = {
-      ...baseAgent,
-      id: 'assistant-1',
-      name: 'Assistant',
-      role: 'assistant',
-    };
-    const out = buildDirectorPrompt(
-      [studentAgent, assistantAgent],
-      '[Student (Human)] I will explain this page.',
-      [],
-      0,
-      null,
-      null,
-      [],
-      undefined,
-      false,
-      'page_index: 0\nlatest_teacher_turn: example',
-    );
-    expect(out).toContain('Reverse Teaching Gate');
-    expect(out).toContain('"revisit_gate"');
-    expect(out).toContain('latest human turn is the human teacher');
-    expect(out).toContain('Do NOT output an agent whose role is teacher');
-    expect(out).toContain('For "pass", choose an AI student');
-    expect(out).toContain('student_states');
-    expect(out).toContain('questioning');
-    expect(out).toContain('all active AI students are satisfied');
-    expect(out).toContain('every id listed in active_student_ids');
-    expect(out).toContain('prefer the most recent student whose question was resolved');
-    expect(out).toContain('Questions are not participation rewards');
-    expect(out).not.toContain('role` field is LITERALLY the string `teacher`');
-    expect(out).not.toContain('or choose END');
-    expect(out).not.toMatch(UNRESOLVED_PLACEHOLDER);
-  });
-});
-
-describe('placeholder naming convention lint', () => {
-  // The `interpolateVariables` regex is /\{\{(\w+)\}\}/, which is
-  // strictly [A-Za-z0-9_]. Kebab-case placeholders would silently pass
-  // through. Convention (per README) is camelCase. This test scans every
-  // template for non-conforming placeholders.
-  //
-  // slide-content/{system,user}.md predates the convention and still uses
-  // snake_case ({{canvas_width}}, {{canvas_height}}). Grandfather it here;
-  // new templates must be camelCase.
-  test('templates (excluding grandfathered) use camelCase placeholders', async () => {
-    const { readdirSync, readFileSync, statSync } = await import('fs');
-    const { join } = await import('path');
-
-    const templatesDir = join(process.cwd(), 'lib', 'prompts', 'templates');
-    const GRANDFATHERED = new Set(['slide-content']);
-
-    const offenders: string[] = [];
-    for (const promptId of readdirSync(templatesDir)) {
-      if (GRANDFATHERED.has(promptId)) continue;
-      const promptDir = join(templatesDir, promptId);
-      if (!statSync(promptDir).isDirectory()) continue;
-
-      for (const file of ['system.md', 'user.md']) {
-        const p = join(promptDir, file);
-        try {
-          const content = readFileSync(p, 'utf-8');
-          // Match {{placeholder}} but NOT {{snippet:name}}, {{#if}}, or {{/if}}
-          const matches = content.match(/\{\{(?!snippet:|#if |\/if)([^}]+)\}\}/g) || [];
-          for (const m of matches) {
-            const name = m.slice(2, -2);
-            // camelCase: starts with lowercase, rest alphanumeric; reject _ and -
-            if (!/^[a-z][a-zA-Z0-9]*$/.test(name)) {
-              offenders.push(`${promptId}/${file}: ${m}`);
-            }
-          }
-        } catch {
-          // user.md is optional
-        }
-      }
-    }
-
-    expect(offenders).toEqual([]);
-  });
-});
-
-describe('whiteboard-reference snippet is wired into every role', () => {
-  const KEY_SECTIONS = [
-    'Canvas Specifications',
-    'Action Reference',
-    'LaTeX JSON Escape (CRITICAL)',
-    'Bounds & Overlap',
-    'Font Size Table',
-    'Pre-Output Checklist',
-  ];
-
-  test('teacher prompt contains every key whiteboard-reference section', () => {
-    const out = buildStructuredPrompt(baseAgent, slideState);
-    for (const section of KEY_SECTIONS) {
-      expect(out).toContain(section);
-    }
-  });
-
-  test('assistant prompt contains every key whiteboard-reference section', () => {
-    const assistantAgent: AgentConfig = { ...baseAgent, role: 'assistant' };
-    const out = buildStructuredPrompt(assistantAgent, slideState);
-    for (const section of KEY_SECTIONS) {
-      expect(out).toContain(section);
-    }
-  });
-
-  test('student prompt contains every key whiteboard-reference section', () => {
-    const studentAgent: AgentConfig = { ...baseAgent, role: 'student' };
-    const out = buildStructuredPrompt(studentAgent, slideState);
-    for (const section of KEY_SECTIONS) {
-      expect(out).toContain(section);
-    }
   });
 });

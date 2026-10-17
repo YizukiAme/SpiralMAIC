@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import { getOvertimeAgentActions, validateOvertimeChatContext } from '@/lib/overtime/chat';
-import { selectOvertimeInstructorIds } from '@/lib/orchestration/director-graph';
-import { buildStructuredPrompt } from '@/lib/orchestration/prompt-builder';
+import { selectOvertimeInstructorIds } from '@/lib/overtime/chat';
+import { buildChildPrompt } from '@/lib/chat/pi/prompts';
+import type { OvertimeChatContext } from '@/lib/overtime/types';
 import type { AgentConfig } from '@/lib/orchestration/registry/types';
 import type { StatelessChatRequest } from '@/lib/types/chat';
 
@@ -73,17 +74,8 @@ describe('overtime chat constraints', () => {
     );
     expect(getOvertimeAgentActions(['spotlight'], teacher.role)).toEqual(['spotlight']);
 
-    const regularPrompt = buildStructuredPrompt(teacher, storeState);
-    const overtimePrompt = buildStructuredPrompt(
-      teacher,
-      storeState,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      overtimeContext,
-    );
+    const regularPrompt = instructorPrompt(teacher, storeState);
+    const overtimePrompt = instructorPrompt(teacher, storeState, overtimeContext);
 
     expect(regularPrompt).not.toContain('request_learning_extension');
     expect(overtimePrompt).toContain('request_learning_extension');
@@ -101,7 +93,7 @@ describe('overtime chat constraints', () => {
   });
 
   it('grounds the overtime instructor in the completed pages instead of only the course name', () => {
-    const groundedPrompt = buildStructuredPrompt(
+    const groundedPrompt = instructorPrompt(
       teacher,
       {
         ...storeState,
@@ -134,11 +126,6 @@ describe('overtime chat constraints', () => {
           },
         ] as StatelessChatRequest['storeState']['scenes'],
       },
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
       overtimeContext,
     );
 
@@ -152,3 +139,17 @@ describe('overtime chat constraints', () => {
     expect(groundedPrompt).not.toContain('scene-2');
   });
 });
+
+function instructorPrompt(
+  agent: AgentConfig,
+  storeState: StatelessChatRequest['storeState'],
+  overtimeContext?: OvertimeChatContext,
+) {
+  return buildChildPrompt(
+    { apiKey: '', messages: [], storeState, config: { agentIds: [agent.id], overtimeContext } },
+    agent,
+    [],
+    [],
+    getOvertimeAgentActions([], agent.role, overtimeContext),
+  );
+}

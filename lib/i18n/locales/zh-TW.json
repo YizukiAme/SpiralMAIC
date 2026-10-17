@@ -245,6 +245,8 @@
     "endQA": "結束問答",
     "softClosing": "繼續討論",
     "error": {
+      "toolCallingRequired": "課堂聊天需要支援工具呼叫的模型。請在設定 → 課程模型配置中為「課堂互動」選擇此類模型；如果此設定由管理員管理，請聯絡管理員。",
+      "geminiNativeRequired": "Gemini 課堂互動需要使用 Google 原生路線。請在設定 → 模型服務中新增 Google（google 預設），再在課程模型配置中為「課堂互動」選擇該模型；如果配置由管理員管理，請聯絡管理員。",
       "emptyAgentResponses": "智能體連續無回應,討論已停止。請重新嘗試或檢查模型設定。",
       "streamInterrupted": "資料串流意外中斷,討論未能完成。請重新嘗試。"
     },
@@ -1275,6 +1277,8 @@
     },
     "apiKey": "API 金鑰",
     "apiKeyDesc": "設定你的API密鑰",
+    "credentialStorageHint": "已加密保存在本執行個體伺服器",
+    "credentialStorageHintDetail": "憑據會加密保存在此執行個體的伺服器上，並由伺服器代你呼叫服務。此部署的運營者可能存取這些憑據，請只在你信任的執行個體上輸入。",
     "apiBaseUrl": "API 端點位址",
     "apiBaseUrlDesc": "設定你的 API 端點位址",
     "apiKeyRequired": "API密鑰不能為空",
@@ -1363,7 +1367,8 @@
       "baidu": "Baidu",
       "claude": "Claude",
       "searxng": "SearXNG",
-      "openai-codex": "Codex"
+      "openai-codex": "Codex",
+      "builtin": "內建讀取服務"
     },
     "modelCount": "個模型",
     "modelSingular": "個模型",
@@ -1901,7 +1906,7 @@
     "tokenPlan": {
       "nav": "Token Plan",
       "title": "Token Plan 一鍵設定",
-      "desc": "選擇你的 Token Plan 服務商並填入金鑰，將自動設定所有已適配的模態（語言模型/影像/影片/語音/網路搜尋）。",
+      "desc": "選擇你的 Token Plan 服務商並填入金鑰，將自動設定所有已適配的模態（語言模型/影像/影片/語音/網路搜尋/網頁擷取）。",
       "selectPlan": "選擇服務商",
       "apiKey": "API 金鑰",
       "updateKey": "更新金鑰",
@@ -1909,7 +1914,7 @@
       "capabilities": "套餐提供的能力",
       "offeredNote": "此方案提供的模型清單。請在生成介面選擇需要使用的模型——是否可用取決於你的方案檔位，不支援的模型會在生成時報錯。",
       "statusConnected": "已連接",
-      "keyStorage": "金鑰加密保存在伺服器上，之後不再顯示。連接後會將此方案推薦的模型套用到課程環節；如果會取代環節目前所用的模型（你選的模型或伺服器預設值），會先徵求你的確認。",
+      "applyModelsNote": "連接後會將此方案推薦的模型套用到課程環節；如果會取代環節目前所用的模型（你選的模型或伺服器預設值），會先徵求你的確認。",
       "saveKey": "儲存並啟用",
       "cancelKeyUpdate": "取消更新",
       "manageAccount": "管理帳號",
@@ -1927,6 +1932,7 @@
       "capTts": "語音合成",
       "capVideo": "影片生成",
       "capWebSearch": "網路搜尋",
+      "capWebFetch": "網頁擷取",
       "saved": "連線設定已儲存",
       "stageInteractive": "互動頁面",
       "stageSlide": "課件頁面",
@@ -2047,7 +2053,8 @@
         "providers": "設定語言模型服務的憑證、API 位址與模型目錄",
         "tts": "設定語音合成服務、音色與模型",
         "video": "設定影片生成服務的憑證與模型目錄",
-        "webSearch": "設定網路搜尋服務與檢索來源"
+        "webSearch": "設定網路搜尋服務與檢索來源",
+        "webFetch": "設定網頁內容擷取服務"
       },
       "nav": "模型服務",
       "notConfigured": "未設定",
@@ -2124,7 +2131,7 @@
       },
       "picker": {
         "follow": "跟隨{{name}}",
-        "providers": "Provider",
+        "providers": "供應商",
         "providerDefault": "預設模型",
         "modelId": "模型 ID",
         "use": "使用",
@@ -2186,7 +2193,7 @@
         },
         "classroom": {
           "name": "課堂互動",
-          "desc": "學習過程中的討論、測驗批改與專題。"
+          "desc": "學習過程中的討論、測驗批改與專題。課堂聊天需要支援工具呼叫的模型。"
         },
         "agent": {
           "name": "智慧體",
@@ -2215,6 +2222,10 @@
         "document": {
           "name": "文件解析",
           "desc": "讀取上傳的文件。"
+        },
+        "webFetch": {
+          "name": "網頁擷取",
+          "desc": "供智慧體讀取工作階段中已獲准的網頁。"
         }
       },
       "source": {
@@ -2228,6 +2239,7 @@
         "lines": {
           "rewrite": "改寫",
           "search": "搜尋",
+          "fetch": "擷取",
           "image": "圖像",
           "video": "影片"
         }
@@ -2260,7 +2272,11 @@
         "unconfirmed": "伺服器未確認已匯入。"
       }
     },
-    "serverConfiguredAddOwn": "如需使用自己的憑證，請新增一個供應商。"
+    "serverConfiguredAddOwn": "如需使用自己的憑證，請新增一個供應商。",
+    "webFetchSettings": "網頁擷取",
+    "webFetchHint": "選擇網頁讀取方式。託管服務只會收到工作階段中已獲准的公開網址。結果仍是不可信資料，失敗時不會切換讀取服務。",
+    "webFetchApiKey": "API 金鑰",
+    "webFetchSharedKeyHint": "此金鑰也用於與同一供應商進行對話。修改或移除金鑰也會影響對話。"
   },
   "profile": {
     "title": "個人資料",

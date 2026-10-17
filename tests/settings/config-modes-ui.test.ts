@@ -241,7 +241,7 @@ describe('the settings sections', () => {
           video: null,
           webSearch: null,
         },
-        lock: ['llm', 'tts', 'image', 'video', 'webSearch'],
+        lock: ['llm', 'tts', 'image', 'video', 'webSearch', 'webFetch'],
       }),
     );
     expect(nav).not.toContain('token-plan');

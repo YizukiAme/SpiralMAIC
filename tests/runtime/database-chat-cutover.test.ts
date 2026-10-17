@@ -1676,7 +1676,7 @@ describe('database runtime chat integration', () => {
       stageId: 'stage-legacy-no-lock',
     });
 
-    await expect(loadChatSessions('stage-legacy-no-lock')).rejects.toThrow(/Web Lock/);
+    await expect(loadChatSessions('stage-legacy-no-lock')).resolves.toEqual([]);
     await expect(
       db.chatSessions.where('stageId').equals('stage-legacy-no-lock').count(),
     ).resolves.toBe(1);
@@ -1901,10 +1901,11 @@ describe('database runtime chat integration', () => {
     ).resolves.toBe(1);
   });
 
-  it('still fails non-empty chat document saves without Web Locks', async () => {
+  it('persists the document and its non-empty chats without Web Locks', async () => {
     vi.stubGlobal('navigator', {});
     stubMemoryLocalStorage();
-    const { saveStageData } = await import('@/lib/utils/stage-storage');
+    const { saveStageData, loadStageData } = await import('@/lib/utils/stage-storage');
+    const { getDocumentStore } = await import('@/lib/document-store');
 
     await expect(
       saveStageData(
@@ -1922,7 +1923,14 @@ describe('database runtime chat integration', () => {
         },
         0,
       ),
-    ).rejects.toThrow(/Web Locks/);
+    ).resolves.toBeUndefined();
+    await expect(getDocumentStore().loadDocument('stage-with-chat')).resolves.toMatchObject({
+      stage: { id: 'stage-with-chat', name: 'Chat stage' },
+    });
+    await expect(loadStageData('stage-with-chat')).resolves.toMatchObject({
+      stage: { id: 'stage-with-chat', name: 'Chat stage' },
+      chats: [chatSession()],
+    });
   });
 
   it('clears document and runtime databases without Web Locks', async () => {
