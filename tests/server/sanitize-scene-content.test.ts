@@ -178,6 +178,12 @@ describe('sanitizeProseHtml — content outside the renderer vocabulary', () => 
     expect(canon(output)).toEqual(canon('<p>ok</p>'));
   });
 
+  it('bounds hostile iframe fallbacks while preserving preceding lesson content', () => {
+    const output = sanitizeProseHtml('<p>Keep this lesson</p>' + '<iframe>'.repeat(3000));
+    expect(output).toContain('<p>Keep this lesson</p>');
+    expect(output).not.toMatch(/<iframe[\s>]/i);
+  });
+
   it('never allows style properties outside the typography vocabulary', () => {
     const output = sanitizeProseHtml(
       '<p style="color:red; background:url(https://evil.test/x); position:fixed; font-size:14px">t</p>',

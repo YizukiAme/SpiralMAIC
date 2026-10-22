@@ -74,6 +74,11 @@ export interface MaterialExtractionState {
   status: MaterialExtractionStatus;
   attempts: number;
   error?: string;
+  /**
+   * The host's stable classification of a terminal failure, when it had one.
+   * Opaque to the package: it is stored and read back, never interpreted.
+   */
+  reasonCode?: string;
   stats?: MaterialExtractionStats;
   extractorVersion?: string;
 }
@@ -208,10 +213,16 @@ export interface AgentSessionMaterialStore {
   ): Promise<ClaimedMaterialExtraction | null>;
   heartbeatExtraction(materialId: string, workerId: string): Promise<boolean>;
   completeExtraction(input: CompleteMaterialExtractionInput): Promise<boolean>;
+  /**
+   * `reasonCode` is kept only when the attempt settles as `failed`: a retry
+   * back to `pending` clears it, and a failure without one never keeps an
+   * earlier attempt's code.
+   */
   settleExtractionFailure(
     materialId: string,
     workerId: string,
     error: string,
     retryable: boolean,
+    reasonCode?: string,
   ): Promise<MaterialExtractionFailureSettlement | null>;
 }

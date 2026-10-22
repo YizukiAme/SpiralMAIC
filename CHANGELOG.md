@@ -4,7 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased] - 2026-10-17
+## [Unreleased] - 2026-10-22
+
+- Add the upstream material library: folders, reusable sources, owner-scoped extraction and conversation attachments.
+- Configure provider-local TTS voices and add opt-in DeepSeek and Firecrawl web tools.
+- Improve selectable whiteboards, chart labels, inline math, SVG recovery and classroom exports.
+- Host interactive scene libraries with the application while keeping its patched math engine separate.
+- Preserve access-code protection on every material-library endpoint and update vulnerable sanitizer, MCP and query-parser dependencies.
+- Retire the shut-down built-in Veo preview provider; existing configurations fall back without blocking startup. Other configured video providers remain available.
+
+### Previous maintenance — 2026-10-17
 
 - Move Revisit teach-back onto the shared Pi runtime without losing page gates, student states or assistant rescue.
 - Retire the legacy chat endpoint; keep Codex sign-in, Fast mode and overtime on the surviving runtime.
