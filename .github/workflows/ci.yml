@@ -51,7 +51,10 @@ jobs:
   check:
     name: Lint, Typecheck & Unit Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # The serialized root suite takes ~21 minutes on the hosted runner; leave
+    # room for install/quality checks and the workspace suites without dropping
+    # coverage or increasing test-level timeouts.
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
