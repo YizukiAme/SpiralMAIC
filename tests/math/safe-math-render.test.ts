@@ -116,6 +116,24 @@ describe('math rendering with user macro definitions disabled', () => {
     // `\@eqnsw` is undefined until an align environment sets it to "1".
     const visibleText = (html: string) => html.replace(/<[^>]*>/g, '');
 
+    it('does not treat inherited namespace entries as chat math macros', () => {
+      const name = '\\dependencyProbe';
+      const previous = Object.getOwnPropertyDescriptor(Object.prototype, name);
+      let html: string;
+      try {
+        Object.defineProperty(Object.prototype, name, {
+          value: 'POLLUTED',
+          configurable: true,
+        });
+        html = chat(`$$\n${name}\n$$`);
+      } finally {
+        if (previous) Object.defineProperty(Object.prototype, name, previous);
+        else Reflect.deleteProperty(Object.prototype, name);
+      }
+      expect(visibleText(html)).not.toContain('POLLUTED');
+      expect(visibleText(html)).toContain(name);
+    });
+
     it('across messages', () => {
       const before = chat(PROBE);
       expect(visibleText(before)).toContain('\\@eqnsw');

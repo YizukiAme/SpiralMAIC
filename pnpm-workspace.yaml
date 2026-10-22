@@ -4,6 +4,15 @@ packages:
   - "!packages/docs" # standalone docs sub-app: own lockfile, build, deploy
 
 overrides:
+  # Keep OMML conversion, but remove get-dom's obsolete jsdom/request stack.
+  # get-dom 13 uses the current JSDOM constructor; its browser adapter is unchanged.
+  "omml2mathml@1.3.0>get-dom": "13.0.0"
+  "get-dom@13.0.0>jsdom": "29.1.1"
+  # Chat uses the application's 0.18 stylesheet. Leave the versioned interactive
+  # scene assets alone: older authored scenes can depend on 0.16's CSS classes.
+  "@streamdown/math>katex": "0.18.4"
+  "rehype-katex@7.0.1>katex": "0.18.4"
+  "micromark-extension-math@3.1.0>katex": "0.18.4"
   "form-data@2.3.3": "2.5.6"
   "path-to-regexp@8.3.0": "8.4.0"
   "picomatch@2.3.1": "2.3.2"

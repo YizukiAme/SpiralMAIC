@@ -15,7 +15,8 @@ const stored = (latex) => {
   return `<span data-inline-math="${escaped}">${escaped}</span>`;
 };
 const many = Array.from({ length: 148 }, (_, i) => stored(`x_{${i}}`)).join(' ');
-const content = `<p>Energy ${stored('E=mc^2')} and ${stored('\\frac{a}{b}')}.</p><p>${many}</p>`;
+const probe = `<span id="namespace-probe">${stored('\\dependencyProbe')}</span>`;
+const content = `<p>Energy ${stored('E=mc^2')} and ${stored('\\frac{a}{b}')}.</p><p>${many} ${probe}</p>`;
 
 const scene = {
   id: 'inline-math-scene',
@@ -66,6 +67,11 @@ const browserLauncher = {
         await page.evaluate(() => {
           window.requestIdleCallback = () => 0;
           window.cancelIdleCallback = () => {};
+          // An unrelated prototype-pollution bug must not create a math macro.
+          Object.defineProperty(Object.prototype, '\\dependencyProbe', {
+            value: 'POLLUTED',
+            configurable: true,
+          });
         });
         return addScriptTag(tag);
       };
@@ -78,6 +84,12 @@ const browserLauncher = {
             formulas: formulas.length,
             typeset: formulas.filter((formula) => formula.classList.contains('katex')).length,
             fractions: document.querySelectorAll('#preview-slide-root .katex .mfrac').length,
+            inheritedMacroExpanded: document
+              .querySelector('#namespace-probe')
+              .textContent.includes('POLLUTED'),
+            undefinedMacroPreserved: document
+              .querySelector('#namespace-probe')
+              .textContent.includes('\\dependencyProbe'),
             variableFont: variable ? getComputedStyle(variable).fontFamily : null,
             mathFontLoaded: [...document.fonts].some(
               (face) => face.family === 'KaTeX_Math' && face.status === 'loaded',
@@ -103,9 +115,11 @@ const png = Buffer.from(
 );
 assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
 assert.deepEqual(state, {
-  formulas: 150,
+  formulas: 151,
   typeset: 150,
   fractions: 1,
+  inheritedMacroExpanded: false,
+  undefinedMacroPreserved: true,
   variableFont: 'KaTeX_Math',
   mathFontLoaded: true,
 });

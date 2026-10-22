@@ -46,6 +46,9 @@
     "vitest": "4.1.11"
   },
   "overrides": {
+    "@openmaic/renderer": {
+      "katex": "0.18.4"
+    },
     "esbuild": "0.28.1"
   }
 }
