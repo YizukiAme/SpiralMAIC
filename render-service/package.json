@@ -27,7 +27,7 @@
     "hyperframes-resource-producer": "npm:@hyperframes/producer@0.8.37",
     "motion": "^12.27.5",
     "parse5": "^8.0.1",
-    "puppeteer-core": "^25.6.0",
+    "puppeteer-core": "25.16.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "shiki": "^3.21.0",

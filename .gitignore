@@ -84,6 +84,7 @@ next-env.d.ts
 # Private product and planning docs
 /community/
 # Eval results
+eval/whiteboard-shapes/results/
 eval/whiteboard-layout/results/
 eval/outline-language/results/
 eval/orchestration/results/

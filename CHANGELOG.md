@@ -4,7 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased] - 2026-10-22
+## [Unreleased] - 2026-10-27
+
+- Adapt the homepage, course library and settings for phones while preserving Spiral review and learning controls.
+- Recover playback after rejected stored actions and coordinate interactive media with narration.
+- Preserve equation and table metadata, repair PowerPoint math export, and fit generated images inside their assigned boxes.
+- Add whiteboard rotation and custom paths, bound parallel narration requests, and follow the interface language for speech defaults.
+- Keep agent prompts stable as materials change and reap exited Chromium processes in the render container.
+- Update vulnerable validation, HTTP transport, URI parsing and browser automation dependencies.
+
+### Previous maintenance — 2026-10-22
 
 - Add the upstream material library: folders, reusable sources, owner-scoped extraction and conversation attachments.
 - Configure provider-local TTS voices and add opt-in DeepSeek and Firecrawl web tools.

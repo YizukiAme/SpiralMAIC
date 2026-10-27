@@ -60,6 +60,62 @@ test.describe('Spiral v0.4 core loop', () => {
     scenario = await seedV032SpiralScenario(page);
   });
 
+  test('a short phone viewport keeps Spiral controls and review reachable', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 430 });
+    const home = page.getByTestId('home-page');
+    await expect(home).toHaveAttribute('data-mobile', 'true');
+    const history = page.getByTestId('home-history-open');
+    const mode = page.getByRole('switch', { name: 'Spiral mode' });
+    await expect(mode).toBeChecked();
+    const historyBounds = (await history.boundingBox())!;
+    const controlsBounds = (await page.locator('.home-top-controls').boundingBox())!;
+    expect(controlsBounds.x).toBeGreaterThanOrEqual(historyBounds.x + historyBounds.width);
+    expect(controlsBounds.x + controlsBounds.width).toBeLessThanOrEqual(320);
+
+    const hero = page.locator('.home-hero');
+    await hero.hover();
+    await page.mouse.wheel(0, 1000);
+    const review = page.getByRole('button', { name: 'Review challenge' });
+    await expect(review).toBeInViewport();
+    await review.click();
+    await expect(page.getByRole('button', { name: 'Reverse 1' })).toBeVisible();
+    await page.keyboard.press('Escape');
+
+    await history.click();
+    await expect(page.getByTestId('home-library-drawer')).toBeVisible();
+    await page.getByRole('link', { name: 'Photosynthesis review', exact: true }).click();
+    await expect(page.getByTestId('home-library-drawer')).not.toBeVisible();
+    await expect(page.getByRole('button', { name: 'Reverse 1' })).toBeVisible();
+  });
+
+  test('phone Spiral library keeps general settings reachable', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByTestId('home-history-open').click();
+    const library = page.getByTestId('home-library-drawer');
+    const settings = library.getByRole('button', { name: 'All settings', exact: true });
+    await expect(settings).toBeInViewport();
+    await settings.click();
+    await expect(library).not.toBeVisible();
+    await expect(page.getByRole('dialog', { name: 'Settings', exact: true })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('switch', { name: 'Spiral mode' })).toBeChecked();
+  });
+
+  test('phone library can import another course after the first one', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByTestId('home-history-open').click();
+    const library = page.getByTestId('home-library-drawer');
+    await expect(
+      library.getByRole('link', { name: 'Photosynthesis review', exact: true }),
+    ).toBeVisible();
+    const importCourse = library.getByRole('button', { name: 'Import Classroom', exact: true });
+    await expect(importCourse).toBeInViewport();
+    const chooser = page.waitForEvent('filechooser');
+    await importCourse.click();
+    const input = (await chooser).element();
+    expect(await input.getAttribute('accept')).toBe('.zip');
+  });
+
   test('reads v0.3.2 data and completes Reverse Challenge → report → Study Studio → overtime', async ({
     page,
     mockApi,

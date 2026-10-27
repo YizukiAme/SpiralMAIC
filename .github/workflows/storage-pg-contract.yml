@@ -74,6 +74,9 @@ jobs:
       # left off it skips everywhere, since no other job runs the app suites
       # against a database.
       - name: App-domain PostgreSQL contracts
+        # These suites create schemas and run races against a shared database
+        # service, so a test can take several seconds on a busy runner. The
+        # default 5 s test/hook timeout made unrelated PRs fail intermittently.
         run: |
           pnpm exec vitest run \
             tests/lib/whiteboard/runtime-store.pg.test.ts \
