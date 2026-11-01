@@ -10,6 +10,7 @@ import { buildDirectorPrompt, buildUserPrompt, toHistoryMessages } from './promp
 import { createDirectorCompactionRuntime } from './director-compaction';
 import type { DirectorToolTraceEntry, SendEvent } from './types';
 import type { ChildRuntimeMode } from './child-runtime';
+import { createAbortableSend } from './send';
 import { buildCallAgentTool } from './tools/call-agent';
 import { buildCloseSessionTool } from './tools/close-session';
 import { buildCueUserTool } from './tools/cue-user';
@@ -40,8 +41,6 @@ export async function runPiDirectorLoop(opts: {
   contextWindow?: number;
   abortSignal: AbortSignal;
   signal: AbortSignal;
-  maxAgentTurns: number;
-  maxActionsPerAgent: number;
   enableWhiteboardTools: boolean;
   childRuntimeMode?: ChildRuntimeMode;
   enableNativeChildSpotlight?: boolean;
@@ -51,8 +50,10 @@ export async function runPiDirectorLoop(opts: {
   nativeWhiteboardLearnerKey?: string;
   requestStartManualVisibilityRevision?: number;
 }): Promise<void> {
+  const signal = AbortSignal.any([opts.signal, opts.abortSignal]);
+  if (signal.aborted) return;
+  const send = createAbortableSend(opts.send, signal);
   const revisitMode = Boolean(opts.body.config.revisitGateContext);
-  if (revisitMode) opts = { ...opts, maxAgentTurns: 1 };
   if (validateOvertimeChatContext(opts.body.config.overtimeContext, opts.body.storeState)) {
     opts = {
       ...opts,
@@ -82,7 +83,6 @@ export async function runPiDirectorLoop(opts: {
         })
       : undefined;
   const directorToolTrace: DirectorToolTraceEntry[] = [];
-  const maxDirectorToolCalls = Math.max(opts.maxAgentTurns * 3, opts.maxAgentTurns + 3);
   const piAgentResponses: AgentTurnSummary[] = [];
   const piWhiteboardLedger: WhiteboardActionRecord[] = [];
   const requestStartCurrentScene = (() => {
@@ -124,7 +124,7 @@ export async function runPiDirectorLoop(opts: {
   ): Promise<boolean> => {
     if (userCued) return false;
     userCued = true;
-    await opts.send({ type: 'cue_user', data });
+    await send({ type: 'cue_user', data });
     return true;
   };
   const closeSession = async (data: { endReason?: string }): Promise<boolean> => {
@@ -139,7 +139,7 @@ export async function runPiDirectorLoop(opts: {
     maxOutputTokens: opts.maxOutputTokens,
     thinkingConfig: opts.thinkingConfig,
     source: 'pi-chat-director',
-    abortSignal: opts.abortSignal,
+    abortSignal: signal,
   });
   const compactionRuntime = createDirectorCompactionRuntime({
     streamFn,
@@ -157,7 +157,7 @@ export async function runPiDirectorLoop(opts: {
     buildCallAgentTool({
       body: opts.body,
       agentConfigs: opts.agentConfigs,
-      send: opts.send,
+      send,
       languageModel: opts.languageModel,
       onAgentDone: (summary) => {
         totalAgents += 1;
@@ -170,9 +170,7 @@ export async function runPiDirectorLoop(opts: {
       },
       thinkingConfig: opts.thinkingConfig,
       maxOutputTokens: opts.maxOutputTokens,
-      abortSignal: opts.abortSignal,
-      maxAgentTurns: opts.maxAgentTurns,
-      getAgentTurnCount,
+      abortSignal: signal,
       getAgentResponses: () => [
         ...(opts.body.directorState?.agentResponses ?? []),
         ...piAgentResponses,
@@ -180,7 +178,6 @@ export async function runPiDirectorLoop(opts: {
       // storeState is already the request-start whiteboard snapshot, so replay
       // only mutations produced during this request in child-agent prompts.
       getWhiteboardLedger: () => piWhiteboardLedger,
-      maxActionsPerAgent: opts.maxActionsPerAgent,
       enableWhiteboardTools: opts.enableWhiteboardTools,
       childRuntimeMode: opts.childRuntimeMode ?? 'legacy',
       enableNativeChildSpotlight: opts.enableNativeChildSpotlight === true,
@@ -228,7 +225,7 @@ export async function runPiDirectorLoop(opts: {
 
   const director = buildAgent({
     streamFn,
-    systemPrompt: buildDirectorPrompt(opts.body, opts.agentConfigs, opts.maxAgentTurns),
+    systemPrompt: buildDirectorPrompt(opts.body, opts.agentConfigs),
     tools,
     allowedToolNames: new Set(tools.map((tool) => tool.name)),
     history: toHistoryMessages(opts.body.messages, null),
@@ -263,7 +260,7 @@ export async function runPiDirectorLoop(opts: {
       if (revisitMode && hasVisibleAgentTurn()) {
         await cueUser({ fromAgentId: piAgentResponses.at(-1)?.agentId });
       }
-      const terminate = sessionClosed || userCued || directorToolCalls >= maxDirectorToolCalls;
+      const terminate = sessionClosed || userCued;
       if (!terminate && !evidenceError) return undefined;
       return {
         ...(terminate ? { terminate: true } : {}),
@@ -272,52 +269,57 @@ export async function runPiDirectorLoop(opts: {
     },
   });
 
+  const abortDirector = () => director.abort();
+  signal.addEventListener('abort', abortDirector, { once: true });
   try {
+    signal.throwIfAborted();
     const directorEvidence = [opts.elementReference?.directorSummary, opts.interactiveStateNote]
       .filter(Boolean)
       .join('\n');
     await director.prompt(buildUserPrompt(opts.body, directorEvidence || undefined));
     await director.waitForIdle();
+    if (signal.aborted) return;
+
+    // Pi settles provider failures in state rather than rejecting prompt(). Let
+    // the route log and stream the actual reason instead of emitting a normal done.
+    if (director.state.errorMessage) throw new Error(director.state.errorMessage);
+
+    if (revisitListenerFailed) return;
+    if (revisitMode && !hasVisibleAgentTurn()) {
+      throw new Error('No listener response was completed. Please retry this turn.');
+    }
+
+    if (!sessionClosed && !userCued && hasAgentContent()) {
+      await cueUser({ fromAgentId: piAgentResponses.at(-1)?.agentId });
+    }
+
+    await send({
+      type: 'done',
+      data: {
+        totalActions,
+        totalAgents,
+        agentHadContent,
+        cueUserReceived: userCued,
+        sessionClosed,
+        endReason,
+        directorCompaction: compactionRuntime.getTrace(),
+        directorToolTrace,
+        directorState: {
+          turnCount: getAgentTurnCount(),
+          agentResponses: [...(opts.body.directorState?.agentResponses ?? []), ...piAgentResponses],
+          // Return only this turn's whiteboard mutations. The cross-turn board
+          // state is carried by storeState's request-start snapshot, and Pi child
+          // prompts replay only the current-turn ledger (see getWhiteboardLedger
+          // above), so persisting the historical ledger just inflated session
+          // state and follow-up payloads without being read back.
+          whiteboardLedger: piWhiteboardLedger,
+        },
+      },
+    });
+  } catch (error) {
+    if (!signal.aborted) throw error;
   } finally {
+    signal.removeEventListener('abort', abortDirector);
     compactionRuntime.dispose();
   }
-
-  if (opts.signal.aborted) return;
-
-  // Pi settles provider failures in state rather than rejecting prompt(). Let
-  // the route log and stream the actual reason instead of emitting a normal done.
-  if (director.state.errorMessage) throw new Error(director.state.errorMessage);
-
-  if (revisitListenerFailed) return;
-  if (revisitMode && !hasVisibleAgentTurn()) {
-    throw new Error('No listener response was completed. Please retry this turn.');
-  }
-
-  if (!sessionClosed && !userCued && hasAgentContent()) {
-    await cueUser({ fromAgentId: piAgentResponses.at(-1)?.agentId });
-  }
-
-  await opts.send({
-    type: 'done',
-    data: {
-      totalActions,
-      totalAgents,
-      agentHadContent,
-      cueUserReceived: userCued,
-      sessionClosed,
-      endReason,
-      directorCompaction: compactionRuntime.getTrace(),
-      directorToolTrace,
-      directorState: {
-        turnCount: getAgentTurnCount(),
-        agentResponses: [...(opts.body.directorState?.agentResponses ?? []), ...piAgentResponses],
-        // Return only this turn's whiteboard mutations. The cross-turn board
-        // state is carried by storeState's request-start snapshot, and Pi child
-        // prompts replay only the current-turn ledger (see getWhiteboardLedger
-        // above), so persisting the historical ledger just inflated session
-        // state and follow-up payloads without being read back.
-        whiteboardLedger: piWhiteboardLedger,
-      },
-    },
-  });
 }

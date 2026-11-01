@@ -2375,6 +2375,12 @@
         "processing_interrupted": {
           "label": "Análisis sin completar",
           "description": "No se pudo completar el análisis. Puedes volver a intentarlo más tarde."
+        },
+        "too_many_pages": {
+          "label": "Demasiadas páginas",
+          "description": "Este PDF tiene {{pages}} páginas y supera el límite de análisis de {{maxPages}} páginas. Divídelo antes de subirlo o sube solo los capítulos que necesites.",
+          "descriptionWithoutCount": "Este PDF supera el límite de análisis de {{maxPages}} páginas. Divídelo antes de subirlo o sube solo los capítulos que necesites.",
+          "descriptionWithoutLimit": "Este PDF tiene más páginas de las que acepta el servicio de análisis. Divídelo antes de subirlo o sube solo los capítulos que necesites."
         }
       },
       "status": {
@@ -2518,6 +2524,11 @@
     "homeAria": "Back to home",
     "currentSession": "Current chat",
     "startLearning": "Comenzar a aprender",
+    "classroomMode": "Modo del aula",
+    "learningMode": "Aprender",
+    "editingMode": "Editar",
+    "editingUnavailableGenerating": "No se puede editar mientras se genera el curso.",
+    "fullscreenLearning": "Aprender en pantalla completa",
     "time": {
       "justNow": "Just now",
       "minutesAgo": "{{count}}m ago",

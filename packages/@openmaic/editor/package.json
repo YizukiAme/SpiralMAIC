@@ -1,6 +1,6 @@
 {
   "name": "@openmaic/editor",
-  "version": "0.0.12",
+  "version": "0.0.13",
   "description": "Composable slide editing core, React surface, and UI for OpenMAIC.",
   "type": "module",
   "main": "./dist/core/index.js",
@@ -41,6 +41,7 @@
   },
   "dependencies": {
     "@openmaic/dsl": "workspace:^",
+    "@openmaic/geometry": "workspace:^",
     "@openmaic/renderer": "workspace:^",
     "immer": "^11.1.3",
     "katex": "^0.18.4",
@@ -56,8 +57,7 @@
     "prosemirror-schema-list": "^1.5.1",
     "prosemirror-state": "^1.4.4",
     "prosemirror-view": "^1.41.5",
-    "react-colorful": "^5.7.0",
-    "@openmaic/geometry": "workspace:^"
+    "react-colorful": "^5.7.0"
   },
   "peerDependencies": {
     "react": ">=18",
@@ -78,6 +78,6 @@
     "rollup": "^4.63.1",
     "rollup-plugin-preserve-directives": "^0.4.0",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "@openmaic/geometry",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Pure SVG path and shape geometry validation for OpenMAIC producers and renderers.",
   "type": "module",
   "main": "./dist/index.js",
@@ -30,9 +30,9 @@
     "tinycolor2": "^1.6.0"
   },
   "devDependencies": {
+    "@types/tinycolor2": "^1.4.6",
     "typescript": "^5",
-    "vitest": "^4.1.8",
-    "@types/tinycolor2": "^1.4.6"
+    "vitest": "^4.1.12"
   },
   "license": "MIT",
   "repository": {

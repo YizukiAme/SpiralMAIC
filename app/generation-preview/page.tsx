@@ -60,7 +60,7 @@ import { buildAgentProfileRequestBody } from '@/lib/generation/agent-profile-req
 import { buildModelRequestHeaders, getCurrentModelConfig } from '@/lib/utils/model-config';
 import type { PersistedAgentConfig } from '@/lib/types/stage';
 
-import { StepVisualizer } from './components/visualizers';
+import { StepVisualizer } from '@/components/generation/step-visualizers';
 
 const log = createLogger('GenerationPreview');
 

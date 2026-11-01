@@ -2375,6 +2375,12 @@
         "processing_interrupted": {
           "label": "Phân tích chưa hoàn tất",
           "description": "Không thể hoàn tất phân tích. Bạn có thể thử lại sau."
+        },
+        "too_many_pages": {
+          "label": "Quá nhiều trang",
+          "description": "Tệp PDF này có {{pages}} trang, vượt quá giới hạn phân tích {{maxPages}} trang. Hãy chia nhỏ tệp rồi tải lên, hoặc chỉ tải lên các chương cần thiết.",
+          "descriptionWithoutCount": "Tệp PDF này vượt quá giới hạn phân tích {{maxPages}} trang. Hãy chia nhỏ tệp rồi tải lên, hoặc chỉ tải lên các chương cần thiết.",
+          "descriptionWithoutLimit": "Tệp PDF này có nhiều trang hơn mức dịch vụ phân tích chấp nhận. Hãy chia nhỏ tệp rồi tải lên, hoặc chỉ tải lên các chương cần thiết."
         }
       },
       "status": {
@@ -2518,6 +2524,11 @@
     "homeAria": "Back to home",
     "currentSession": "Current chat",
     "startLearning": "Bắt đầu học",
+    "classroomMode": "Chế độ lớp học",
+    "learningMode": "Học",
+    "editingMode": "Chỉnh sửa",
+    "editingUnavailableGenerating": "Không thể chỉnh sửa khi khóa học đang được tạo.",
+    "fullscreenLearning": "Học toàn màn hình",
     "time": {
       "justNow": "Just now",
       "minutesAgo": "{{count}}m ago",

@@ -12,6 +12,6 @@ export default defineConfig({
   },
   test: {
     include: ['tests/**/*.test.ts'],
-    setupFiles: ['tests/setup-env.ts'],
+    setupFiles: ['tests/setup-env.ts', 'tests/pg-contract-database.ts'],
   },
 });

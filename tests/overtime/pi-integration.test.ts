@@ -64,7 +64,7 @@ describe('Pi post-class overtime integration', () => {
 
   it('uses the completed course digest and durable-extension policy in both child runtimes', () => {
     const request = body();
-    const director = buildDirectorPrompt(request, [teacher], 6);
+    const director = buildDirectorPrompt(request, [teacher]);
     const legacy = buildChildPrompt(request, teacher, [], [], ['request_learning_extension']);
     const native = buildNativeChildPrompt(request, teacher, [], ['request_learning_extension']);
     for (const prompt of [director, legacy, native]) {
@@ -84,7 +84,6 @@ describe('Pi post-class overtime integration', () => {
       messageId: 'message-1',
       send,
       onActionDone: vi.fn(),
-      maxActionsPerAgent: 8,
       enableWhiteboardTools: true,
     });
     expect(tools.map((tool) => tool.name)).toEqual(['request_learning_extension']);
@@ -111,7 +110,6 @@ describe('Pi post-class overtime integration', () => {
       messageId: 'message-1',
       send: vi.fn(),
       onActionDone: vi.fn(),
-      maxActionsPerAgent: 8,
       enableWhiteboardTools: false,
     };
     expect(buildChildActionTools(options).map((tool) => tool.name)).not.toContain(
@@ -146,11 +144,8 @@ describe('Pi post-class overtime integration', () => {
       onActionDone: vi.fn(),
       thinkingConfig: { mode: 'disabled', enabled: false },
       abortSignal: new AbortController().signal,
-      maxAgentTurns: 6,
-      getAgentTurnCount: () => 0,
       getAgentResponses: () => [],
       getWhiteboardLedger: () => [],
-      maxActionsPerAgent: 8,
       enableWhiteboardTools: true,
       childRuntimeMode: 'native',
     });
@@ -198,11 +193,8 @@ describe('Pi post-class overtime integration', () => {
       onActionDone: vi.fn(),
       thinkingConfig: { mode: 'disabled', enabled: false },
       abortSignal: new AbortController().signal,
-      maxAgentTurns: 6,
-      getAgentTurnCount: () => 0,
       getAgentResponses: () => [],
       getWhiteboardLedger: () => [],
-      maxActionsPerAgent: 8,
       enableWhiteboardTools: true,
       childRuntimeMode: 'legacy',
     });

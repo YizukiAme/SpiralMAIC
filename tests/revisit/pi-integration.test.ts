@@ -82,11 +82,8 @@ function makeTool(request = body, childRuntimeMode: 'legacy' | 'native' = 'legac
     onActionDone: () => {},
     thinkingConfig: { mode: 'disabled', enabled: false },
     abortSignal: new AbortController().signal,
-    maxAgentTurns: 1,
-    getAgentTurnCount: () => summaries.length,
     getAgentResponses: () => [],
     getWhiteboardLedger: () => [],
-    maxActionsPerAgent: 0,
     enableWhiteboardTools: false,
     childRuntimeMode,
   });
@@ -237,8 +234,6 @@ describe('Revisit on the shared Pi runtime', () => {
         thinkingConfig: { mode: 'disabled', enabled: false },
         abortSignal: controller.signal,
         signal: controller.signal,
-        maxAgentTurns: 6,
-        maxActionsPerAgent: 0,
         enableWhiteboardTools: false,
         childRuntimeMode: runtime,
       });
@@ -267,8 +262,6 @@ describe('Revisit on the shared Pi runtime', () => {
         thinkingConfig: { mode: 'disabled', enabled: false },
         abortSignal: controller.signal,
         signal: controller.signal,
-        maxAgentTurns: 6,
-        maxActionsPerAgent: 0,
         enableWhiteboardTools: false,
       }),
     ).rejects.toThrow(/listener.*retry/i);
@@ -314,8 +307,6 @@ describe('Revisit on the shared Pi runtime', () => {
       thinkingConfig: { mode: 'disabled', enabled: false },
       abortSignal: controller.signal,
       signal: controller.signal,
-      maxAgentTurns: 6,
-      maxActionsPerAgent: 0,
       enableWhiteboardTools: false,
     });
     expect(events.filter((e) => e.type === 'agent_start')).toHaveLength(1);

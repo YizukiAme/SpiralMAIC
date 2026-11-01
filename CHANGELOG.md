@@ -4,7 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased] - 2026-10-27
+## [Unreleased] - 2026-11-01
+
+- Keep edits when leaving the classroom, while keeping Revisit practice decks separate from the original course.
+- Add Learn/Edit workspace tabs and show request progress until the first generated scene is ready.
+- Stop classroom responses promptly on cancellation and retain one listener response per teach-back turn.
+- Improve material images, PDF error messages, formula exports, ASR formats and Gemini speech playback.
+- Keep large media uploads outside database transactions and bound connection waits.
+- Patch HTTP adapter, query parsing and test tooling dependencies; remove an unused legacy converter.
+
+### Previous maintenance — 2026-10-27
 
 - Adapt the homepage, course library and settings for phones while preserving Spiral review and learning controls.
 - Recover playback after rejected stored actions and coordinate interactive media with narration.
