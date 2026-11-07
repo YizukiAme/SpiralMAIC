@@ -22,7 +22,9 @@ jobs:
   storage-pg-contract:
     name: Storage Contract (PostgreSQL 16)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # The package and app suites run sequentially after the workspace build.
+    # Keep time for all 38 app suites and container cleanup on hosted runners.
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16
