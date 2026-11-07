@@ -1,4 +1,5 @@
 import { withAccessCode } from '@/lib/server/with-access-code';
+import { isPBLRoleSession } from '@/lib/pbl/v3/session-kind';
 
 /**
  * Agent runtime control plane for cancellation.
@@ -23,6 +24,8 @@ async function POSTHandler(req: NextRequest, { params }: { params: Promise<{ id:
 
   return withRequestOwner(req, async ({ ownerId }, responseHeaders) => {
     const { id } = await params;
+    if (isPBLRoleSession(id))
+      return new Response('Not found', { status: 404, headers: responseHeaders });
     const store = await getAgentSessionStore();
     const meta = await store.getSession(id);
     if (!meta || meta.ownerId !== ownerId) {

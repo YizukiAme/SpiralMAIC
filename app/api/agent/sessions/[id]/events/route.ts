@@ -1,4 +1,5 @@
 import { withAccessCode } from '@/lib/server/with-access-code';
+import { isPBLRoleSession } from '@/lib/pbl/v3/session-kind';
 
 /**
  * Agent runtime control plane — the session event stream (SSE).
@@ -78,6 +79,8 @@ async function GETHandler(req: NextRequest, { params }: { params: Promise<{ id: 
     principal: { ownerId },
     responseHeaders,
   } = owner;
+  if (isPBLRoleSession(id))
+    return new Response('Not found', { status: 404, headers: responseHeaders });
   const store = await getAgentSessionStore();
   const meta = await store.getSession(id);
   if (!meta) {

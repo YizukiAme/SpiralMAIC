@@ -22,6 +22,7 @@ import { completedClassroomImportOutline } from './classroom-import-outline';
 import { putAsset } from '@/lib/media/asset-pool';
 import { isStorageFullFailure } from '@/lib/media/media-failure';
 import type JSZip from 'jszip';
+import { installClassroomProjects } from '@/lib/pbl/v3/package-client';
 import type { AssetMeta, Slide } from '@openmaic/dsl';
 import type { Stage } from '@/lib/types/stage';
 
@@ -419,6 +420,8 @@ export function useImportClassroom(onSuccess?: (importedStageId: string) => void
           toast.error(t('import.error.missingData'), { id: toastId });
           return;
         }
+
+        await installClassroomProjects(zip, manifest);
 
         // 3. Generate new IDs
         const newStageId = nanoid();

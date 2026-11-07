@@ -27,6 +27,7 @@ import {
 } from '@/lib/store/stage';
 import type { PendingChange } from '@/lib/utils/stage-storage';
 import type { Scene, Stage } from '@/lib/types/stage';
+import { unseenScenes } from '@/lib/store/known-scenes';
 
 const stage: Stage = { id: 'stage-1', name: 'Stage', createdAt: 1, updatedAt: 1 };
 
@@ -156,6 +157,18 @@ describe('beforeunload', () => {
     expect(wouldLoseChanges).toBe(true);
     expect(sentRequests).toBe(1);
     expect(incrementalSave.mock.calls.at(-1)![2].scenes[0].title).toBe('second');
+  });
+
+  it('does not treat transient revisit scenes as removable pages of the original course', () => {
+    const revisitScene = scene('revisit-only');
+    useStageStore.setState({
+      persistenceScope: 'transient-revisit',
+      scenes: [revisitScene],
+    });
+
+    expect(unseenScenes(stage.id, [revisitScene], [scene('scene-1'), scene('scene-2')])).toEqual([
+      revisitScene,
+    ]);
   });
 
   it('never writes a transient revisit deck through pending edits from its original course', async () => {

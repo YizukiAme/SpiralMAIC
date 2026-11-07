@@ -33,6 +33,17 @@ overrides:
   "brace-expansion@>=1.0.0 <1.1.21": "1.1.21"
   "brace-expansion@>=2.0.0 <2.1.7": "2.1.7"
   "brace-expansion@>=5.0.0 <5.0.12": "5.0.12"
+  # Monaco's vendored sanitizer is replaced by the same version in prepare-code-editor.
+  "monaco-editor>dompurify": "3.4.17"
+  # These callers use glob/globSync and Minimatch.match; keep older regex-based
+  # consumers on their own majors instead of replacing every minimatch instance.
+  "e2b@2.31.0>glob": "14.0.2"
+  "ts-json-schema-generator@2.9.0>glob": "14.0.2"
+  "eslint@10>minimatch": "11.0.1"
+  "@eslint/config-array@0.23>minimatch": "11.0.1"
+  "@typescript-eslint/typescript-estree@8>minimatch": "11.0.1"
+  "@ts-morph/common@0.27>minimatch": "11.0.1"
+  "hyperframes@0.7.60>puppeteer-core": "25.16.0"
 
 # ESLint 10 is bridged through @eslint/compat until Next's plugins widen their
 # peer ranges. TypeScript 6 is the official API companion for the TS 7 CLI.

@@ -56,6 +56,21 @@ describe('proxy access-token gate', () => {
     expect(response.status).toBe(401);
   });
 
+  it('lets the signed preview resolver reach its route-level authentication', () => {
+    const request = new NextRequest('http://localhost/api/sandbox/preview/resolve', {
+      method: 'POST',
+      body: '{}',
+    });
+    expect(proxy(request).headers.get('x-middleware-next')).toBe('1');
+  });
+
+  it.each(['/api/sandbox/preview', '/api/sandbox/preview/resolve/extra'])(
+    'keeps the access-code gate on %s',
+    (path) => {
+      expect(proxy(new NextRequest(`http://localhost${path}`)).status).toBe(401);
+    },
+  );
+
   it('rejects a missing cookie', async () => {
     const response = await proxy(apiRequest());
     expect(response.status).toBe(401);

@@ -1,0 +1,20 @@
+import { withAccessCode } from '@/lib/server/with-access-code';
+
+import { sandboxBody, sandboxPrincipalResponse } from '@/lib/server/sandbox/http';
+import { sandboxInvalid } from '@/lib/sandbox/errors';
+import { LearningStore } from '@/lib/server/pbl-v3/store';
+
+export const runtime = 'nodejs';
+export const POST = withAccessCode(POSTHandler);
+
+/** Idempotent UI acknowledgement; never advances a learning revision or allocates compute. */
+function POSTHandler(request: Request) {
+  return sandboxPrincipalResponse(request, async (principal) => {
+    const body = await sandboxBody(request);
+    if (typeof body.studyId !== 'string' || !body.studyId)
+      throw sandboxInvalid('A learning session is required.');
+    const store = await LearningStore.open();
+    await store.completeOnboarding(body.studyId, principal.ownerId);
+    return Response.json({ onboardingCompleted: true });
+  });
+}

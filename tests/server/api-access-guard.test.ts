@@ -9,7 +9,41 @@ const publicRoutes = new Set([
   'access-code/verify/route.ts',
   'health/route.ts',
 ]);
-const customGuardRoutes = new Set(['codex/auth/route.ts', 'codex/auth/login/route.ts']);
+const customGuardRoutes = new Map<
+  string,
+  { module: string; guard: string; methods: readonly string[] }
+>([
+  [
+    'codex/auth/route.ts',
+    {
+      module: '@/lib/server/codex/route-utils',
+      guard: 'requireCodexRouteAccess',
+      methods: ['GET', 'DELETE'],
+    },
+  ],
+  [
+    'codex/auth/login/route.ts',
+    {
+      module: '@/lib/server/codex/route-utils',
+      guard: 'requireCodexRouteAccess',
+      methods: ['POST', 'PATCH', 'DELETE'],
+    },
+  ],
+  // Machine-only preview requests use the gateway signature, independently of
+  // browser access cookies. Real signed/unsigned route calls are covered by
+  // tests/sandbox/preview-access-code.test.ts.
+  ...['resolve', 'tunnel'].map(
+    (operation) =>
+      [
+        `sandbox/preview/${operation}/route.ts`,
+        {
+          module: '@/lib/server/sandbox/preview',
+          guard: 'verifyGatewayRequest',
+          methods: ['POST'],
+        },
+      ] as const,
+  ),
+]);
 
 function routeFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -26,14 +60,26 @@ describe('API access-code architecture', () => {
       if (publicRoutes.has(route)) continue;
 
       const source = readFileSync(file, 'utf8');
-      if (customGuardRoutes.has(route)) {
-        expect(source, route).toContain('requireCodexRouteAccess');
+      const exportedMethods = [
+        ...source.matchAll(
+          /export\s+(?:async\s+)?(?:function|const)\s+(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\b/g,
+        ),
+      ].map(([, method]) => method);
+      expect(exportedMethods.length, `${route} exports no guarded method`).toBeGreaterThan(0);
+      const custom = customGuardRoutes.get(route);
+      if (custom) {
+        expect(source, route).toContain(`from '${custom.module}'`);
+        expect(source, route).toMatch(
+          new RegExp(`import\\s*\\{[^}]*\\b${custom.guard}\\b[^}]*\\}\\s*from`),
+        );
+        expect(exportedMethods.sort(), route).toEqual([...custom.methods].sort());
+        expect([...source.matchAll(new RegExp(`\\b${custom.guard}\\(`, 'g'))], route).toHaveLength(
+          custom.methods.length,
+        );
         continue;
       }
       expect(source, route).toContain('@/lib/server/with-access-code');
-      const exportedMethods = [...source.matchAll(/export const (GET|POST|PUT|PATCH|DELETE)/g)];
-      expect(exportedMethods.length, `${route} exports no guarded method`).toBeGreaterThan(0);
-      for (const [, method] of exportedMethods) {
+      for (const method of exportedMethods) {
         expect(source, `${route} ${method}`).toMatch(
           new RegExp(`export const ${method}\\s*=\\s*withAccessCode\\(`),
         );

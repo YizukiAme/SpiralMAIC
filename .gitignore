@@ -107,5 +107,14 @@ e2e/__screenshots-619/
 # Temporary render-service sources extracted by the mixed-pool regression test
 render-service/.owner-bound-parent-*/
 
+# Generated, self-hosted Monaco assets
+/public/code-editor/
+
 # Generated interactive libraries
 /public/vendor/interactive
+
+# Local provider acceptance evidence and implementation audits
+/eval/sandbox-lifecycle/
+/lib/pbl/v3/LIVE-ACCEPTANCE.md
+/lib/pbl/v3/READINESS.md
+/lib/pbl/v3/screenshots/workbench-live-terminal.png

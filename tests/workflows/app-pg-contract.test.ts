@@ -46,6 +46,7 @@ it('runs every tracked app PostgreSQL suite in the database-backed CI step', () 
     .trim()
     .split(/\s+/);
   expect(command.slice(0, 4)).toEqual(['pnpm', 'exec', 'vitest', 'run']);
+  expect(command).toContain('--maxWorkers=1');
 
   const suites = execFileSync('git', ['ls-files', '-z', '--', 'tests/**/*.pg.test.ts'], {
     cwd: root,

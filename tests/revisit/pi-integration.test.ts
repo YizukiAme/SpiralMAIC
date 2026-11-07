@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentConfig } from '@/lib/orchestration/registry/types';
 import type { StatelessChatRequest, StatelessEvent } from '@/lib/types/chat';
 import type { RevisitGateDecision } from '@/lib/revisit/types';
+import { AgentToolTimeoutError, withAgentToolTimeout } from '@/lib/agent/runtime/tool-timeout';
 
 const mocks = vi.hoisted(() => ({ stream: vi.fn() }));
 vi.mock('@/lib/ai/llm', () => ({ streamLLM: mocks.stream }));
@@ -66,19 +67,21 @@ function gate(status: RevisitGateDecision['status']): RevisitGateDecision {
     studentStates: { 'student-1': status === 'pass' ? 'satisfied' : 'questioning' },
   };
 }
-function makeTool(request = body, childRuntimeMode: 'legacy' | 'native' = 'legacy') {
+function makeTool(
+  request = body,
+  childRuntimeMode: 'legacy' | 'native' = 'legacy',
+  agentConfigs = agents,
+) {
   const events: StatelessEvent[] = [];
-  const summaries: unknown[] = [];
+  const onAgentDone = vi.fn();
   const tool = buildCallAgentTool({
     body: request,
-    agentConfigs: agents,
+    agentConfigs,
     send: async (event) => {
       events.push(event);
     },
     languageModel: {} as never,
-    onAgentDone: (summary) => {
-      summaries.push(summary);
-    },
+    onAgentDone,
     onActionDone: () => {},
     thinkingConfig: { mode: 'disabled', enabled: false },
     abortSignal: new AbortController().signal,
@@ -87,7 +90,7 @@ function makeTool(request = body, childRuntimeMode: 'legacy' | 'native' = 'legac
     enableWhiteboardTools: false,
     childRuntimeMode,
   });
-  return { tool, events };
+  return { tool, events, onAgentDone };
 }
 
 describe('Revisit on the shared Pi runtime', () => {
@@ -111,7 +114,7 @@ describe('Revisit on the shared Pi runtime', () => {
     '%s child preserves each gate and the listener-side actor',
     async (runtime) => {
       for (const status of ['pass', 'probe', 'fail', 'rescue'] as const) {
-        const { tool, events } = makeTool(body, runtime);
+        const { tool, events, onAgentDone } = makeTool(body, runtime);
         await tool.execute('teach-back', {
           agentId: 'teacher-1',
           instruction: 'React to the current page.',
@@ -137,7 +140,110 @@ describe('Revisit on the shared Pi runtime', () => {
           revisitGate: gate(status),
         });
         expect(events.filter((e) => e.type === 'agent_start')).toHaveLength(1);
+        expect(events.filter((e) => e.type === 'agent_end')).toHaveLength(1);
         expect(events.filter((e) => e.type === 'revisit_gate')).toHaveLength(1);
+        expect(onAgentDone).toHaveBeenCalledTimes(1);
+      }
+    },
+  );
+
+  it.each(['legacy', 'native'] as const)(
+    '%s child allows a valid listener after a pre-start cancellation',
+    async (runtime) => {
+      const { tool, events } = makeTool(body, runtime);
+      const params = {
+        agentId: 'student-1',
+        instruction: 'Respond to this page.',
+        revisitGate: gate('pass'),
+      };
+      await expect(
+        tool.execute(
+          'cancelled-before-start',
+          params,
+          AbortSignal.abort(new DOMException('Cancelled', 'AbortError')),
+        ),
+      ).rejects.toMatchObject({ name: 'AbortError' });
+      expect(events).toEqual([]);
+      expect(mocks.stream).not.toHaveBeenCalled();
+
+      await tool.execute('valid-listener', params);
+      expect(events.filter((event) => event.type === 'agent_start')).toHaveLength(1);
+      expect(events.filter((event) => event.type === 'revisit_gate')).toHaveLength(1);
+    },
+  );
+
+  it.each(['legacy', 'native'] as const)(
+    '%s child allows a valid listener after an unavailable rescue agent',
+    async (runtime) => {
+      const { tool, events } = makeTool(
+        body,
+        runtime,
+        agents.filter((a) => a.role === 'student'),
+      );
+      await expect(
+        tool.execute('unavailable-rescue', {
+          agentId: 'assistant-1',
+          instruction: 'Offer rescue.',
+          revisitGate: gate('rescue'),
+        }),
+      ).resolves.toMatchObject({ details: { skipped: true, reason: 'invalid_agent_id' } });
+      expect(events).toEqual([]);
+      expect(mocks.stream).not.toHaveBeenCalled();
+
+      await tool.execute('valid-listener', {
+        agentId: 'student-1',
+        instruction: 'Respond to this page.',
+        revisitGate: gate('pass'),
+      });
+      expect(events.filter((event) => event.type === 'agent_start')).toHaveLength(1);
+      expect(events.filter((event) => event.type === 'revisit_gate')).toHaveLength(1);
+    },
+  );
+
+  it.each(['legacy', 'native'] as const)(
+    '%s timed-out listener ends once without committing the gate or starting another response',
+    async (runtime) => {
+      vi.useFakeTimers();
+      try {
+        mocks.stream.mockImplementation(() => ({
+          fullStream: (async function* () {
+            yield {
+              type: 'text-delta',
+              text:
+                runtime === 'native'
+                  ? 'Partial response'
+                  : '[{"type":"text","content":"Partial response"}]',
+            };
+            await new Promise(() => {});
+          })(),
+          usage: Promise.resolve(usage),
+        }));
+        const { tool, events, onAgentDone } = makeTool(body, runtime);
+        const boundedTool = withAgentToolTimeout(tool, 100);
+        const params = {
+          agentId: 'student-1',
+          instruction: 'Respond to this page.',
+          revisitGate: gate('pass'),
+        };
+        const pending = boundedTool.execute('timed-out-listener', params);
+        const rejected = expect(pending).rejects.toBeInstanceOf(AgentToolTimeoutError);
+        await vi.advanceTimersByTimeAsync(100);
+        await rejected;
+
+        expect(events.filter((event) => event.type === 'agent_start')).toHaveLength(1);
+        expect(events.filter((event) => event.type === 'agent_end')).toHaveLength(1);
+        expect(events.filter((event) => event.type === 'revisit_gate')).toEqual([]);
+        expect(onAgentDone).toHaveBeenCalledExactlyOnceWith(
+          expect.objectContaining({ contentPreview: 'Partial response' }),
+          { completed: false },
+        );
+        await expect(tool.execute('duplicate-listener', params)).resolves.toMatchObject({
+          details: { skipped: true, reason: 'revisit_listener_already_called' },
+        });
+        expect(events.filter((event) => event.type === 'agent_start')).toHaveLength(1);
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        vi.useRealTimers();
       }
     },
   );
@@ -189,18 +295,30 @@ describe('Revisit on the shared Pi runtime', () => {
     },
   );
 
-  it('does not apply Revisit routing or gates to ordinary classroom chat', async () => {
-    const { tool, events } = makeTool({ ...body, config: { agentIds: agents.map((a) => a.id) } });
-    await tool.execute('ordinary-chat', {
-      agentId: 'teacher-1',
-      instruction: 'Explain the concept.',
-      revisitGate: gate('pass'),
-    });
-    expect(events.find((e) => e.type === 'agent_start')).toMatchObject({
-      data: { agentId: 'teacher-1' },
-    });
-    expect(events.some((e) => e.type === 'revisit_gate')).toBe(false);
-  });
+  it.each(['legacy', 'native'] as const)(
+    '%s child does not apply the Revisit listener cap, routing, or gates to ordinary classroom chat',
+    async (runtime) => {
+      const { tool, events, onAgentDone } = makeTool(
+        { ...body, config: { agentIds: agents.map((a) => a.id) } },
+        runtime,
+      );
+      for (let turn = 0; turn < 3; turn++) {
+        await tool.execute(`ordinary-chat-${turn}`, {
+          agentId: 'teacher-1',
+          instruction: 'Explain the concept.',
+          revisitGate: gate('pass'),
+        });
+      }
+      expect(events.filter((event) => event.type === 'agent_start')).toEqual([
+        expect.objectContaining({ data: expect.objectContaining({ agentId: 'teacher-1' }) }),
+        expect.objectContaining({ data: expect.objectContaining({ agentId: 'teacher-1' }) }),
+        expect.objectContaining({ data: expect.objectContaining({ agentId: 'teacher-1' }) }),
+      ]);
+      expect(events.filter((event) => event.type === 'agent_end')).toHaveLength(3);
+      expect(onAgentDone).toHaveBeenCalledTimes(3);
+      expect(events.some((e) => e.type === 'revisit_gate')).toBe(false);
+    },
+  );
 
   it.each(['legacy', 'native'] as const)(
     '%s failed listener stops the director without another inference or a successful done',

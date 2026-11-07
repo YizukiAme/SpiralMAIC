@@ -248,11 +248,7 @@ async function POSTHandler(req: NextRequest) {
 
     // First use → bootstrap-synthesize the descriptor, register, return the clip.
     if (adapter.supportsBootstrapReferenceClip === false) {
-      return apiError(
-        'INVALID_REQUEST',
-        400,
-        'This provider requires reference audio and a verbatim transcript',
-      );
+      return apiError('INVALID_REQUEST', 400, 'This provider requires reference audio');
     }
     const clip = await adapter.bootstrapReferenceClip(
       cfg,
