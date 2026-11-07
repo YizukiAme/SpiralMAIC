@@ -245,6 +245,8 @@ test('suggested strings stay in 192px, send once as ordinary messages, and disap
   await screenshot(page, info, 'cue-options-normal-light.png');
   await page.keyboard.press('F11');
   await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(true);
+  // The browser changes fullscreenElement before React switches the roundtable layout.
+  await expect(page.getByTestId('roundtable-region')).toHaveCount(0);
   const fullscreenMetrics = await assertOptionsLayout(page);
   await screenshot(page, info, 'cue-options-fullscreen-light.png');
   const fullscreenCanvas = await canvasGeometry(page);
@@ -258,6 +260,7 @@ test('suggested strings stay in 192px, send once as ordinary messages, and disap
   await screenshot(page, info, 'cue-options-fullscreen-dark.png');
   await page.keyboard.press('F11');
   await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(false);
+  await expect(page.getByTestId('roundtable-region')).toBeVisible();
   await assertOptionsLayout(page);
   expect(await geometry(page)).toEqual(idle);
   await screenshot(page, info, 'cue-options-normal-dark.png');
@@ -314,6 +317,7 @@ test('no-options cue keeps the main idle animation in normal and fullscreen view
   await expect(page.getByTestId('cue-user-panel')).toContainText('Your turn');
   await page.keyboard.press('F11');
   await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(true);
+  await expect(page.getByTestId('roundtable-region')).toHaveCount(0);
   await expect(page.getByTestId('cue-user-panel')).toBeVisible();
   await expect(page.getByTestId('cue-user-options')).toHaveCount(0);
   await expect(page.getByTestId('cue-user-suggested-bubble')).toHaveCount(0);
