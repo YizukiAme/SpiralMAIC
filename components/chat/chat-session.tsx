@@ -233,6 +233,9 @@ export function ChatSessionComponent({
       {/* Messages */}
       <div
         ref={scrollContainerRef}
+        role="region"
+        aria-label={session.title}
+        tabIndex={0}
         onScroll={handleScroll}
         className="space-y-1 overflow-y-auto scrollbar-hide"
       >

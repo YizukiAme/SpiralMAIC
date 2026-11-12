@@ -19,6 +19,8 @@ import {
 } from '@/lib/config/feature-flags';
 import { createLogger } from '@/lib/logger';
 import { resolveAgentConfigs } from '@/lib/chat/pi/config';
+import { createWhiteboardPreview } from '@/lib/chat/pi/whiteboard-preview';
+import { getRenderServiceCapability } from '@/lib/server/render-service';
 import { runPiDirectorLoop } from '@/lib/chat/pi/director-loop';
 import type { SendEvent } from '@/lib/chat/pi/types';
 import { requestWorkspaceId } from '@/lib/server/model-config/runtime';
@@ -213,6 +215,7 @@ async function chat(req: NextRequest, principal: OwnerPrincipal): Promise<Respon
       enabled: false,
     };
 
+    const supportsToolImages = modelInfo?.capabilities?.vision === true;
     const enableWhiteboardTools = body.config.piEnableWhiteboardTools === true;
     const childRuntimeMode = isPiNativeChildRuntimeEnabled() ? 'native' : 'legacy';
     const enableNativeChildSpotlight = isPiNativeChildSpotlightEnabled();
@@ -291,6 +294,18 @@ async function chat(req: NextRequest, principal: OwnerPrincipal): Promise<Respon
       try {
         startHeartbeat();
 
+        // A configured RENDER_SERVICE_URL is not enough for board images: the
+        // service must pass the same /health probe as render_scene_preview
+        // (#2108). Probed only when an image could otherwise be sent; an unset
+        // URL resolves disabled without a request.
+        const whiteboardPreview =
+          supportsToolImages &&
+          nativeWhiteboardService &&
+          validRequestStartStageId &&
+          (await getRenderServiceCapability()).enabled
+            ? createWhiteboardPreview(principal.ownerId, validRequestStartStageId)
+            : undefined;
+
         await runPiDirectorLoop({
           body,
           elementReference,
@@ -298,6 +313,8 @@ async function chat(req: NextRequest, principal: OwnerPrincipal): Promise<Respon
           agentConfigs,
           send,
           languageModel,
+          supportsToolImages,
+          whiteboardPreview,
           thinkingConfig,
           maxOutputTokens: modelInfo?.outputWindow,
           contextWindow: modelInfo?.contextWindow,

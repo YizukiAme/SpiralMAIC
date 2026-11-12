@@ -7,11 +7,12 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import type { StageMode } from '@/lib/types/stage';
 import { classroomExitLabelKey, exitClassroom } from '@/lib/workbench/classroom-exit';
 import { HeaderControls } from './stage/header-controls';
+import { ClassroomFullHeader } from '@/components/workbench/ClassroomFullHeader';
+import { useStageStore } from '@/lib/store';
 
 interface HeaderProps {
   readonly currentSceneTitle: string;
   readonly mode?: StageMode;
-  readonly proModeActive?: boolean;
   readonly canEdit?: boolean;
   readonly onToggleEditMode?: () => void;
   readonly rightSlot?: ReactNode;
@@ -31,12 +32,27 @@ interface HeaderProps {
   readonly hideGlobalControls?: boolean;
   /** Hide course-level share/export in a workbench-attached classroom. */
   readonly hideCourseActions?: boolean;
+  /** See `HeaderControls`: Learn | Edit and the way into the workspace. */
+  readonly workbenchControls?: boolean;
+  readonly onOpenInWorkspace?: () => void;
+  readonly makeOwnCourseHref?: string;
 }
 
+/**
+ * The standalone classroom's header (`/classroom/[id]`). A classroom hosted
+ * in the workspace has no header of its own: the pane draws one around it.
+ *
+ * Where the workbench is part of the build (`workbenchControls`), the page is
+ * the workspace's full-screen classroom entered from outside, and wears its
+ * header (`ClassroomFullHeader`): the course, the scene's title, then
+ * the export control and — for the owner — Learn | Edit and the way into the
+ * workspace; for a viewer, the way to a course of their own instead. The
+ * language / theme / settings pill is not part of it: the workbench keeps
+ * those in its account menu. Without the workbench, the classic header below.
+ */
 export function Header({
   currentSceneTitle,
   mode,
-  proModeActive,
   canEdit,
   onToggleEditMode,
   rightSlot,
@@ -45,12 +61,40 @@ export function Header({
   hideBackControl,
   hideGlobalControls,
   hideCourseActions,
+  workbenchControls,
+  onOpenInWorkspace,
+  makeOwnCourseHref,
 }: HeaderProps) {
   const { t } = useI18n();
   const router = useRouter();
   const searchParams = useSearchParams();
   const exitLabel = t(classroomExitLabelKey(searchParams));
   const backLabel = onBack ? t('generation.backToHome') : exitLabel;
+  const courseName = useStageStore((s) => s.stage?.name) || t('workspace.untitledCourse');
+
+  if (workbenchControls) {
+    return (
+      <ClassroomFullHeader
+        testId="classroom-full-header"
+        className="px-3 sm:pl-6 sm:pr-5"
+        courseName={courseName}
+        sceneTitle={currentSceneTitle}
+        actions={
+          <HeaderControls
+            variant="compact"
+            showGlobalControls={false}
+            showCourseActions
+            mode={mode}
+            canEdit={canEdit}
+            onToggleEditMode={onToggleEditMode}
+            workbenchControls
+            onOpenInWorkspace={onOpenInWorkspace}
+            makeOwnCourseHref={makeOwnCourseHref}
+          />
+        }
+      />
+    );
+  }
 
   return (
     <>
@@ -60,6 +104,7 @@ export function Header({
             ? null
             : (backControl ?? (
                 <button
+                  data-testid="classroom-exit"
                   onClick={onBack ?? (() => exitClassroom(router, searchParams))}
                   className="shrink-0 p-2 rounded-lg text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
                   title={backLabel}
@@ -98,7 +143,9 @@ export function Header({
               classrooms omit both the global capsule and course share/export. */}
           <HeaderControls
             mode={mode}
-            proModeActive={proModeActive}
+            workbenchControls={workbenchControls}
+            onOpenInWorkspace={onOpenInWorkspace}
+            makeOwnCourseHref={makeOwnCourseHref}
             canEdit={canEdit}
             onToggleEditMode={onToggleEditMode}
             showGlobalControls={!hideGlobalControls}

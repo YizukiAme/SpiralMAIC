@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { isAgentRuntimeConfigured, isProWorkbenchEnabled } from '@/lib/config/feature-flags';
+import { isAgentRuntimeConfigured, isWorkbenchEnabled } from '@/lib/config/feature-flags';
 import { ACCESS_TOKEN_COOKIE, verifyAccessToken } from '@/lib/server/access-token';
 import {
   anonymousOwnerForNavigation,
@@ -30,7 +30,7 @@ export function proxy(request: NextRequest) {
   // Keep the workbench unreachable unless both its public affordance and the
   // durable server runtime are configured. Next.js 16 proxies run on Node, so
   // this can use the same complete gate as the workbench startup path.
-  const workbenchEnabled = isProWorkbenchEnabled() && isAgentRuntimeConfigured();
+  const workbenchEnabled = isWorkbenchEnabled() && isAgentRuntimeConfigured();
   if (!workbenchEnabled && (pathname === '/workbench' || pathname.startsWith('/workbench/'))) {
     return new NextResponse('Not found', { status: 404 });
   }

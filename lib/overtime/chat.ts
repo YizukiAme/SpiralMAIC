@@ -1,3 +1,4 @@
+import { courseIsComplete } from '@/lib/classroom/course-end';
 import type { OvertimeChatContext } from '@/lib/overtime/types';
 import type { StatelessChatRequest } from '@/lib/types/chat';
 import type { Scene } from '@/lib/types/stage';
@@ -20,10 +21,16 @@ export function buildOvertimeChatContext(args: {
   scenes: Scene[];
   generationComplete: boolean;
   activeDemoSessionId: string | null;
+  /** The completed-course card now overlays the final real page. */
+  courseEndOpen?: boolean;
 }): OvertimeChatContext | undefined {
   if (!args.stageId || args.activeDemoSessionId) return undefined;
 
-  if (args.generationComplete && args.currentSceneId === '__pending__') {
+  if (
+    args.generationComplete &&
+    (args.currentSceneId === '__pending__' ||
+      (args.courseEndOpen && args.currentSceneId === args.scenes.at(-1)?.id))
+  ) {
     return {
       stageId: args.stageId,
       entry: 'course_complete',
@@ -54,12 +61,16 @@ export function buildOvertimeRequestContext(args: {
   outlineCount: number;
   generatingOutlineCount: number;
   activeDemoSessionId: string | null;
+  /** The completed-course card now overlays the final real page. */
+  courseEndOpen?: boolean;
 }): OvertimeChatContext | undefined {
-  const courseComplete =
-    args.generationComplete ||
-    (args.outlineCount > 0 &&
-      args.scenes.length === args.outlineCount &&
-      args.generatingOutlineCount === 0);
+  const courseComplete = courseIsComplete({
+    generationComplete: args.generationComplete,
+    outlineCount: args.outlineCount,
+    sceneCount: args.scenes.length,
+    generatingCount: args.generatingOutlineCount,
+    agentBuilding: false,
+  });
 
   return buildOvertimeChatContext({
     stageId: args.stageId,
@@ -67,6 +78,7 @@ export function buildOvertimeRequestContext(args: {
     scenes: args.scenes,
     generationComplete: courseComplete,
     activeDemoSessionId: args.activeDemoSessionId,
+    courseEndOpen: args.courseEndOpen,
   });
 }
 
@@ -79,7 +91,11 @@ export function validateOvertimeChatContext(
   if (context.formal !== true || !context.stageId || context.stageId !== storeState.stage?.id) {
     return undefined;
   }
-  if (context.entry === 'course_complete' && storeState.currentSceneId === '__pending__') {
+  if (
+    context.entry === 'course_complete' &&
+    (storeState.currentSceneId === '__pending__' ||
+      (storeState.scenes.length > 0 && storeState.currentSceneId === storeState.scenes.at(-1)?.id))
+  ) {
     return context as OvertimeChatContext;
   }
   if (context.entry === 'overtime_page') {

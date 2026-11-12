@@ -235,7 +235,7 @@ describe('Revisit on the shared Pi runtime', () => {
         expect(events.filter((event) => event.type === 'revisit_gate')).toEqual([]);
         expect(onAgentDone).toHaveBeenCalledExactlyOnceWith(
           expect.objectContaining({ contentPreview: 'Partial response' }),
-          { completed: false },
+          { completed: false, failed: true },
         );
         await expect(tool.execute('duplicate-listener', params)).resolves.toMatchObject({
           details: { skipped: true, reason: 'revisit_listener_already_called' },

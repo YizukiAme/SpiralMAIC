@@ -47,8 +47,26 @@ async function hydrate(state: Record<string, unknown>, version: number) {
   return useSettingsStore;
 }
 
+describe('shared page list migration to Spiral v9', () => {
+  it.each([6, 8])('gives v%s the shared fold from Learn and width from Edit', async (version) => {
+    const store = await hydrate(
+      { sidebarCollapsed: false, editRailCollapsed: true, editRailWidth: 300 },
+      version,
+    );
+    expect(store.getState().sidebarCollapsed).toBe(false);
+    expect(store.getState().sidebarWidth).toBe(300);
+    expect(store.getState()).not.toHaveProperty('editRailCollapsed');
+    expect(store.getState()).not.toHaveProperty('editRailWidth');
+  });
+
+  it('leaves the default width when Edit never stored one', async () => {
+    const store = await hydrate({ sidebarCollapsed: true }, 6);
+    expect(store.getState().sidebarWidth).toBe(220);
+  });
+});
+
 describe('settings store v4 → v5', () => {
-  it('leaves a fresh speech preference unset without bumping the persisted version', async () => {
+  it('leaves a fresh speech preference unset at the persisted version', async () => {
     const { useSettingsStore: store } = await import('@/lib/store/settings');
     await store.persist.rehydrate();
     expect(store.getState().asrLanguage).toBe('');
@@ -58,8 +76,8 @@ describe('settings store v4 → v5', () => {
         'settings-storage',
         'account',
       );
-      // Spiral's existing migrations already use version 8.
-      expect(blob?.version).toBe(8);
+      // Spiral's existing migrations now use version 9.
+      expect(blob?.version).toBe(9);
       expect(blob?.state.asrLanguage).toBe('');
     });
   });
@@ -138,7 +156,7 @@ describe('settings store v4 → v5', () => {
         'account',
       );
       expect(blob?.state.playbackSpeed).toBe(1.25);
-      expect(blob?.version).toBe(8);
+      expect(blob?.version).toBe(9);
       expect(JSON.stringify(blob)).not.toContain('sk-');
     });
   });
@@ -186,7 +204,7 @@ describe('settings store v4 → v5', () => {
         'settings-storage',
         'account',
       );
-      expect(blob?.version).toBe(8);
+      expect(blob?.version).toBe(9);
       expect(JSON.stringify(blob?.state)).toContain('sk-kept');
     });
     expect(JSON.stringify(warn.mock.calls)).not.toContain('sk-kept');

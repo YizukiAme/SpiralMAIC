@@ -30,6 +30,7 @@ import { LectureNotesView } from './lecture-notes-view';
 import type { RequestLearningExtensionParams } from '@/lib/overtime/types';
 
 interface ChatAreaProps {
+  courseEndOpen?: boolean;
   className?: string;
   width?: number;
   onWidthChange?: (width: number) => void;
@@ -114,6 +115,7 @@ export const ChatArea = forwardRef<ChatAreaRef, ChatAreaProps>(
       canJumpToAction,
       onJumpToAction,
       onLearningExtensionRequest,
+      courseEndOpen,
     },
     ref,
   ) => {
@@ -153,6 +155,7 @@ export const ChatArea = forwardRef<ChatAreaRef, ChatAreaProps>(
       onSegmentSealed,
       shouldHoldAfterReveal,
       onLearningExtensionRequest,
+      courseEndOpen,
     });
 
     const [activeTab, setActiveTab] = useState<'lecture' | 'chat'>('lecture');

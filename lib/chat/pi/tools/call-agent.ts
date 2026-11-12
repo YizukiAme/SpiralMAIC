@@ -1,3 +1,11 @@
+import {
+  listClassroomSkills,
+  availableSkillsPromptBlock,
+  createNativeSkillReadTool,
+} from '@/lib/server/agent-runtime/skills';
+import { createChildTailStateTransform } from '../child-tail-state';
+import type { WhiteboardPreview } from '@/lib/chat/pi/whiteboard-preview';
+import { formatChildResult } from './child-result';
 import { createAbortableSend } from '../send';
 import type { AgentTool } from '@earendil-works/pi-agent-core';
 import { Type, type Static } from 'typebox';
@@ -31,7 +39,7 @@ import {
   sanitizeVisibleSpeech,
   toHistoryMessages,
 } from '../prompts';
-import type { SendEvent } from '../types';
+import type { PiStreamFnFactory, SendEvent } from '../types';
 import {
   buildChildActionTools,
   createPiWhiteboardRuntimeState,
@@ -117,7 +125,16 @@ function agentToolTimeout(signal: AbortSignal | undefined): AgentToolTimeoutErro
     : undefined;
 }
 
-type AgentTurnOutcome = { completed: boolean };
+/**
+ * Omitted for a normal turn. `completed: false` means the call never produced a
+ * result (tool timeout) and is not counted as an agent turn. `failed` marks a
+ * provider error, timeout or exhausted run, whether or not partial output was kept.
+ */
+type AgentTurnOutcome = { completed: boolean; failed?: boolean };
+
+function abnormalOutcome(outcome: AgentTurnOutcome): AgentTurnOutcome | undefined {
+  return outcome.completed && !outcome.failed ? undefined : outcome;
+}
 
 async function emitTextDelta(opts: {
   content: string;
@@ -557,6 +574,9 @@ export function buildCallAgentTool(opts: {
   agentConfigs: AgentConfig[];
   send: SendEvent;
   languageModel: LanguageModel;
+  supportsToolImages?: boolean;
+  whiteboardPreview?: WhiteboardPreview;
+  streamFnFactory?: PiStreamFnFactory;
   onAgentDone: (summary: AgentTurnSummary, outcome?: AgentTurnOutcome) => void;
   onActionDone: (record?: WhiteboardActionRecord) => void;
   thinkingConfig: ThinkingConfig;
@@ -763,6 +783,12 @@ export function buildCallAgentTool(opts: {
 
         const childRuntimeMode = opts.childRuntimeMode ?? 'legacy';
         if (childRuntimeMode === 'native') {
+          const isExplainer =
+            agent.role === 'teacher' ||
+            (agent.role === 'assistant' &&
+              !opts.agentConfigs.some((candidate) => candidate.role === 'teacher'));
+          const classroomSkills = isExplainer ? await listClassroomSkills() : [];
+          const activatedSkills: string[] = [];
           const spotlightTargets = new Set(spotlightElementIds);
           const spotlightEnabled = Boolean(
             opts.enableNativeChildSpotlight &&
@@ -776,6 +802,13 @@ export function buildCallAgentTool(opts: {
           const nativeTools: AgentTool[] = overtimeContext
             ? buildLearningExtensionTools({ body: opts.body, agent, messageId, send })
             : [
+                ...(classroomSkills.length
+                  ? [
+                      createNativeSkillReadTool(classroomSkills, (skill) => {
+                        if (!activatedSkills.includes(skill.name)) activatedSkills.push(skill.name);
+                      }),
+                    ]
+                  : []),
                 ...(spotlightEnabled
                   ? [
                       buildNativeSpotlightTool({
@@ -805,27 +838,42 @@ export function buildCallAgentTool(opts: {
           const availableToolNames = nativeTools.map((tool) => tool.name);
           const sanitizeNativeDelta = createVisibleSpeechDeltaSanitizer();
           const nativeResult = await runNativeChild({
-            streamFn: createCallLlmStreamFn({
-              languageModel: opts.languageModel,
-              source: 'pi-chat-native-child',
-              thinkingConfig: opts.thinkingConfig,
-              maxOutputTokens: opts.maxOutputTokens,
-              abortSignal: childAbort.signal,
-            }),
-            systemPrompt: buildNativeChildPrompt(
-              opts.body,
+            streamFn: (opts.streamFnFactory ?? createCallLlmStreamFn)(
+              {
+                languageModel: opts.languageModel,
+                source: 'pi-chat-native-child',
+                supportsToolImages: opts.supportsToolImages,
+                includeUserImages: opts.supportsToolImages === true,
+                thinkingConfig: opts.thinkingConfig,
+                maxOutputTokens: opts.maxOutputTokens,
+                abortSignal: childAbort.signal,
+              },
               agent,
-              opts.getAgentResponses(),
-              availableToolNames,
-              capturedScene,
-              revisitContext,
             ),
+            systemPrompt:
+              buildNativeChildPrompt(
+                opts.body,
+                agent,
+                opts.getAgentResponses(),
+                availableToolNames,
+                capturedScene,
+                revisitContext,
+              ) +
+              '\n' +
+              availableSkillsPromptBlock(classroomSkills),
             prompt: buildNativeChildTurnPrompt(params.instruction, agent.role, {
               scene: sceneEvidence?.content,
               element: elementReferenceEvidence?.content,
               spotlightElementIds,
             }),
             tools: nativeTools,
+            transformContext: availableToolNames.includes('wb_read')
+              ? createChildTailStateTransform({
+                  preview: opts.whiteboardPreview,
+                  service: opts.nativeWhiteboardService,
+                  stageId: opts.nativeWhiteboardStageId,
+                })
+              : undefined,
             allowedToolNames: new Set(availableToolNames),
             history: toHistoryMessages(opts.body.messages),
             abortSignal: childAbort.signal,
@@ -853,7 +901,7 @@ export function buildCallAgentTool(opts: {
                 whiteboardActions,
                 actionWarnings: [],
               },
-              { completed: false },
+              { completed: false, failed: true },
             );
             throw toolTimeout;
           }
@@ -861,24 +909,32 @@ export function buildCallAgentTool(opts: {
             throw abortChildError(opts.abortSignal, signal);
           }
 
-          const isCompleted = nativeResult.status === 'completed';
+          const formatted = formatChildResult({
+            agentName: agent.name,
+            text: finalText,
+            actionCount,
+            status: nativeResult.status,
+            stopReason: nativeResult.stopReason,
+          });
           await send({ type: 'agent_end', data: { messageId, agentId: agent.id } });
           childAbort.signal.throwIfAborted();
-          const revisitCompleted = await finishRevisitResponse(isCompleted, finalText);
-          opts.onAgentDone({
+          const revisitCompleted = await finishRevisitResponse(!formatted.isError, finalText);
+          const nativeSummary = {
             agentId: agent.id,
             agentName: agent.name,
             contentPreview: finalText.slice(0, 300),
             actionCount,
             whiteboardActions,
             actionWarnings: [],
-          });
+          };
+          if (formatted.isError) opts.onAgentDone(nativeSummary, { completed: true, failed: true });
+          else opts.onAgentDone(nativeSummary);
 
           return {
             content: [
               {
                 type: 'text',
-                text: `${agent.name}: ${finalText || '(no visible response)'}`,
+                text: formatted.text,
               },
             ],
             details: {
@@ -888,6 +944,8 @@ export function buildCallAgentTool(opts: {
               runtimeMode: childRuntimeMode,
               availableToolNames,
               nativeChildRun: nativeResult,
+              availableSkills: classroomSkills.map((skill) => skill.name),
+              activatedSkills,
               ...(sceneEvidence ? { sceneEvidence: sceneEvidence.metadata } : {}),
               ...(elementReferenceEvidence?.metadata
                 ? {
@@ -895,7 +953,7 @@ export function buildCallAgentTool(opts: {
                   }
                 : {}),
             },
-            ...(isCompleted && revisitCompleted ? {} : { isError: true }),
+            ...(formatted.isError || !revisitCompleted ? { isError: true } : {}),
           };
         }
 
@@ -919,13 +977,16 @@ export function buildCallAgentTool(opts: {
         const childToolsByName = new Map(childTools.map((tool) => [tool.name, tool]));
 
         const child = buildAgent({
-          streamFn: createCallLlmStreamFn({
-            languageModel: opts.languageModel,
-            source: 'pi-chat-child',
-            thinkingConfig: opts.thinkingConfig,
-            maxOutputTokens: opts.maxOutputTokens,
-            abortSignal: childAbort.signal,
-          }),
+          streamFn: (opts.streamFnFactory ?? createCallLlmStreamFn)(
+            {
+              languageModel: opts.languageModel,
+              source: 'pi-chat-child',
+              thinkingConfig: opts.thinkingConfig,
+              maxOutputTokens: opts.maxOutputTokens,
+              abortSignal: childAbort.signal,
+            },
+            agent,
+          ),
           systemPrompt: buildChildPrompt(
             opts.body,
             agent,
@@ -966,7 +1027,7 @@ export function buildCallAgentTool(opts: {
         let legacyAgentEnded = false;
         let legacySummaryRecorded = false;
         const finalizeLegacy = async (
-          completed: boolean,
+          outcome: AgentTurnOutcome,
           finalText: string,
           eventSend: SendEvent,
         ): Promise<void> => {
@@ -974,7 +1035,7 @@ export function buildCallAgentTool(opts: {
             await eventSend({ type: 'agent_end', data: { messageId, agentId: agent.id } });
             legacyAgentEnded = true;
           }
-          if (completed) {
+          if (outcome.completed) {
             childAbort.signal.throwIfAborted();
             const lastAssistant = child.state.messages.findLast(
               (message) => message.role === 'assistant',
@@ -994,8 +1055,9 @@ export function buildCallAgentTool(opts: {
               whiteboardActions,
               actionWarnings,
             };
-            if (completed) opts.onAgentDone(summary);
-            else opts.onAgentDone(summary, { completed: false });
+            const abnormal = abnormalOutcome(outcome);
+            if (abnormal) opts.onAgentDone(summary, abnormal);
+            else opts.onAgentDone(summary);
           }
         };
 
@@ -1022,9 +1084,24 @@ export function buildCallAgentTool(opts: {
 
         const toolTimeout = agentToolTimeout(signal);
         if (toolTimeout) {
-          await finalizeLegacy(false, text.trim(), opts.send);
+          await finalizeLegacy({ completed: false, failed: true }, text.trim(), opts.send);
           throw toolTimeout;
         }
+
+        // Classify the settled child run before the summary callback so the
+        // Director sees the failure in the same, single onAgentDone call.
+        const lastAssistant = child.state.messages.findLast(
+          (message) => message.role === 'assistant',
+        );
+        const stopReason =
+          lastAssistant?.role === 'assistant' ? lastAssistant.stopReason : undefined;
+        childErrored ||=
+          Boolean(child.state.errorMessage) || stopReason === 'error' || stopReason === 'aborted';
+        const childStatus = childErrored
+          ? 'failed'
+          : stopReason === 'length'
+            ? 'exhausted'
+            : 'completed';
 
         let finalText = text.trim();
         try {
@@ -1062,20 +1139,32 @@ export function buildCallAgentTool(opts: {
           if (finalText && !emittedText) {
             await send({ type: 'text_delta', data: { content: finalText, messageId } });
           }
-          await finalizeLegacy(true, finalText, send);
+          await finalizeLegacy(
+            { completed: true, failed: childStatus !== 'completed' },
+            finalText,
+            send,
+          );
         } catch (error) {
           const timeoutDuringCleanup = agentToolTimeout(signal);
           if (!timeoutDuringCleanup) throw error;
-          await finalizeLegacy(false, text.trim(), opts.send);
+          await finalizeLegacy({ completed: false, failed: true }, text.trim(), opts.send);
           throw timeoutDuringCleanup;
         }
 
+        const formatted = formatChildResult({
+          agentName: agent.name,
+          text: finalText,
+          actionCount,
+          status: childStatus,
+          stopReason: stopReason === 'length' ? 'output_token_limit' : undefined,
+        });
+
         return {
-          ...(!revisitCompleted ? { isError: true } : {}),
+          ...(formatted.isError || !revisitCompleted ? { isError: true } : {}),
           content: [
             {
               type: 'text',
-              text: `${agent.name}: ${finalText || '(no visible response)'}`,
+              text: formatted.text,
             },
           ],
           details: {

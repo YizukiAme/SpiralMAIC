@@ -118,3 +118,6 @@ render-service/.owner-bound-parent-*/
 /lib/pbl/v3/LIVE-ACCEPTANCE.md
 /lib/pbl/v3/READINESS.md
 /lib/pbl/v3/screenshots/workbench-live-terminal.png
+
+# Local forced-child eval results
+eval/orchestration/results-child-failure/

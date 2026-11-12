@@ -15,8 +15,8 @@ import { AgentRegistryInit } from '@/components/agent-registry-init';
 import { ModelSettingsInit } from '@/components/model-settings-init';
 import { StorageHealthNotice } from '@/components/storage-health-notice';
 import { AccessCodeGuard } from '@/components/access-code-guard';
-import { ProSwapWatcher } from '@/components/workbench/ProSwapWatcher';
 import { LegacyBrowserImportNotice } from '@/components/legacy-import/notice';
+import { SpiralWorkbenchExtensions } from '@/components/revisit/workbench-extensions';
 import { loadLocaleResource } from '@/lib/i18n/load-resource';
 import { LOCALE_COOKIE, resolveRequestLocale } from '@/lib/i18n/resolve-locale';
 
@@ -86,8 +86,9 @@ export default async function RootLayout({
             <I18nProvider initialLocale={locale} initialResources={resources}>
               <ModelSettingsInit />
               <AgentRegistryInit />
-              <ProSwapWatcher />
-              <AccessCodeGuard>{children}</AccessCodeGuard>
+              <SpiralWorkbenchExtensions>
+                <AccessCodeGuard>{children}</AccessCodeGuard>
+              </SpiralWorkbenchExtensions>
               <Toaster position="top-center" />
               {/* After the Toaster: this one raises a toast on mount when
                 persistence is already broken, and a toast raised before its

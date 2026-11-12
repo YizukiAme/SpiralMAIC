@@ -205,10 +205,17 @@ test.describe('Spiral v0.4 core loop', () => {
     await expectNoCriticalOrSeriousViolations(page, 'classroom-with-overtime');
 
     const overtime = await mockApi.mockSpiralOvertime();
-    await page.getByText('Course complete', { exact: true }).first().click();
+    await page
+      .getByTestId('scene-title')
+      .filter({ hasText: 'Overtime: photosynthesis at home' })
+      .click();
+    await page.getByRole('button', { name: 'Next scene', exact: true }).click();
+    await expect(page.getByTestId('course-end')).toBeVisible();
+    await page.getByRole('button', { name: 'Collapse the dock', exact: true }).click();
     await page.keyboard.press('T');
     const overtimeInput = page.getByPlaceholder('Type your message...', { exact: true });
     await expect(overtimeInput).toBeVisible();
+    await expect(overtimeInput).toBeFocused();
     await overtimeInput.fill('Help me design a plant-light experiment.');
     await overtimeInput.press('Enter');
     await expect(page.getByTestId('scene-title').filter({ hasText: overtime.title })).toBeVisible({

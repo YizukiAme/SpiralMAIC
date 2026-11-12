@@ -218,10 +218,6 @@ Do not disable/change provider or storage configuration until outstanding enviro
 drained. The provider lease remains the final compute bound if application workers disappear;
 it cannot itself guarantee archival before expiry.
 
-The pre-change sequential baseline is recorded in `eval/sandbox-lifecycle/baseline-2026-10-23.json`.
-It uses a small two-milestone Python project, real cloud compute and local S3-compatible
-checkpoint storage; it is not a production object-storage or concurrency capacity result.
-
 ## Server configuration
 
 Configure the installation's `sandbox` section in `openmaic.yml` (see

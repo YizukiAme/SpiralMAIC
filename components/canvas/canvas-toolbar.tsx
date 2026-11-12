@@ -8,7 +8,8 @@ import {
   Pause,
   PencilLine,
   LayoutList,
-  MessageSquare,
+  PanelRightClose,
+  PanelRightOpen,
   Volume1,
   Volume2,
   VolumeX,
@@ -16,6 +17,8 @@ import {
   Maximize2,
   Minimize2,
   Quote,
+  FoldVertical,
+  UnfoldVertical,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useStageStore } from '@/lib/store';
@@ -66,17 +69,22 @@ export interface CanvasToolbarProps {
   readonly canPickSlideElement?: boolean;
   readonly elementPickActive?: boolean;
   readonly onToggleElementPick?: () => void;
+  /** The dock's fold, where the toolbar sits in a dock. */
+  /** Next on the last page opens the course's end state, so it is not a dead end. */
+  readonly nextOpensEnd?: boolean;
+  readonly dockCollapsed?: boolean;
+  readonly onToggleDock?: () => void;
 }
 
 /* Compact control button */
-const ctrlBtn = cn(
+export const ctrlBtn = cn(
   'relative w-7 h-7 rounded-md flex items-center justify-center',
   'transition-all duration-150 outline-none cursor-pointer',
   'hover:bg-gray-500/[0.08] dark:hover:bg-gray-400/[0.08] active:scale-90',
 );
 
 /* Subtle separator */
-function CtrlDivider() {
+export function CtrlDivider() {
   return <div className="w-px h-3 bg-gray-200/80 dark:bg-gray-700/60 mx-0.5 shrink-0" />;
 }
 
@@ -134,11 +142,14 @@ export function CanvasToolbar({
   canPickSlideElement,
   elementPickActive,
   onToggleElementPick,
+  nextOpensEnd,
+  dockCollapsed,
+  onToggleDock,
 }: CanvasToolbarProps) {
   const { t } = useI18n();
   const remainingSoftCloseSeconds = useSoftCloseCountdown(softCloseDeadline);
   const canGoPrev = canGoPrevOverride ?? currentSceneIndex > 0;
-  const canGoNext = canGoNextOverride ?? currentSceneIndex < scenesCount - 1;
+  const canGoNext = canGoNextOverride ?? (currentSceneIndex < scenesCount - 1 || !!nextOpensEnd);
   const showPlayPause = shouldShowPlaybackButton({
     isLiveSession: !!isLiveSession,
     hidePlaybackControls,
@@ -188,7 +199,9 @@ export function CanvasToolbar({
                 ? 'text-gray-400 dark:text-gray-500'
                 : 'text-gray-600 dark:text-gray-300',
             )}
-            aria-label="Toggle sidebar"
+            aria-expanded={!sidebarCollapsed}
+            title={t(sidebarCollapsed ? 'edit.nav.expand' : 'edit.nav.collapse')}
+            aria-label={t(sidebarCollapsed ? 'edit.nav.expand' : 'edit.nav.collapse')}
           >
             <LayoutList className="w-3.5 h-3.5" />
           </button>
@@ -311,7 +324,7 @@ export function CanvasToolbar({
           <CtrlDivider />
 
           {/* Prev scene */}
-          {scenesCount > 1 && (
+          {(scenesCount > 1 || nextOpensEnd) && (
             <button
               onClick={onPrevSlide}
               disabled={!canGoPrev}
@@ -383,7 +396,7 @@ export function CanvasToolbar({
           ) : null}
 
           {/* Next scene */}
-          {scenesCount > 1 && (
+          {(scenesCount > 1 || nextOpensEnd) && (
             <button
               onClick={onNextSlide}
               disabled={!canGoNext}
@@ -475,9 +488,26 @@ export function CanvasToolbar({
         </div>
       </div>
 
-      {/* ── Right: fullscreen + chat toggle ── */}
+      {/* ── Right: dock fold, fullscreen, then the chat toggle at the edge ── */}
       <div className="flex items-center justify-end gap-px shrink-0 pr-1">
         <CtrlDivider />
+        {onToggleDock && (
+          <button
+            type="button"
+            data-testid="dock-fold"
+            aria-expanded={!dockCollapsed}
+            onClick={onToggleDock}
+            className={cn(ctrlBtn, 'w-6 h-6 text-gray-500 dark:text-gray-400')}
+            aria-label={t(dockCollapsed ? 'stage.dock.expand' : 'stage.dock.collapse')}
+            title={t(dockCollapsed ? 'stage.dock.expand' : 'stage.dock.collapse')}
+          >
+            {dockCollapsed ? (
+              <UnfoldVertical className="w-3.5 h-3.5" />
+            ) : (
+              <FoldVertical className="w-3.5 h-3.5" />
+            )}
+          </button>
+        )}
         {onTogglePresentation && (
           <button
             onClick={onTogglePresentation}
@@ -508,9 +538,16 @@ export function CanvasToolbar({
                 ? 'text-gray-400 dark:text-gray-500'
                 : 'text-gray-600 dark:text-gray-300',
             )}
-            aria-label="Toggle chat"
+            aria-label={t(chatCollapsed ? 'stage.chatPanel.expand' : 'stage.chatPanel.collapse')}
+            title={t(chatCollapsed ? 'stage.chatPanel.expand' : 'stage.chatPanel.collapse')}
           >
-            <MessageSquare className="w-3.5 h-3.5" />
+            {/* A panel, not a speech bubble: the bubble is the classroom's own
+                type-to-speak control, and the two must not read as one. */}
+            {chatCollapsed ? (
+              <PanelRightOpen className="w-3.5 h-3.5" />
+            ) : (
+              <PanelRightClose className="w-3.5 h-3.5" />
+            )}
           </button>
         )}
       </div>

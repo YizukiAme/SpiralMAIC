@@ -13,6 +13,7 @@
  * (`lib/legacy-browser-import/model-settings.ts`) and drops them.
  */
 
+import { DOCK_DEFAULT_HEIGHT } from '@/lib/edit/dock-height';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { ASRProviderId } from '@/lib/audio/types';
@@ -29,7 +30,7 @@ import {
 import { keepUnimported } from '@/lib/legacy-browser-import/model-settings-unimported';
 
 /** Persisted-blob version for zustand's `persist` `migrate` ladder. */
-const SETTINGS_PERSIST_VERSION = 8;
+const SETTINGS_PERSIST_VERSION = 9;
 
 /**
  * Bound after the store exists; see `onWriteRefused` for why it is not inlined.
@@ -147,10 +148,12 @@ export interface SettingsState {
 
   // Layout preferences (persisted via localStorage)
   sidebarCollapsed: boolean;
+  sidebarWidth: number;
   chatAreaCollapsed: boolean;
   chatAreaWidth: number;
-  editRailCollapsed: boolean;
-  editRailWidth: number;
+  /** The classroom dock, shared by both modes, so a switch never moves the canvas. */
+  dockHeight: number;
+  dockCollapsed: boolean;
 
   /**
    * The model settings of an earlier build, kept only while they could not be
@@ -184,10 +187,11 @@ export interface SettingsState {
 
   // Layout actions
   setSidebarCollapsed: (collapsed: boolean) => void;
+  setSidebarWidth: (width: number) => void;
   setChatAreaCollapsed: (collapsed: boolean) => void;
   setChatAreaWidth: (width: number) => void;
-  setEditRailCollapsed: (collapsed: boolean) => void;
-  setEditRailWidth: (width: number) => void;
+  setDockHeight: (height: number) => void;
+  setDockCollapsed: (collapsed: boolean) => void;
 }
 
 /** The persisted fields: everything but the actions. */
@@ -214,10 +218,11 @@ const PERSISTED_FIELDS = [
   'agentSelectionIsUserSet',
   'presetAgentChoice',
   'sidebarCollapsed',
+  'sidebarWidth',
   'chatAreaCollapsed',
   'chatAreaWidth',
-  'editRailCollapsed',
-  'editRailWidth',
+  'dockHeight',
+  'dockCollapsed',
   'legacyModelSettings',
 ] as const satisfies readonly (keyof SettingsState)[];
 
@@ -331,10 +336,11 @@ export const useSettingsStore = create<SettingsState>()(
 
       // Layout preferences
       sidebarCollapsed: true,
+      sidebarWidth: 220,
       chatAreaCollapsed: true,
       chatAreaWidth: 320,
-      editRailCollapsed: false,
-      editRailWidth: 220,
+      dockHeight: DOCK_DEFAULT_HEIGHT,
+      dockCollapsed: false,
 
       setTTSVoice: (voice, providerId) => set({ ttsVoice: voice, ttsVoiceProviderId: providerId }),
       setTTSSpeed: (speed) => set({ ttsSpeed: speed }),
@@ -363,9 +369,10 @@ export const useSettingsStore = create<SettingsState>()(
       setPresetAgentChoice: (ids) => set({ presetAgentChoice: ids }),
 
       setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
+      setSidebarWidth: (width) => set({ sidebarWidth: width }),
       setChatAreaCollapsed: (collapsed) => set({ chatAreaCollapsed: collapsed }),
-      setEditRailCollapsed: (collapsed) => set({ editRailCollapsed: collapsed }),
-      setEditRailWidth: (width) => set({ editRailWidth: width }),
+      setDockHeight: (height) => set({ dockHeight: height }),
+      setDockCollapsed: (collapsed) => set({ dockCollapsed: collapsed }),
       setChatAreaWidth: (width) => set({ chatAreaWidth: width }),
     }),
     {
@@ -384,12 +391,17 @@ export const useSettingsStore = create<SettingsState>()(
       migrate: (persistedState: unknown, version: number) => {
         const state = { ...((persistedState as Record<string, unknown> | null) ?? {}) };
         // v4 → v5: model settings move to the server (RFC #1701).
-        // Spiral builds used versions 5–7 before adopting server model slots.
-        // Detect their old provider shape rather than mistaking them for the
-        // upstream v5 preferences and dropping their keys before staging.
-        return version < 5 || Object.hasOwn(state, 'providersConfig')
-          ? migrateSettingsToV5(state, version)
-          : pickPersisted(state);
+        // Spiral versions 5–7 still carried provider keys; stage them before filtering.
+        const next =
+          version < 5 || (version < 8 && Object.hasOwn(state, 'providersConfig'))
+            ? migrateSettingsToV5(state, version)
+            : pickPersisted(state);
+        // Spiral v8 → v9: Learn and Edit share one page list. Its fold is the Learn one
+        // (`sidebarCollapsed`); only Edit ever remembered a width.
+        if (version < 9 && typeof state.editRailWidth === 'number') {
+          next.sidebarWidth = state.editRailWidth;
+        }
+        return next;
       },
       // Only known preference fields reach the state; anything else a blob
       // carries (fields of earlier builds) is ignored. Model settings kept

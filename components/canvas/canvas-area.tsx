@@ -27,6 +27,7 @@ interface CanvasAreaProps extends CanvasToolbarProps {
   readonly mode: StageMode;
   readonly hideToolbar?: boolean;
   readonly isPendingScene?: boolean;
+  /** Revisit keeps its own completion/report page; ordinary courses use CourseEnd. */
   readonly isCourseComplete?: boolean;
   readonly isGenerationFailed?: boolean;
   readonly generationFailureMessage?: string;
@@ -68,7 +69,6 @@ export function CanvasArea({
   onContinueDiscussion,
   hideToolbar,
   isPendingScene,
-  isCourseComplete,
   isGenerationFailed,
   generationFailureMessage,
   isGenerationInterrupted,
@@ -77,6 +77,7 @@ export function CanvasArea({
   canGoNextOverride,
   overlay,
   completionAction,
+  isCourseComplete,
   hidePlaybackControls,
   elementPickActive,
   whiteboardElementReference,
@@ -147,7 +148,9 @@ export function CanvasArea({
             (currentScene?.content.type === 'pbl' && !!currentScene.content.projectV3)
           }
           className={cn(
-            'bg-white dark:bg-gray-800 shadow-2xl rounded-lg overflow-hidden relative transition-all duration-700',
+            // Only its colours ease, between scene types. Its size must not: a box
+            // measured on mount would otherwise visibly shrink to 16:9 every time.
+            'bg-white dark:bg-gray-800 shadow-2xl rounded-lg overflow-hidden relative transition-[background-color,box-shadow] duration-700',
             showControls && !isLiveSession && currentScene?.type === 'slide' && 'cursor-pointer',
             currentScene?.type === 'interactive'
               ? 'shadow-blue-200/50 dark:shadow-blue-900/50 ring-1 ring-blue-900/5 dark:ring-blue-500/10'
@@ -191,7 +194,7 @@ export function CanvasArea({
               />
             )}
 
-          {/* Pending Scene Loading / Completion Overlay */}
+          {/* Pending Scene Loading Overlay */}
           <AnimatePresence>
             {isPendingScene && !currentScene && isCourseComplete && (
               <motion.div
